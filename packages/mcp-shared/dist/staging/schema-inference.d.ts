@@ -8,6 +8,14 @@
  *   2. Arrays of scalars → pipe-delimited TEXT columns
  *   3. Arrays of objects → child tables with parent_id FK
  *   4. Remaining JSON columns carry jsonShape metadata
+ *
+ * v3 improvements:
+ *   5. Transaction boundaries for INSERT batches (10-50x perf gain)
+ *   6. Two-pass column discovery — scans beyond sample for sparse columns
+ *   7. Biological identifier auto-indexing (gene_symbol, rsid, etc.)
+ *   8. Composite index support via SchemaHints
+ *   9. Cached column classification (avoids redundant scans)
+ *  10. Deduplicated table creation logic
  */
 export interface SchemaHints {
     tableName?: string;
@@ -19,6 +27,8 @@ export interface SchemaHints {
     skipChildTables?: string[];
     /** Max depth for recursive child table extraction (default 2: parent → child → grandchild) */
     maxRecursionDepth?: number;
+    /** Multi-column indexes, e.g. [["gene_symbol", "clinical_significance"]] */
+    compositeIndexes?: string[][];
 }
 export interface InferredColumn {
     name: string;
@@ -38,6 +48,8 @@ export interface InferredTable {
     name: string;
     columns: InferredColumn[];
     indexes: string[];
+    /** Multi-column indexes */
+    compositeIndexes?: string[][];
     /** Set on child tables extracted from arrays of objects */
     childOf?: ChildTableRef;
 }
@@ -58,11 +70,12 @@ export declare function flattenObject(obj: Record<string, unknown>, maxDepth: nu
 /**
  * Infer a complete schema from detected arrays.
  *
- * Improvements:
- * - Arrays of objects → extracted as child tables with parent_id FK
- * - Arrays of scalars → marked as TEXT (materialization joins with " | ")
- * - Large strings → TEXT (not JSON)
- * - Remaining JSON columns get jsonShape metadata
+ * Two-pass column discovery:
+ *   Pass 1: Flatten up to MAX_SCAN_ROWS for type inference.
+ *   Pass 2: Scan up to MAX_DISCOVERY_ROWS beyond the sample to find
+ *           sparse columns that only appear in later rows.
+ *
+ * Column classification is cached from the first pass to avoid redundant scans.
  */
 export declare function inferSchema(arrays: Array<{
     key: string;
@@ -88,6 +101,9 @@ export interface MaterializationResult {
  * Handles parent/child/grandchild table relationships:
  * - Tables are processed in topological order (parent before child before grandchild)
  * - Each level tracks row IDs for FK resolution at the next level
+ *
+ * All inserts are wrapped in a single transaction for performance
+ * (10-50x faster than implicit per-statement autocommit).
  */
 export declare function materializeSchema(schema: InferredSchema, rows: Map<string, unknown[]>, sql: {
     exec: (query: string, ...bindings: unknown[]) => unknown;

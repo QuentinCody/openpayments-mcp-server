@@ -360,59 +360,6 @@ function parseArgs(argsStr) {
     }
     return args;
 }
-function parseHelperCallExpression(expr) {
-    const fnNameMatch = expr.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
-    if (!fnNameMatch)
-        return null;
-    let pos = fnNameMatch[0].length;
-    while (pos < expr.length && /\s/.test(expr[pos]))
-        pos++;
-    if (expr[pos] !== "(")
-        return null;
-    const argsStart = pos + 1;
-    pos = argsStart;
-    let depth = 1;
-    let quote = null;
-    let escaped = false;
-    for (; pos < expr.length; pos++) {
-        const ch = expr[pos];
-        if (quote) {
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (ch === "\\") {
-                escaped = true;
-                continue;
-            }
-            if (ch === quote) {
-                quote = null;
-            }
-            continue;
-        }
-        if (ch === '"' || ch === "'") {
-            quote = ch;
-            continue;
-        }
-        if (ch === "(") {
-            depth++;
-            continue;
-        }
-        if (ch === ")") {
-            depth--;
-            if (depth === 0)
-                break;
-        }
-    }
-    if (depth !== 0)
-        return null;
-    if (expr.slice(pos + 1).trim() !== "")
-        return null;
-    return {
-        fnName: fnNameMatch[1],
-        argsStr: expr.slice(argsStart, pos),
-    };
-}
 function parseSpecLookupTokens(expr) {
     let pos = 0;
     if (expr.startsWith("spec")) {
@@ -462,6 +409,738 @@ function parseSpecLookupTokens(expr) {
     }
     return tokens;
 }
+function splitTopLevelExpressions(source) {
+    const parts = [];
+    let current = "";
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let pos = 0; pos < source.length; pos++) {
+        const ch = source[pos];
+        if (quote) {
+            current += ch;
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            current += ch;
+            continue;
+        }
+        if (ch === "(")
+            parenDepth++;
+        if (ch === ")")
+            parenDepth--;
+        if (ch === "[")
+            bracketDepth++;
+        if (ch === "]")
+            bracketDepth--;
+        if (ch === "{")
+            braceDepth++;
+        if (ch === "}")
+            braceDepth--;
+        if (ch === "," &&
+            parenDepth === 0 &&
+            bracketDepth === 0 &&
+            braceDepth === 0) {
+            parts.push(current.trim());
+            current = "";
+            continue;
+        }
+        current += ch;
+    }
+    if (current.trim()) {
+        parts.push(current.trim());
+    }
+    return parts;
+}
+function parseCallExpressionAt(expr, start = 0) {
+    let pos = start;
+    while (pos < expr.length && /\s/.test(expr[pos]))
+        pos++;
+    const calleeMatch = expr
+        .slice(pos)
+        .match(/^([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)/);
+    if (!calleeMatch)
+        return null;
+    const callee = calleeMatch[1];
+    pos += callee.length;
+    while (pos < expr.length && /\s/.test(expr[pos]))
+        pos++;
+    if (expr[pos] !== "(")
+        return null;
+    const argsStart = pos + 1;
+    pos = argsStart;
+    let depth = 1;
+    let quote = null;
+    let escaped = false;
+    for (; pos < expr.length; pos++) {
+        const ch = expr[pos];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+        if (ch === "(") {
+            depth++;
+            continue;
+        }
+        if (ch === ")") {
+            depth--;
+            if (depth === 0) {
+                return {
+                    callee,
+                    argsStr: expr.slice(argsStart, pos),
+                    nextPos: pos + 1,
+                };
+            }
+        }
+    }
+    return null;
+}
+function stripOuterParens(expr) {
+    let trimmed = expr.trim();
+    while (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+        let depth = 0;
+        let quote = null;
+        let escaped = false;
+        let wrapsWhole = true;
+        for (let pos = 0; pos < trimmed.length; pos++) {
+            const ch = trimmed[pos];
+            if (quote) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch === "\\") {
+                    escaped = true;
+                    continue;
+                }
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+            if (ch === '"' || ch === "'") {
+                quote = ch;
+                continue;
+            }
+            if (ch === "(")
+                depth++;
+            if (ch === ")")
+                depth--;
+            if (depth === 0 && pos < trimmed.length - 1) {
+                wrapsWhole = false;
+                break;
+            }
+        }
+        if (!wrapsWhole)
+            break;
+        trimmed = trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+}
+function findTopLevelArrow(expr) {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let pos = 0; pos < expr.length - 1; pos++) {
+        const ch = expr[pos];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+        if (ch === "(")
+            parenDepth++;
+        if (ch === ")")
+            parenDepth--;
+        if (ch === "[")
+            bracketDepth++;
+        if (ch === "]")
+            bracketDepth--;
+        if (ch === "{")
+            braceDepth++;
+        if (ch === "}")
+            braceDepth--;
+        if (expr[pos] === "=" &&
+            expr[pos + 1] === ">" &&
+            parenDepth === 0 &&
+            bracketDepth === 0 &&
+            braceDepth === 0) {
+            return pos;
+        }
+    }
+    return -1;
+}
+function findTopLevelOperator(expr, operators) {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let pos = 0; pos < expr.length; pos++) {
+        const ch = expr[pos];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+        if (ch === "(")
+            parenDepth++;
+        if (ch === ")")
+            parenDepth--;
+        if (ch === "[")
+            bracketDepth++;
+        if (ch === "]")
+            bracketDepth--;
+        if (ch === "{")
+            braceDepth++;
+        if (ch === "}")
+            braceDepth--;
+        if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0)
+            continue;
+        for (const operator of operators) {
+            if (expr.startsWith(operator, pos)) {
+                return { index: pos, operator };
+            }
+        }
+    }
+    return null;
+}
+function findTopLevelChar(expr, target) {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let pos = 0; pos < expr.length; pos++) {
+        const ch = expr[pos];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+        if (ch === "(")
+            parenDepth++;
+        if (ch === ")")
+            parenDepth--;
+        if (ch === "[")
+            bracketDepth++;
+        if (ch === "]")
+            bracketDepth--;
+        if (ch === "{")
+            braceDepth++;
+        if (ch === "}")
+            braceDepth--;
+        if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && ch === target) {
+            return pos;
+        }
+    }
+    return -1;
+}
+function parseMemberAccess(expr) {
+    const normalized = stripOuterParens(expr);
+    const rootMatch = normalized.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+    if (!rootMatch)
+        return null;
+    const segments = [];
+    let pos = rootMatch[0].length;
+    while (pos < normalized.length) {
+        while (pos < normalized.length && /\s/.test(normalized[pos]))
+            pos++;
+        if (pos >= normalized.length)
+            break;
+        if (normalized.startsWith("?.", pos) || normalized.startsWith("?.[", pos)) {
+            return null;
+        }
+        if (normalized[pos] === ".") {
+            pos++;
+            const match = normalized.slice(pos).match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+            if (!match)
+                return null;
+            segments.push(match[0]);
+            pos += match[0].length;
+            continue;
+        }
+        if (normalized[pos] === "[") {
+            pos++;
+            while (pos < normalized.length && /\s/.test(normalized[pos]))
+                pos++;
+            if (normalized[pos] === '"' || normalized[pos] === "'") {
+                const parsed = readQuotedString(normalized, pos);
+                pos = parsed.nextPos;
+                while (pos < normalized.length && /\s/.test(normalized[pos]))
+                    pos++;
+                if (normalized[pos] !== "]")
+                    return null;
+                segments.push(parsed.value);
+                pos++;
+                continue;
+            }
+            const closeIdx = normalized.indexOf("]", pos);
+            if (closeIdx === -1)
+                return null;
+            const token = normalized.slice(pos, closeIdx).trim();
+            if (!/^\d+$/.test(token))
+                return null;
+            segments.push(Number(token));
+            pos = closeIdx + 1;
+            continue;
+        }
+        return null;
+    }
+    return {
+        root: rootMatch[1],
+        segments,
+    };
+}
+function evaluateMemberAccess(expr, scope) {
+    const access = parseMemberAccess(expr);
+    if (!access)
+        return unsupportedExpression();
+    let current = scope[access.root];
+    for (const segment of access.segments) {
+        if (current == null)
+            return undefined;
+        current = Reflect.get(Object(current), segment);
+    }
+    return current;
+}
+function parseArrowParam(source) {
+    const trimmed = source.trim();
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+        return { kind: "identifier", name: trimmed };
+    }
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        const names = splitTopLevelExpressions(trimmed.slice(1, -1)).map((part) => {
+            const token = part.trim();
+            return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(token) ? token : null;
+        });
+        return { kind: "array", names };
+    }
+    return unsupportedExpression();
+}
+function parseArrowFunction(source) {
+    const arrowIdx = findTopLevelArrow(source);
+    if (arrowIdx === -1)
+        return unsupportedExpression();
+    let paramsSource = source.slice(0, arrowIdx).trim();
+    const body = source.slice(arrowIdx + 2).trim();
+    if (!body || body.startsWith("{"))
+        return unsupportedExpression();
+    if (paramsSource.startsWith("(") && paramsSource.endsWith(")")) {
+        paramsSource = paramsSource.slice(1, -1).trim();
+    }
+    const params = splitTopLevelExpressions(paramsSource).map(parseArrowParam);
+    return {
+        invoke: (value, index, array) => {
+            const scope = {};
+            const providedValues = [value, index, array];
+            params.forEach((param, paramIndex) => {
+                const paramValue = providedValues[paramIndex];
+                if (param.kind === "identifier") {
+                    scope[param.name] = paramValue;
+                }
+                else {
+                    const entries = Array.isArray(paramValue) ? paramValue : [];
+                    param.names.forEach((name, idx) => {
+                        if (name) {
+                            scope[name] = entries[idx];
+                        }
+                    });
+                }
+            });
+            if (params.length === 0) {
+                scope._ = value;
+            }
+            return evaluateCallbackExpression(body, scope);
+        },
+    };
+}
+function evaluateObjectLiteral(expr, scope) {
+    const body = expr.slice(1, -1).trim();
+    if (!body)
+        return {};
+    const result = {};
+    for (const field of splitTopLevelExpressions(body)) {
+        const colonIdx = findTopLevelChar(field, ":");
+        if (colonIdx === -1) {
+            const shorthand = field.trim();
+            if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(shorthand)) {
+                return unsupportedExpression();
+            }
+            result[shorthand] = evaluateCallbackExpression(shorthand, scope);
+            continue;
+        }
+        const rawKey = field.slice(0, colonIdx).trim();
+        const valueExpr = field.slice(colonIdx + 1).trim();
+        let key;
+        if (rawKey.startsWith('"') || rawKey.startsWith("'")) {
+            key = readQuotedString(rawKey, 0).value;
+        }
+        else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rawKey)) {
+            key = rawKey;
+        }
+        else {
+            return unsupportedExpression();
+        }
+        result[key] = evaluateCallbackExpression(valueExpr, scope);
+    }
+    return result;
+}
+function parseOptionalMemberAccess(expr, start) {
+    let pos = start;
+    let optional = false;
+    if (expr.startsWith("?.", pos)) {
+        optional = true;
+        pos += 2;
+    }
+    else if (expr.startsWith("?.[", pos)) {
+        optional = true;
+        pos += 2;
+    }
+    else if (expr[pos] === ".") {
+        pos++;
+    }
+    else if (expr[pos] !== "[") {
+        return null;
+    }
+    if (expr[pos] === "[") {
+        pos++;
+        while (pos < expr.length && /\s/.test(expr[pos]))
+            pos++;
+        let key;
+        if (expr[pos] === '"' || expr[pos] === "'") {
+            const parsed = readQuotedString(expr, pos);
+            key = parsed.value;
+            pos = parsed.nextPos;
+        }
+        else {
+            const closeIdx = expr.indexOf("]", pos);
+            if (closeIdx === -1)
+                return null;
+            const token = expr.slice(pos, closeIdx).trim();
+            if (!/^\d+$/.test(token))
+                return null;
+            key = Number(token);
+            pos = closeIdx;
+        }
+        while (pos < expr.length && /\s/.test(expr[pos]))
+            pos++;
+        if (expr[pos] !== "]")
+            return null;
+        return {
+            key,
+            nextPos: pos + 1,
+            optional,
+        };
+    }
+    const identifier = expr.slice(pos).match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+    if (!identifier)
+        return null;
+    return {
+        key: identifier[0],
+        nextPos: pos + identifier[0].length,
+        optional,
+    };
+}
+function applyOptionalMemberAccess(value, expr, start) {
+    const parsed = parseOptionalMemberAccess(expr, start);
+    if (!parsed)
+        return null;
+    if (value == null) {
+        if (parsed.optional) {
+            return {
+                value: undefined,
+                nextPos: parsed.nextPos,
+            };
+        }
+        return unsupportedExpression();
+    }
+    return {
+        value: Reflect.get(Object(value), parsed.key),
+        nextPos: parsed.nextPos,
+    };
+}
+function evaluateCallbackExpression(source, scope) {
+    const expr = stripOuterParens(source);
+    if (!expr)
+        return undefined;
+    if (expr.startsWith("{") && expr.endsWith("}")) {
+        return evaluateObjectLiteral(expr, scope);
+    }
+    const nullish = findTopLevelOperator(expr, ["??"]);
+    if (nullish) {
+        const left = evaluateCallbackExpression(expr.slice(0, nullish.index), scope);
+        return left ?? evaluateCallbackExpression(expr.slice(nullish.index + 2), scope);
+    }
+    const logicalOr = findTopLevelOperator(expr, ["||"]);
+    if (logicalOr) {
+        return (evaluateCallbackExpression(expr.slice(0, logicalOr.index), scope) ||
+            evaluateCallbackExpression(expr.slice(logicalOr.index + 2), scope));
+    }
+    const logicalAnd = findTopLevelOperator(expr, ["&&"]);
+    if (logicalAnd) {
+        return (evaluateCallbackExpression(expr.slice(0, logicalAnd.index), scope) &&
+            evaluateCallbackExpression(expr.slice(logicalAnd.index + 2), scope));
+    }
+    const comparison = findTopLevelOperator(expr, ["===", "!==", "==", "!="]);
+    if (comparison) {
+        const left = evaluateCallbackExpression(expr.slice(0, comparison.index), scope);
+        const right = evaluateCallbackExpression(expr.slice(comparison.index + comparison.operator.length), scope);
+        switch (comparison.operator) {
+            case "===":
+                return left === right;
+            case "!==":
+                return left !== right;
+            case "==":
+                return left == right;
+            case "!=":
+                return left != right;
+            default:
+                return unsupportedExpression();
+        }
+    }
+    const call = parseCallExpressionAt(expr);
+    if (call && call.nextPos === expr.length) {
+        const lastDot = call.callee.lastIndexOf(".");
+        if (lastDot === -1) {
+            return unsupportedExpression();
+        }
+        const receiver = evaluateCallbackExpression(call.callee.slice(0, lastDot), scope);
+        const method = call.callee.slice(lastDot + 1);
+        const args = splitTopLevelExpressions(call.argsStr).map((part) => evaluateCallbackExpression(part, scope));
+        if (method === "includes" && receiver != null) {
+            return receiver.includes(...args);
+        }
+        if (method === "startsWith" && typeof receiver === "string") {
+            return receiver.startsWith(String(args[0] ?? ""));
+        }
+        if (method === "endsWith" && typeof receiver === "string") {
+            return receiver.endsWith(String(args[0] ?? ""));
+        }
+        return unsupportedExpression();
+    }
+    if (expr[0] === '"' || expr[0] === "'") {
+        return readQuotedString(expr, 0).value;
+    }
+    if (expr === "true")
+        return true;
+    if (expr === "false")
+        return false;
+    if (expr === "null")
+        return null;
+    if (expr === "undefined")
+        return undefined;
+    if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(expr)) {
+        return Number(expr);
+    }
+    return evaluateMemberAccess(expr, scope);
+}
+function evaluateArrayMethod(value, method, argsStr) {
+    if (method === "length") {
+        return Array.isArray(value) || typeof value === "string"
+            ? value.length
+            : unsupportedExpression();
+    }
+    if (method === "map" || method === "filter" || method === "find") {
+        if (!Array.isArray(value))
+            return unsupportedExpression();
+        const callback = parseArrowFunction(argsStr);
+        if (method === "map") {
+            return value.map((entry, index, array) => callback.invoke(entry, index, array));
+        }
+        if (method === "filter") {
+            return value.filter((entry, index, array) => Boolean(callback.invoke(entry, index, array)));
+        }
+        return value.find((entry, index, array) => Boolean(callback.invoke(entry, index, array)));
+    }
+    if (method === "slice") {
+        if (!Array.isArray(value) && typeof value !== "string") {
+            return unsupportedExpression();
+        }
+        const args = argsStr.trim() ? parseArgs(argsStr) : [];
+        return value.slice(typeof args[0] === "number" ? args[0] : undefined, typeof args[1] === "number" ? args[1] : undefined);
+    }
+    return unsupportedExpression();
+}
+function evaluateSafeExpression(expr, helpers) {
+    const normalized = stripOuterParens(expr);
+    const helperFns = {
+        searchPaths: (q, m) => helpers.searchPaths(String(q ?? ""), Number(m) || 10),
+        searchSpec: (q, m) => helpers.searchSpec(String(q ?? ""), Number(m) || 10),
+        listTags: () => helpers.listTags(),
+        listCategories: () => helpers.listCategories(),
+        getOperation: (id) => helpers.getOperation(String(id ?? "")),
+        getEndpoint: (p, m) => helpers.getEndpoint(String(p ?? ""), m ? String(m) : undefined),
+        describeOperation: (id) => helpers.describeOperation(String(id ?? "")),
+        describeEndpoint: (p, m) => helpers.describeEndpoint(String(p ?? ""), m ? String(m) : undefined),
+    };
+    const baseCall = parseCallExpressionAt(normalized);
+    let current;
+    let pos = 0;
+    if (baseCall) {
+        if (helperFns[baseCall.callee]) {
+            const args = baseCall.argsStr.trim() ? parseArgs(baseCall.argsStr) : [];
+            current = helperFns[baseCall.callee](...args);
+            pos = baseCall.nextPos;
+        }
+        else if (baseCall.callee === "Object.entries" ||
+            baseCall.callee === "Object.keys" ||
+            baseCall.callee === "Object.values") {
+            const args = splitTopLevelExpressions(baseCall.argsStr);
+            if (args.length !== 1)
+                return unsupportedExpression();
+            const target = evaluateSafeExpression(args[0], helpers);
+            if (target == null || typeof target !== "object") {
+                return unsupportedExpression();
+            }
+            if (baseCall.callee === "Object.entries") {
+                current = Object.entries(target);
+            }
+            else if (baseCall.callee === "Object.keys") {
+                current = Object.keys(target);
+            }
+            else {
+                current = Object.values(target);
+            }
+            pos = baseCall.nextPos;
+        }
+        else {
+            return unsupportedExpression();
+        }
+    }
+    else {
+        const lookupTokens = parseSpecLookupTokens(normalized);
+        if (!lookupTokens)
+            return unsupportedExpression();
+        current = helpers.spec;
+        for (let i = 0; i < lookupTokens.length; i++) {
+            if (current == null) {
+                return unsupportedExpression();
+            }
+            const next = Reflect.get(Object(current), lookupTokens[i]);
+            if (next === undefined && i < lookupTokens.length - 1) {
+                return unsupportedExpression();
+            }
+            current = next;
+        }
+        pos = normalized.length;
+    }
+    while (pos < normalized.length) {
+        while (pos < normalized.length && /\s/.test(normalized[pos]))
+            pos++;
+        if (pos >= normalized.length)
+            break;
+        if (normalized[pos] === "." ||
+            normalized[pos] === "[" ||
+            normalized.startsWith("?.", pos) ||
+            normalized.startsWith("?.[", pos)) {
+            const optionalAccess = applyOptionalMemberAccess(current, normalized, pos);
+            if (optionalAccess &&
+                (optionalAccess.nextPos >= normalized.length || normalized[optionalAccess.nextPos] !== "(")) {
+                current = optionalAccess.value;
+                pos = optionalAccess.nextPos;
+                continue;
+            }
+            if (normalized[pos] !== "." && !normalized.startsWith("?.", pos)) {
+                return unsupportedExpression();
+            }
+            pos++;
+            const identifier = normalized
+                .slice(pos)
+                .match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+            if (!identifier)
+                return unsupportedExpression();
+            const methodOrProperty = identifier[0];
+            pos += methodOrProperty.length;
+            while (pos < normalized.length && /\s/.test(normalized[pos]))
+                pos++;
+            if (normalized[pos] === "(") {
+                const call = parseCallExpressionAt(normalized, pos - methodOrProperty.length);
+                if (!call || call.callee !== methodOrProperty) {
+                    return unsupportedExpression();
+                }
+                current = evaluateArrayMethod(current, methodOrProperty, call.argsStr);
+                pos = call.nextPos;
+                continue;
+            }
+            if (current == null)
+                return unsupportedExpression();
+            current = Reflect.get(Object(current), methodOrProperty);
+            continue;
+        }
+        return unsupportedExpression();
+    }
+    return current;
+}
 /**
  * Interpret common search helper calls without using new Function().
  * Supports patterns like: `return searchPaths("query")`, `searchPaths("query")`,
@@ -478,44 +1157,7 @@ function interpretSearchCode(code, helpers) {
     if (!expr) {
         return unsupportedExpression();
     }
-    const helperCall = parseHelperCallExpression(expr);
-    if (helperCall) {
-        const fnMap = {
-            searchPaths: (q, m) => helpers.searchPaths(String(q ?? ""), Number(m) || 10),
-            searchSpec: (q, m) => helpers.searchSpec(String(q ?? ""), Number(m) || 10),
-            listTags: () => helpers.listTags(),
-            listCategories: () => helpers.listCategories(),
-            getOperation: (id) => helpers.getOperation(String(id ?? "")),
-            getEndpoint: (p, m) => helpers.getEndpoint(String(p ?? ""), m ? String(m) : undefined),
-            describeOperation: (id) => helpers.describeOperation(String(id ?? "")),
-            describeEndpoint: (p, m) => helpers.describeEndpoint(String(p ?? ""), m ? String(m) : undefined),
-        };
-        const fn = fnMap[helperCall.fnName];
-        if (fn) {
-            const args = helperCall.argsStr.trim() ? parseArgs(helperCall.argsStr) : [];
-            return fn(...args);
-        }
-    }
-    // Pure property access: spec.paths["/studies/{nctId}"].get, spec.info, etc.
-    // Any optional chaining, computed expressions, or missing intermediate values
-    // fall back to JS so the runtime semantics stay unchanged.
-    const lookupTokens = parseSpecLookupTokens(expr);
-    if (lookupTokens) {
-        let obj = helpers.spec;
-        for (let i = 0; i < lookupTokens.length; i++) {
-            if (obj == null) {
-                return unsupportedExpression();
-            }
-            const next = Reflect.get(Object(obj), lookupTokens[i]);
-            if (next === undefined && i < lookupTokens.length - 1) {
-                return unsupportedExpression();
-            }
-            obj = next;
-        }
-        return obj;
-    }
-    // Not a pattern we can interpret — signal caller to fall back
-    return unsupportedExpression();
+    return evaluateSafeExpression(expr, helpers);
 }
 /**
  * Execute search code against OpenAPI helpers.

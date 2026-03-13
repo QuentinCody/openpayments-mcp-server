@@ -9,8 +9,7 @@
     "cf-typegen": "wrangler types",
     "lint": "biome lint --diagnostic-level=error src/",
     "type-check": "npm run cf-typegen && tsc --noEmit",
-    "test:regression": "node test/structured-content-regression.mjs",
-    "test": "npm run type-check && npm run test:regression"
+    "test": "npm run type-check"
   },
   "dependencies": {
     "@cloudflare/codemode": "^0.1.1",

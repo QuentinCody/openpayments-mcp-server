@@ -16,22 +16,36 @@ export const openPaymentsCatalog: ApiCatalog = {
     baseUrl: "https://openpaymentsdata.cms.gov/api/1",
     version: "1.0",
     auth: "none",
-    endpointCount: 8,
+    endpointCount: 6,
     notes:
         "## DKAN Query API\n" +
         "This API uses the DKAN open data platform. Each year/type of payment data is a separate dataset.\n" +
         "The primary query endpoint is `/datastore/query/{datasetId}/0` where `{datasetId}` is a UUID.\n\n" +
         "## How to Query Payments\n" +
         "1. Pick the dataset UUID from the registry below (or use `/search` to discover datasets)\n" +
-        "2. Query via `/datastore/query/{datasetId}/0` with conditions and sorts\n\n" +
+        "2. Query via `/datastore/query/{datasetId}/0` with conditions and sorts\n" +
+        "3. Always pass `keys: true` so results are objects (not arrays). Pass `schema: false` to keep responses small.\n\n" +
         "## Filtering Syntax\n" +
         "Pass `conditions` as an array of objects. Each condition has:\n" +
         "- `property`: column name (lowercase with underscores)\n" +
         "- `value`: value to match\n" +
-        "- `operator`: `=`, `<>`, `<`, `>`, `<=`, `>=`, `LIKE`, `STARTS_WITH`, `CONTAINS`\n\n" +
+        "- `operator`: `=`, `<>`, `<`, `>`, `<=`, `>=`, `LIKE`, `BETWEEN`, `IN`, `NOT IN`\n\n" +
+        "For substring matching, use `LIKE` with `%` wildcards: `{ property: 'col', value: '%term%', operator: 'LIKE' }`\n" +
+        "NOTE: `CONTAINS` and `STARTS_WITH` are NOT valid DKAN operators. Use `LIKE` with wildcards instead.\n" +
+        "For prefix matching: `{ value: 'Pfizer%', operator: 'LIKE' }`\n\n" +
         "Example: `conditions: [{ property: 'recipient_state', value: 'TX', operator: '=' }]`\n\n" +
+        "## IMPORTANT: Data Conventions\n" +
+        "- **Names are UPPERCASE**: 'JOHN', 'SMITH', not 'John', 'Smith'\n" +
+        "- **All values are strings**: amounts like '999.95' are TEXT, use CAST() for numeric sorting in staged SQL\n" +
+        "- **Minimum limit is 1**: `limit: 0` is invalid, use `limit: 1` with `results: false` for count-only queries\n\n" +
+        "## Performance Notes\n" +
+        "- General payments have ~15M records per year. Queries filtering on unindexed or wide columns (manufacturer name, product name, NPI) may be slow or timeout.\n" +
+        "- LIKE queries with leading wildcards (`%term%`) are very slow on large datasets — filter by state first to narrow results.\n" +
+        "- Best-performing filters: `recipient_state`, `covered_recipient_type`, `nature_of_payment_or_transfer_of_value`\n" +
+        "- For NPI lookups: consider using a smaller limit and narrowing by state if the query is slow.\n\n" +
         "## Sorting\n" +
-        "Pass `sorts` as an array: `sorts: [{ property: 'total_amount_of_payment_usdollars', order: 'desc' }]`\n\n" +
+        "Pass `sorts` as an array: `sorts: [{ property: 'total_amount_of_payment_usdollars', order: 'desc' }]`\n" +
+        "NOTE: Sorts are lexicographic (string-based), so '999' > '9972' > '100000'. For true numeric sort, use staged SQL with CAST().\n\n" +
         "## Dataset UUID Registry\n" +
         "**General Payments** (physician non-research payments):\n" +
         "- 2024: `e6b17c6a-2534-4207-a4a1-6746a14911ff` (~15.4M records)\n" +
@@ -56,16 +70,17 @@ export const openPaymentsCatalog: ApiCatalog = {
         "**Covered Recipient Profile Supplement** (all years): `23160558-6742-54ff-8b9f-cac7d514ff4e`\n\n" +
         "## Key Columns — General Payments\n" +
         "- `covered_recipient_npi` — NPI number\n" +
-        "- `covered_recipient_first_name` / `covered_recipient_last_name`\n" +
+        "- `covered_recipient_first_name` / `covered_recipient_last_name` — UPPERCASE\n" +
         "- `covered_recipient_profile_id` — CMS profile ID\n" +
+        "- `covered_recipient_type` — 'Covered Recipient Physician', 'Covered Recipient Non-Physician Practitioner', 'Covered Recipient Teaching Hospital'\n" +
         "- `covered_recipient_primary_type_1` — e.g. 'Medical Doctor'\n" +
         "- `covered_recipient_specialty_1` — e.g. 'Allopathic & Osteopathic Physicians|Internal Medicine'\n" +
         "- `recipient_city`, `recipient_state`, `recipient_zip_code`, `recipient_country`\n" +
         "- `applicable_manufacturer_or_applicable_gpo_making_payment_name` — payer/manufacturer name\n" +
         "- `applicable_manufacturer_or_applicable_gpo_making_payment_id` — payer ID\n" +
-        "- `total_amount_of_payment_usdollars` — payment amount\n" +
+        "- `total_amount_of_payment_usdollars` — payment amount (string, use CAST for numeric ops)\n" +
         "- `date_of_payment` — MM/DD/YYYY format\n" +
-        "- `nature_of_payment_or_transfer_of_value` — e.g. 'Food and Beverage', 'Consulting Fee', 'Travel and Lodging'\n" +
+        "- `nature_of_payment_or_transfer_of_value` — e.g. 'Food and Beverage', 'Consulting Fee', 'Travel and Lodging', 'Royalty or License'\n" +
         "- `form_of_payment_or_transfer_of_value` — e.g. 'Cash or cash equivalent', 'In-kind items and services'\n" +
         "- `name_of_drug_or_biological_or_device_or_medical_supply_1` — associated product\n" +
         "- `physician_ownership_indicator` — Yes/No\n" +
@@ -76,7 +91,7 @@ export const openPaymentsCatalog: ApiCatalog = {
         "- `clinicaltrials_gov_identifier` — NCT number link\n" +
         "- `research_information_link` — URL for research details\n" +
         "- `preclinical_research_indicator` — Yes/No\n" +
-        "- Principal investigator fields (up to 5 PIs per record)\n\n" +
+        "- Principal investigator fields (PI 1 has named columns; PIs 2-5 are collapsed during staging)\n\n" +
         "## Key Columns — Ownership Payments\n" +
         "- `physician_npi`, `physician_first_name`, `physician_last_name`\n" +
         "- `total_amount_invested_usdollars`\n" +
@@ -88,7 +103,8 @@ export const openPaymentsCatalog: ApiCatalog = {
         "- Set `count: true` to get total matching rows in response\n\n" +
         "## Response Format\n" +
         "Datastore queries return: `{ results: [...], count: N, schema: {...}, query: {...} }`\n" +
-        "Set `schema: true` and `keys: true` for full column metadata.\n",
+        "Always use `keys: true` so results are objects with named fields.\n" +
+        "Use `schema: false` to avoid inflating the response size with column metadata.\n",
     endpoints: [
         // === Datastore Query ===
         {
@@ -96,7 +112,8 @@ export const openPaymentsCatalog: ApiCatalog = {
             path: "/datastore/query/{datasetId}/0",
             summary:
                 "Query a specific Open Payments dataset. This is the primary endpoint for retrieving payment records. " +
-                "Use the dataset UUID registry (in notes) to find the right datasetId for each payment type and year.",
+                "Use the dataset UUID registry (in notes) to find the right datasetId for each payment type and year. " +
+                "Always pass keys=true and schema=false for optimal results.",
             category: "datastore",
             pathParams: [
                 {
@@ -112,7 +129,7 @@ export const openPaymentsCatalog: ApiCatalog = {
                     name: "limit",
                     type: "number",
                     required: false,
-                    description: "Max results per request (1-500, default 500)",
+                    description: "Max results per request (1-500, default 500). Minimum is 1.",
                     default: "500",
                 },
                 {
@@ -133,28 +150,22 @@ export const openPaymentsCatalog: ApiCatalog = {
                     name: "schema",
                     type: "boolean",
                     required: false,
-                    description: "Include column schema definitions in response",
+                    description:
+                        "Include column schema definitions in response. Set to false to keep response size small.",
                 },
                 {
                     name: "keys",
                     type: "boolean",
                     required: false,
-                    description: "Include field keys in response",
+                    description:
+                        "When true, results are objects with named fields. When false, results are arrays. Always set to true.",
                 },
                 {
                     name: "results",
                     type: "boolean",
                     required: false,
-                    description: "Include result rows (default true)",
+                    description: "Include result rows (default true). Set to false for count-only queries.",
                     default: "true",
-                },
-                {
-                    name: "format",
-                    type: "string",
-                    required: false,
-                    description: "Response format",
-                    default: "json",
-                    enum: ["json"],
                 },
                 {
                     name: "conditions",
@@ -162,7 +173,8 @@ export const openPaymentsCatalog: ApiCatalog = {
                     required: false,
                     description:
                         "Filter conditions — array of { property, value, operator }. " +
-                        "Operators: =, <>, <, >, <=, >=, LIKE, STARTS_WITH, CONTAINS. " +
+                        "Operators: =, <>, <, >, <=, >=, LIKE (use % wildcards), BETWEEN, IN, NOT IN. " +
+                        "CONTAINS and STARTS_WITH are NOT valid — use LIKE with %wildcards% instead. " +
                         "Example: [{ property: 'recipient_state', value: 'TX', operator: '=' }]",
                 },
                 {
@@ -171,6 +183,7 @@ export const openPaymentsCatalog: ApiCatalog = {
                     required: false,
                     description:
                         "Sort order — array of { property, order }. order: 'asc' or 'desc'. " +
+                        "NOTE: sorts are lexicographic (string-based). " +
                         "Example: [{ property: 'total_amount_of_payment_usdollars', order: 'desc' }]",
                 },
             ],
@@ -182,7 +195,8 @@ export const openPaymentsCatalog: ApiCatalog = {
             path: "/search",
             summary:
                 "Full-text search across all Open Payments datasets. Returns dataset metadata (titles, identifiers, descriptions). " +
-                "Use this to discover datasets, then query specific ones via /datastore/query/{datasetId}/0.",
+                "Use this to discover datasets, then query specific ones via /datastore/query/{datasetId}/0. " +
+                "Use single-word search terms for best results (e.g. 'general', 'research', 'ownership').",
             category: "search",
             queryParams: [
                 {
@@ -190,7 +204,7 @@ export const openPaymentsCatalog: ApiCatalog = {
                     type: "string",
                     required: false,
                     description:
-                        "Full-text search term (e.g. 'general payment', 'research payment 2024', 'ownership')",
+                        "Full-text search term. Use single words for best results: 'general', 'research', 'ownership'",
                 },
                 {
                     name: "facets",
@@ -225,7 +239,7 @@ export const openPaymentsCatalog: ApiCatalog = {
             path: "/metastore/schemas/dataset/items",
             summary:
                 "List all available datasets in the Open Payments catalog. Returns metadata for every dataset " +
-                "including identifiers, titles, descriptions, and download URLs.",
+                "including identifiers, titles, descriptions, and download URLs. Response is large (61+ datasets).",
             category: "metastore",
         },
 
@@ -253,57 +267,6 @@ export const openPaymentsCatalog: ApiCatalog = {
             path: "/search/facets",
             summary: "Get available facet filters and their values for dataset search.",
             category: "search",
-        },
-
-        // === Datastore SQL ===
-        {
-            method: "GET",
-            path: "/datastore/sql",
-            summary:
-                "Execute a SQL-like query against the datastore. Supports SELECT with FROM (dataset UUID), " +
-                "WHERE, ORDER BY, LIMIT, OFFSET. Alternative to the conditions-based query endpoint.",
-            category: "datastore",
-            queryParams: [
-                {
-                    name: "query",
-                    type: "string",
-                    required: true,
-                    description:
-                        "SQL-like query string. Format: [SELECT columns FROM datasetId][WHERE conditions][ORDER BY col][LIMIT n][OFFSET n]",
-                },
-            ],
-        },
-
-        // === Datastore Query Download ===
-        {
-            method: "GET",
-            path: "/datastore/query/{datasetId}/0/download",
-            summary:
-                "Download query results as CSV. Same filtering/sorting as the query endpoint " +
-                "but returns a CSV file instead of JSON.",
-            category: "datastore",
-            pathParams: [
-                {
-                    name: "datasetId",
-                    type: "string",
-                    required: true,
-                    description: "Dataset UUID",
-                },
-            ],
-            queryParams: [
-                {
-                    name: "conditions",
-                    type: "array",
-                    required: false,
-                    description: "Filter conditions (same as query endpoint)",
-                },
-                {
-                    name: "sorts",
-                    type: "array",
-                    required: false,
-                    description: "Sort order (same as query endpoint)",
-                },
-            ],
         },
     ],
 };
