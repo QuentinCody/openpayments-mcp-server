@@ -1,0 +1,42 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "openpayments-mcp-server",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-10",
+	"compatibility_flags": ["nodejs_compat"],
+	"alias": {
+		"ai": "./src/ai-stub.ts"
+	},
+	"migrations": [
+		{
+			"new_sqlite_classes": ["OpenPaymentsDataDO"],
+			"tag": "v1"
+		},
+		{
+			"new_sqlite_classes": ["MyMCP"],
+			"tag": "v2"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "OpenPaymentsDataDO",
+				"name": "OPENPAYMENTS_DATA_DO"
+			},
+			{
+				"class_name": "MyMCP",
+				"name": "MCP_OBJECT"
+			}
+		]
+	},
+	// Worker Loader for V8 isolate creation (Code Mode execute tool)
+	"worker_loaders": [
+		{ "binding": "CODE_MODE_LOADER" }
+	],
+	"observability": {
+		"enabled": true
+	},
+	"dev": {
+		"port": 8824
+	}
+}
