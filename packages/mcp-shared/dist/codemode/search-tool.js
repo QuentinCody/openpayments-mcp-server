@@ -961,9 +961,9 @@ function evaluateCallbackExpression(source, scope) {
             case "!==":
                 return left !== right;
             case "==":
-                return left == right;
+                return left === right;
             case "!=":
-                return left != right;
+                return left !== right;
             default:
                 return unsupportedExpression();
         }
