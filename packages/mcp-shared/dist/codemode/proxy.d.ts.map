@@ -1,1 +1,0 @@
-{"version":3,"file":"proxy.d.ts","sourceRoot":"","sources":["../../src/codemode/proxy.ts"],"names":[],"mappings":"AAAA;;;;;;;;;GASG;AAEH,OAAO,EAAE,gBAAgB,EAAE,MAAM,oBAAoB,CAAC;AAEtD,qBAAa,aAAc,SAAQ,gBAAgB;IAClD,OAAO,CAAC,UAAU,CAAwC;IAEpD,YAAY,CAAC,OAAO,EAAE;QAAE,YAAY,EAAE,MAAM,CAAC;QAAC,IAAI,EAAE,OAAO,CAAC;QAAC,IAAI,EAAE,MAAM,CAAA;KAAE;CAYjF"}

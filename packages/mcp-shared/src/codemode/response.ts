@@ -51,7 +51,7 @@ export function createCodeModeResponse<T>(
 		maxPreviewChars?: number;
 	} = {},
 ): CodeModeResponse<SuccessResponse<T>> {
-	const { textSummary, meta, maxPreviewChars = 10000 } = options;
+	const { textSummary, meta, maxPreviewChars = 300 } = options;
 
 	const structured: SuccessResponse<T> = {
 		success: true,
