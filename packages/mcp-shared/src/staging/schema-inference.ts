@@ -77,12 +77,12 @@ const DEFAULT_MAX_RECURSION_DEPTH = 2;
  * These are queried frequently across gnomAD, ClinVar, PharmGKB, FAERS, etc.
  */
 const BIO_INDEX_PATTERNS = [
-	/^(gene_symbol|gene_name|gene_id|entrez_id|ensembl_id)$/,
+	/^(gene_symbol|gene_name|gene_id|gene_label|entrez_id|ensembl_id)$/,
 	/^(rsid|variant_id|hgvs_c|hgvs_p|hgvs_g)$/,
-	/^(clinical_significance|review_status|pathogenicity)$/,
+	/^(clinical_significance|classification_label|outcome_label|review_status|pathogenicity)$/,
 	/^(chromosome|chrom|chr)$/,
 	/^(drug_name|compound_name|medication_name|medicinalproduct)$/,
-	/^(disease_name|condition|phenotype)$/,
+	/^(disease_name|condition|condition_label|phenotype)$/,
 	/^(transcript_id|protein_id|uniprot_id)$/,
 ];
 
