@@ -514,8 +514,9 @@ function createTableAndIndexes(table, sql) {
  * - Tables are processed in topological order (parent before child before grandchild)
  * - Each level tracks row IDs for FK resolution at the next level
  *
- * All inserts are wrapped in a single transaction for performance
+ * Callers should wrap this in a transaction for performance
  * (10-50x faster than implicit per-statement autocommit).
+ * In Cloudflare Durable Objects, use ctx.storage.transactionSync().
  */
 export function materializeSchema(schema, rows, sql, hints) {
     const tablesCreated = [];
@@ -533,158 +534,143 @@ export function materializeSchema(schema, rows, sql, hints) {
             childTablesByParent.set(parentName, []);
         childTablesByParent.get(parentName).push(ct);
     }
-    // Wrap all inserts in a transaction for performance
-    sql.exec("BEGIN TRANSACTION");
-    try {
-        /**
-         * Create a table, insert rows, track IDs, then recurse into child tables.
-         *
-         * ID tracking correctness: we use a manual counter (nextId) that increments
-         * only on successful INSERT. This stays in sync with SQLite AUTOINCREMENT because:
-         * - Each DO instance is created fresh (no pre-existing rows)
-         * - Failed INSERTs don't advance SQLite's auto-increment counter
-         * - We never delete rows during materialization
-         */
-        function materializeTable(table, tableRows, flattenDepth) {
-            createTableAndIndexes(table, sql);
-            // Child tables of this table
-            const myChildTables = childTablesByParent.get(table.name) ?? [];
-            const colNames = table.columns.map((c) => c.name);
-            const placeholders = colNames.map(() => "?").join(", ");
-            const insertSql = `INSERT INTO "${table.name}" (${colNames.map((n) => `"${n}"`).join(", ")}) VALUES (${placeholders})`;
-            // Track IDs for FK resolution and capture child array data
-            const idMap = new Map();
-            const capturedChildData = new Map();
+    /**
+     * Create a table, insert rows, track IDs, then recurse into child tables.
+     *
+     * ID tracking correctness: we use a manual counter (nextId) that increments
+     * only on successful INSERT. This stays in sync with SQLite AUTOINCREMENT because:
+     * - Each DO instance is created fresh (no pre-existing rows)
+     * - Failed INSERTs don't advance SQLite's auto-increment counter
+     * - We never delete rows during materialization
+     */
+    function materializeTable(table, tableRows, flattenDepth) {
+        createTableAndIndexes(table, sql);
+        // Child tables of this table
+        const myChildTables = childTablesByParent.get(table.name) ?? [];
+        const colNames = table.columns.map((c) => c.name);
+        const placeholders = colNames.map(() => "?").join(", ");
+        const insertSql = `INSERT INTO "${table.name}" (${colNames.map((n) => `"${n}"`).join(", ")}) VALUES (${placeholders})`;
+        // Track IDs for FK resolution and capture child array data
+        const idMap = new Map();
+        const capturedChildData = new Map();
+        for (const ct of myChildTables) {
+            capturedChildData.set(ct.name, []);
+        }
+        let nextId = 1;
+        for (let i = 0; i < tableRows.length; i++) {
+            const row = tableRows[i];
+            const flat = typeof row === "object" && row !== null
+                ? flattenObject(row, flattenDepth, hints?.flatten)
+                : { value: row };
+            // Capture child array data before inserting
             for (const ct of myChildTables) {
-                capturedChildData.set(ct.name, []);
+                const sourceCol = ct.childOf.sourceColumn;
+                const arr = flat[sourceCol];
+                if (Array.isArray(arr) && arr.length > 0) {
+                    capturedChildData.get(ct.name).push({ parentIndex: i, items: arr });
+                }
             }
-            let nextId = 1;
-            for (let i = 0; i < tableRows.length; i++) {
-                const row = tableRows[i];
-                const flat = typeof row === "object" && row !== null
-                    ? flattenObject(row, flattenDepth, hints?.flatten)
-                    : { value: row };
-                // Capture child array data before inserting
-                for (const ct of myChildTables) {
-                    const sourceCol = ct.childOf.sourceColumn;
-                    const arr = flat[sourceCol];
+            const values = colNames.map((col) => {
+                const v = flat[col];
+                return sqlValue(v);
+            });
+            try {
+                sql.exec(insertSql, ...values);
+                idMap.set(i, nextId++);
+                totalRows++;
+                tableRowCounts[table.name] = (tableRowCounts[table.name] ?? 0) + 1;
+            }
+            catch (err) {
+                failedRows++;
+                if (warnings.length < MAX_SAMPLE_ERRORS) {
+                    warnings.push({
+                        rowIndex: i,
+                        table: table.name,
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                }
+            }
+        }
+        tablesCreated.push(table.name);
+        // Recurse into child tables
+        for (const childTable of myChildTables) {
+            materializeChildTable(childTable, capturedChildData.get(childTable.name) ?? [], idMap);
+        }
+    }
+    /**
+     * Create and populate a child table, then recurse into its own children (grandchild tables).
+     */
+    function materializeChildTable(childTable, captured, parentIdMap) {
+        createTableAndIndexes(childTable, sql);
+        // Grandchild tables of this child table
+        const myGrandchildTables = childTablesByParent.get(childTable.name) ?? [];
+        const childColNames = childTable.columns.map((c) => c.name);
+        const childPlaceholders = childColNames.map(() => "?").join(", ");
+        const childInsertSql = `INSERT INTO "${childTable.name}" (${childColNames.map((n) => `"${n}"`).join(", ")}) VALUES (${childPlaceholders})`;
+        // Track child IDs for grandchild FK resolution
+        const childIdMap = new Map();
+        const capturedGrandchildData = new Map();
+        for (const gct of myGrandchildTables) {
+            capturedGrandchildData.set(gct.name, []);
+        }
+        let nextChildId = 1;
+        let childRowIndex = 0;
+        for (const { parentIndex, items } of captured) {
+            const parentId = parentIdMap.get(parentIndex);
+            if (parentId === undefined)
+                continue; // parent failed to insert
+            for (let j = 0; j < items.length; j++) {
+                const item = items[j];
+                const childFlat = item !== null && typeof item === "object" && !Array.isArray(item)
+                    ? flattenObject(item, 1)
+                    : { value: item };
+                // Capture grandchild array data before inserting child
+                for (const gct of myGrandchildTables) {
+                    const sourceCol = gct.childOf.sourceColumn;
+                    const arr = childFlat[sourceCol];
                     if (Array.isArray(arr) && arr.length > 0) {
-                        capturedChildData.get(ct.name).push({ parentIndex: i, items: arr });
+                        capturedGrandchildData.get(gct.name).push({ parentIndex: childRowIndex, items: arr });
                     }
                 }
-                const values = colNames.map((col) => {
-                    const v = flat[col];
+                const childValues = childColNames.map((col) => {
+                    if (col === "parent_id")
+                        return parentId;
+                    // Reverse the source_parent_id rename from schema inference
+                    const lookupKey = col === "source_parent_id" ? "parent_id" : col;
+                    const v = childFlat[lookupKey];
                     return sqlValue(v);
                 });
                 try {
-                    sql.exec(insertSql, ...values);
-                    idMap.set(i, nextId++);
+                    sql.exec(childInsertSql, ...childValues);
+                    childIdMap.set(childRowIndex, nextChildId++);
                     totalRows++;
-                    tableRowCounts[table.name] = (tableRowCounts[table.name] ?? 0) + 1;
+                    tableRowCounts[childTable.name] = (tableRowCounts[childTable.name] ?? 0) + 1;
                 }
                 catch (err) {
                     failedRows++;
                     if (warnings.length < MAX_SAMPLE_ERRORS) {
                         warnings.push({
-                            rowIndex: i,
-                            table: table.name,
+                            rowIndex: j,
+                            table: childTable.name,
                             error: err instanceof Error ? err.message : String(err),
                         });
                     }
                 }
-            }
-            tablesCreated.push(table.name);
-            // Recurse into child tables
-            for (const childTable of myChildTables) {
-                materializeChildTable(childTable, capturedChildData.get(childTable.name) ?? [], idMap);
+                childRowIndex++;
             }
         }
-        /**
-         * Create and populate a child table, then recurse into its own children (grandchild tables).
-         */
-        function materializeChildTable(childTable, captured, parentIdMap) {
-            createTableAndIndexes(childTable, sql);
-            // Grandchild tables of this child table
-            const myGrandchildTables = childTablesByParent.get(childTable.name) ?? [];
-            const childColNames = childTable.columns.map((c) => c.name);
-            const childPlaceholders = childColNames.map(() => "?").join(", ");
-            const childInsertSql = `INSERT INTO "${childTable.name}" (${childColNames.map((n) => `"${n}"`).join(", ")}) VALUES (${childPlaceholders})`;
-            // Track child IDs for grandchild FK resolution
-            const childIdMap = new Map();
-            const capturedGrandchildData = new Map();
-            for (const gct of myGrandchildTables) {
-                capturedGrandchildData.set(gct.name, []);
-            }
-            let nextChildId = 1;
-            let childRowIndex = 0;
-            for (const { parentIndex, items } of captured) {
-                const parentId = parentIdMap.get(parentIndex);
-                if (parentId === undefined)
-                    continue; // parent failed to insert
-                for (let j = 0; j < items.length; j++) {
-                    const item = items[j];
-                    const childFlat = item !== null && typeof item === "object" && !Array.isArray(item)
-                        ? flattenObject(item, 1)
-                        : { value: item };
-                    // Capture grandchild array data before inserting child
-                    for (const gct of myGrandchildTables) {
-                        const sourceCol = gct.childOf.sourceColumn;
-                        const arr = childFlat[sourceCol];
-                        if (Array.isArray(arr) && arr.length > 0) {
-                            capturedGrandchildData.get(gct.name).push({ parentIndex: childRowIndex, items: arr });
-                        }
-                    }
-                    const childValues = childColNames.map((col) => {
-                        if (col === "parent_id")
-                            return parentId;
-                        // Reverse the source_parent_id rename from schema inference
-                        const lookupKey = col === "source_parent_id" ? "parent_id" : col;
-                        const v = childFlat[lookupKey];
-                        return sqlValue(v);
-                    });
-                    try {
-                        sql.exec(childInsertSql, ...childValues);
-                        childIdMap.set(childRowIndex, nextChildId++);
-                        totalRows++;
-                        tableRowCounts[childTable.name] = (tableRowCounts[childTable.name] ?? 0) + 1;
-                    }
-                    catch (err) {
-                        failedRows++;
-                        if (warnings.length < MAX_SAMPLE_ERRORS) {
-                            warnings.push({
-                                rowIndex: j,
-                                table: childTable.name,
-                                error: err instanceof Error ? err.message : String(err),
-                            });
-                        }
-                    }
-                    childRowIndex++;
-                }
-            }
-            tablesCreated.push(childTable.name);
-            // Recurse into grandchild tables
-            for (const grandchildTable of myGrandchildTables) {
-                materializeChildTable(grandchildTable, capturedGrandchildData.get(grandchildTable.name) ?? [], childIdMap);
-            }
+        tablesCreated.push(childTable.name);
+        // Recurse into grandchild tables
+        for (const grandchildTable of myGrandchildTables) {
+            materializeChildTable(grandchildTable, capturedGrandchildData.get(grandchildTable.name) ?? [], childIdMap);
         }
-        // Process root (parent) tables
-        const parentTables = schema.tables.filter((t) => !t.childOf);
-        for (const table of parentTables) {
-            const tableRows = rows.get(table.name) ?? [];
-            inputRows += tableRows.length;
-            materializeTable(table, tableRows, 2);
-        }
-        sql.exec("COMMIT");
     }
-    catch (err) {
-        // Roll back on catastrophic failure (not per-row errors, which are caught above)
-        try {
-            sql.exec("ROLLBACK");
-        }
-        catch {
-            // ROLLBACK can fail if COMMIT already succeeded partially — ignore
-        }
-        throw err;
+    // Process root (parent) tables
+    const parentTables = schema.tables.filter((t) => !t.childOf);
+    for (const table of parentTables) {
+        const tableRows = rows.get(table.name) ?? [];
+        inputRows += tableRows.length;
+        materializeTable(table, tableRows, 2);
     }
     return { tablesCreated, totalRows, inputRows, failedRows, warnings, tableRowCounts };
 }

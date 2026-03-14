@@ -155,7 +155,7 @@ export class RestStagingDO extends DurableObject {
             const domainConfig = this.getDomainConfig();
             const context = this.getStagingContext(request);
             const stagingHints = this.getStagingHints(data);
-            const result = stageData(data, this.ctx.storage.sql, context, stagingHints, domainConfig);
+            const result = this.ctx.storage.transactionSync(() => stageData(data, this.ctx.storage.sql, context, stagingHints, domainConfig));
             return this.jsonResponse({
                 success: result.success,
                 tier: result.tier,
@@ -180,7 +180,7 @@ export class RestStagingDO extends DurableObject {
                     : schema.tables.find((t) => t.name === tableName)?.name ?? tableName;
                 rowsMap.set(actualName, arr.rows);
             }
-            const result = materializeSchema(schema, rowsMap, this.ctx.storage.sql);
+            const result = this.ctx.storage.transactionSync(() => materializeSchema(schema, rowsMap, this.ctx.storage.sql));
             // Track row counts in provenance
             this.updateProvenanceRowCounts(result.inputRows, result.totalRows, result.failedRows, result.warnings);
             // Extract relationships from schema

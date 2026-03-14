@@ -102,8 +102,9 @@ export interface MaterializationResult {
  * - Tables are processed in topological order (parent before child before grandchild)
  * - Each level tracks row IDs for FK resolution at the next level
  *
- * All inserts are wrapped in a single transaction for performance
+ * Callers should wrap this in a transaction for performance
  * (10-50x faster than implicit per-statement autocommit).
+ * In Cloudflare Durable Objects, use ctx.storage.transactionSync().
  */
 export declare function materializeSchema(schema: InferredSchema, rows: Map<string, unknown[]>, sql: {
     exec: (query: string, ...bindings: unknown[]) => unknown;

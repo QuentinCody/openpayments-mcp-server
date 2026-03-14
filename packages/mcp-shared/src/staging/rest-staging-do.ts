@@ -211,12 +211,14 @@ export class RestStagingDO extends DurableObject {
 			const context = this.getStagingContext(request);
 			const stagingHints = this.getStagingHints(data);
 
-			const result = stageData(
-				data,
-				this.ctx.storage.sql,
-				context,
-				stagingHints,
-				domainConfig,
+			const result = this.ctx.storage.transactionSync(() =>
+				stageData(
+					data,
+					this.ctx.storage.sql,
+					context,
+					stagingHints,
+					domainConfig,
+				),
 			);
 
 			return this.jsonResponse({
@@ -248,10 +250,12 @@ export class RestStagingDO extends DurableObject {
 				rowsMap.set(actualName, arr.rows);
 			}
 
-			const result = materializeSchema(
-				schema,
-				rowsMap,
-				this.ctx.storage.sql,
+			const result = this.ctx.storage.transactionSync(() =>
+				materializeSchema(
+					schema,
+					rowsMap,
+					this.ctx.storage.sql,
+				),
 			);
 
 			// Track row counts in provenance
