@@ -302,20 +302,19 @@ function buildDriftHint(
 		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
 		const suggestions = buildSuggestions(requestPath, normalizedMethod, knownEndpoints);
 		const suggestionText = suggestions.length > 0
-			? ` Closest known endpoints: ${suggestions
+			? ` Try instead: ${suggestions
 				.map((suggestion) => `${suggestion.method} ${suggestion.path}`)
 				.join(", ")}.`
 			: "";
 		const methodText = knownMethods.length > 0
-			? ` Known methods for this path in current metadata: ${knownMethods.join(", ")}.`
+			? ` This path exists for methods: ${knownMethods.join(", ")}.`
 			: "";
 
 		return {
 			kind: "unknown_endpoint",
 			message:
-				`This call does not match the current search metadata for ${normalizedMethod} ${requestPath}.` +
+				`Unknown endpoint: ${normalizedMethod} ${requestPath} does not exist.` +
 				methodText +
-				` Re-run searchSpec()/getEndpoint() before retrying.` +
 				suggestionText,
 			...(suggestions.length > 0 ? { suggestions } : {}),
 			...(knownMethods.length > 0 ? { known_methods: knownMethods } : {}),
@@ -342,12 +341,28 @@ function buildDriftHint(
 
 	if ([404, 405, 410, 501].includes(status)) {
 		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
+		const hasPathParams = matchedEndpoint.pathParamNames.length > 0;
+
+		// 404 on a parameterized path (e.g. /studies/{id}) almost always means
+		// the specific resource doesn't exist, not that the endpoint is broken.
+		if (status === 404 && hasPathParams) {
+			return {
+				kind: "contract_changed",
+				message:
+					`Resource not found: the upstream API returned 404 for ${normalizedMethod} ${requestPath}. ` +
+					`The endpoint ${matchedEndpoint.path} exists but the requested resource was not found in the database. ` +
+					`Verify the identifier is correct and exists in this data source.`,
+			};
+		}
+
+		// 405/410/501 or 404 on a fixed path — likely an API contract change
 		return {
 			kind: "contract_changed",
 			message:
-				`${normalizedMethod} ${matchedEndpoint.path} exists in current search metadata, but the upstream API returned ${status}. ` +
-				`This usually means the provider removed or renamed the endpoint, changed the allowed method, or the committed search metadata is stale. ` +
-				`Re-run searchSpec()/getEndpoint() and compare against the live docs or spec before retrying.` +
+				`${normalizedMethod} ${matchedEndpoint.path} returned ${status}. ` +
+				(status === 405
+					? `Method ${normalizedMethod} may not be allowed.`
+					: `The endpoint may have been removed or renamed.`) +
 				(knownMethods.length > 0 ? ` Known methods for this path: ${knownMethods.join(", ")}.` : ""),
 			...(knownMethods.length > 0 ? { known_methods: knownMethods } : {}),
 		};
