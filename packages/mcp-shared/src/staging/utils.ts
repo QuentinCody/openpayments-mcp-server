@@ -11,6 +11,57 @@ import { buildStagingMetadata, type StagingMetadata, type TableRelationship } fr
 
 const DEFAULT_STAGING_THRESHOLD = 30 * 1024; // 30KB — stage larger responses into SQLite for compact schema summaries
 
+// ---------------------------------------------------------------------------
+// DO response interfaces — describe the shapes returned by DO endpoints
+// ---------------------------------------------------------------------------
+
+interface ProcessResponse {
+	success?: boolean;
+	error?: string;
+	tables_created?: string[];
+	total_rows?: number;
+	input_rows?: number;
+	table_row_counts?: Record<string, number>;
+	staging_warnings?: Record<string, unknown>;
+	relationships?: TableRelationship[];
+}
+
+interface SchemaResponse {
+	success?: boolean;
+	schema?: unknown;
+	error?: string;
+}
+
+interface QueryResponse {
+	success?: boolean;
+	results?: unknown[];
+	row_count?: number;
+	error?: string;
+}
+
+interface ListDataset {
+	data_access_id: string;
+	tool_name: string | null;
+	tables: string[];
+	total_rows: number | null;
+	tool_prefix: string | null;
+	created_at: string;
+}
+
+interface ListResponse {
+	success?: boolean;
+	datasets?: ListDataset[];
+}
+
+// ---------------------------------------------------------------------------
+
+/** Safely parse a Response body as JSON with a fallback. */
+async function parseJsonResponse<T>(resp: Response, fallback: T): Promise<T> {
+	const raw: unknown = await resp.json();
+	if (raw === null || typeof raw !== "object") return fallback;
+	return raw as T;
+}
+
 /** Decide whether a response should be staged based on byte size. */
 export function shouldStage(responseBytes: number, threshold?: number): boolean {
 	return responseBytes > (threshold ?? DEFAULT_STAGING_THRESHOLD);
@@ -54,6 +105,8 @@ export interface StageResult {
  * Stage data to a Durable Object and return a structuredContent response
  * with the data_access_id for subsequent SQL queries.
  *
+ * @param schemaHints - Optional schema hints forwarded to the DO's /process handler.
+ *   These are merged with server-side hints (client hints take precedence).
  * @param toolPrefix - Tool name prefix for query_data/get_schema tool names (e.g. "ctgov", "faers").
  *   If not provided, falls back to `prefix` (the data access ID prefix).
  * @param sessionId - MCP transport session ID. When provided, registers the staged dataset
@@ -63,7 +116,7 @@ export async function stageToDoAndRespond(
 	data: unknown,
 	doNamespace: DurableObjectNamespace,
 	prefix: string,
-	_schemaHints?: SchemaHints,
+	schemaHints?: SchemaHints,
 	provenance?: StagingProvenance,
 	toolPrefix?: string,
 	sessionId?: string,
@@ -80,33 +133,22 @@ export async function stageToDoAndRespond(
 		body: JSON.stringify({
 			data,
 			...(provenance ? { context: provenance } : {}),
+			...(schemaHints ? { schema_hints: schemaHints } : {}),
 		}),
 	});
 
 	const processResp = await doInstance.fetch(processReq);
-	const processResult = (await processResp.json()) as {
-		success?: boolean;
-		tables_created?: string[];
-		total_rows?: number;
-		input_rows?: number;
-		table_row_counts?: Record<string, number>;
-		staging_warnings?: Record<string, unknown>;
-		relationships?: TableRelationship[];
-	};
+	const processResult = await parseJsonResponse<ProcessResponse>(processResp, { success: false, error: "Empty response from DO" });
 
 	if (!processResult.success) {
-		const doError = (processResult as { error?: string }).error || "unknown error";
-		throw new Error(`Failed to stage data in Durable Object: ${doError}`);
+		throw new Error(`Failed to stage data in Durable Object: ${processResult.error || "unknown error"}`);
 	}
 
 	// Fetch schema
 	const schemaResp = await doInstance.fetch(
 		new Request("http://localhost/schema"),
 	);
-	const schemaResult = (await schemaResp.json()) as {
-		success?: boolean;
-		schema?: unknown;
-	};
+	const schemaResult = await parseJsonResponse<SchemaResponse>(schemaResp, { success: false });
 
 	const tables = processResult.tables_created ?? [];
 	const resolvedToolPrefix = toolPrefix ?? prefix;
@@ -216,12 +258,7 @@ export async function queryDataFromDo(
 		}),
 	);
 
-	const result = (await response.json()) as {
-		success?: boolean;
-		results?: unknown[];
-		row_count?: number;
-		error?: string;
-	};
+	const result = await parseJsonResponse<QueryResponse>(response, { success: false, error: "Empty response from DO" });
 
 	if (!result.success) {
 		throw new Error(`Query failed: ${result.error || "Unknown error"}`);
@@ -249,21 +286,18 @@ export async function getSchemaFromDo(
 	const response = await doInstance.fetch(
 		new Request("http://localhost/schema"),
 	);
-	const result = (await response.json()) as {
-		success?: boolean;
-		schema?: unknown;
-		error?: string;
-	};
+	const result = await parseJsonResponse<SchemaResponse>(response, { success: false, error: "Empty response from DO" });
 
 	if (!result.success) {
 		throw new Error(`Schema retrieval failed: ${result.error}`);
 	}
 
+	const schema = result.schema;
 	if (
-		!result.schema ||
-		typeof result.schema !== "object" ||
-		!(result.schema as Record<string, unknown>).tables ||
-		Object.keys((result.schema as Record<string, unknown>).tables as object).length === 0
+		!schema ||
+		typeof schema !== "object" ||
+		!("tables" in schema) ||
+		Object.keys((schema as { tables: object }).tables).length === 0
 	) {
 		throw new Error(
 			`Data access ID "${dataAccessId}" not found or contains no data.`,
@@ -272,7 +306,7 @@ export async function getSchemaFromDo(
 
 	return {
 		data_access_id: dataAccessId,
-		schema: result.schema,
+		schema,
 		retrieved_at: new Date().toISOString(),
 	};
 }
@@ -371,17 +405,7 @@ export function createGetSchemaHandler(
 			const listResp = await registryDo.fetch(
 				new Request(`http://localhost/list?session_id=${encodeURIComponent(sessionId || "")}`),
 			);
-			const listResult = (await listResp.json()) as {
-				success?: boolean;
-				datasets?: Array<{
-					data_access_id: string;
-					tool_name: string | null;
-					tables: string[];
-					total_rows: number | null;
-					tool_prefix: string | null;
-					created_at: string;
-				}>;
-			};
+			const listResult = await parseJsonResponse<ListResponse>(listResp, { success: false });
 
 			const datasets = listResult.datasets ?? [];
 

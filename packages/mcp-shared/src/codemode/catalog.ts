@@ -39,9 +39,10 @@ export interface ApiEndpoint {
 
 /** A multi-step recipe combining several API endpoints into a reusable workflow. */
 export interface WorkflowRecipe {
-	name: string;
+	title: string;
 	description: string;
-	steps: string[];
+	keywords: string[];
+	code: string;
 }
 
 export interface ApiCatalog {

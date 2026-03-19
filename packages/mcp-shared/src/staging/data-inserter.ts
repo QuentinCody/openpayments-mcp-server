@@ -14,7 +14,6 @@
 import type { DomainConfig, SqlExec, TableSchema } from "./types";
 import { isEntity, inferEntityType } from "./entity-discovery";
 import {
-	sanitizeColumnName,
 	findOriginalKey,
 	isValidId,
 } from "./normalizer";

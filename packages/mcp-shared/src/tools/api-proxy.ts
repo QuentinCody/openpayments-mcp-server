@@ -11,7 +11,27 @@ import { z } from "zod";
 import type { ToolEntry } from "../registry/types";
 import type { ApiCatalog, ApiFetchFn } from "../codemode/catalog";
 import type { ResolvedSpec } from "../codemode/openapi-resolver";
+import type { SchemaHints } from "../staging/schema-inference";
 import { shouldStage, stageToDoAndRespond, queryDataFromDo } from "../staging/utils";
+
+// ---------------------------------------------------------------------------
+// Interfaces for untyped/loosely-typed structures used in this module
+// ---------------------------------------------------------------------------
+
+/** OpenAPI parameter object (subset of fields we inspect). */
+interface SpecParameter {
+	in?: string;
+	name?: string;
+}
+
+/** OpenAPI operation object (subset of fields we inspect). */
+interface SpecOperation {
+	summary?: string;
+	operationId?: string;
+	parameters?: SpecParameter[];
+}
+
+// ---------------------------------------------------------------------------
 
 /** Path traversal patterns to reject */
 const DANGEROUS_PATTERNS = [
@@ -68,7 +88,8 @@ function preserveEnvelopeScalars(
 	if (!original || typeof original !== "object" || Array.isArray(original)) {
 		return;
 	}
-	for (const [key, value] of Object.entries(original as Record<string, unknown>)) {
+	// After the typeof guard, Object.entries is safe on the narrowed `object` type
+	for (const [key, value] of Object.entries(original)) {
 		if (key in staging) continue; // don't clobber staging metadata fields
 		try {
 			const serialized = JSON.stringify(value);
@@ -130,18 +151,20 @@ function extractCatalogEndpoints(catalog?: ApiCatalog): KnownEndpoint[] {
 }
 
 function extractSpecParamNames(
-	params: unknown,
+	params: SpecParameter[],
 	location: "path" | "query",
 ): string[] {
-	if (!Array.isArray(params)) return [];
 	return uniqueStrings(
 		params.flatMap((param) => {
-			if (!param || typeof param !== "object") return [];
-			const record = param as Record<string, unknown>;
-			if (record.in !== location || typeof record.name !== "string") return [];
-			return [record.name];
+			if (param.in !== location || typeof param.name !== "string") return [];
+			return [param.name];
 		}),
 	);
+}
+
+/** Type guard: checks that a value is an object with string keys (not null, not array). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
@@ -149,18 +172,18 @@ function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
 
 	const endpoints: KnownEndpoint[] = [];
 	for (const [path, pathItem] of Object.entries(spec.paths)) {
-		if (!pathItem || typeof pathItem !== "object") continue;
-		const pathRecord = pathItem as Record<string, unknown>;
-		const pathParams = Array.isArray(pathRecord.parameters) ? pathRecord.parameters : [];
+		if (!isRecord(pathItem)) continue;
+		const pathParams: SpecParameter[] = Array.isArray(pathItem.parameters)
+			? pathItem.parameters.filter(isRecord) as SpecParameter[]
+			: [];
 
-		for (const [method, operation] of Object.entries(pathRecord)) {
-			if (!HTTP_METHODS.has(method) || !operation || typeof operation !== "object") {
+		for (const [method, operation] of Object.entries(pathItem)) {
+			if (!HTTP_METHODS.has(method) || !isRecord(operation)) {
 				continue;
 			}
 
-			const operationRecord = operation as Record<string, unknown>;
-			const operationParams = Array.isArray(operationRecord.parameters)
-				? operationRecord.parameters
+			const operationParams: SpecParameter[] = Array.isArray(operation.parameters)
+				? operation.parameters.filter(isRecord) as SpecParameter[]
 				: [];
 			const mergedParams = [...pathParams, ...operationParams];
 
@@ -168,10 +191,10 @@ function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
 				method: method.toUpperCase(),
 				path,
 				summary:
-					typeof operationRecord.summary === "string"
-						? operationRecord.summary
-						: typeof operationRecord.operationId === "string"
-							? operationRecord.operationId
+					typeof operation.summary === "string"
+						? operation.summary
+						: typeof operation.operationId === "string"
+							? operation.operationId
 							: undefined,
 				pathParamNames: extractSpecParamNames(mergedParams, "path"),
 				queryParamNames: extractSpecParamNames(mergedParams, "query"),
@@ -412,7 +435,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 		handler: async (input) => {
 			const method = String(input.method || "GET");
 			const rawPath = String(input.path || "/");
-			const rawParams = (input.params as Record<string, unknown>) ?? {};
+			const rawParams: Record<string, unknown> = isRecord(input.params) ? input.params : {};
 			const body = input.body;
 			let interpolatedPath = rawPath;
 
@@ -477,6 +500,85 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 					data: (err as { data?: unknown }).data,
 					...(driftHint ? { drift_hint: driftHint } : {}),
 				};
+			}
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// __stage_proxy — routes db.stage() calls to the DO for arbitrary data staging
+// ---------------------------------------------------------------------------
+
+export interface StageProxyToolOptions {
+	/** DO namespace for staging data */
+	doNamespace: unknown;
+	/** Prefix for data access IDs (e.g., "gtex") */
+	stagingPrefix: string;
+}
+
+/**
+ * Create the hidden __stage_proxy tool entry.
+ * Stages arbitrary data from isolate db.stage() into the server's Durable Object.
+ *
+ * Accepts optional schema_hints from isolate code to control column types,
+ * indexes, and other schema inference parameters. These are forwarded to the
+ * DO's /process handler and merged with any server-side hints.
+ */
+export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry {
+	const { doNamespace, stagingPrefix } = options;
+
+	return {
+		name: "__stage_proxy",
+		description: "Stage arbitrary data from V8 isolate into DO SQLite. Internal only.",
+		hidden: true,
+		schema: {
+			data: z.unknown(),
+			table_name: z.string().optional(),
+			schema_hints: z.object({
+				tableName: z.string().optional(),
+				columnTypes: z.record(z.string(), z.string()).optional(),
+				indexes: z.array(z.string()).optional(),
+				exclude: z.array(z.string()).optional(),
+				skipChildTables: z.array(z.string()).optional(),
+				maxRecursionDepth: z.number().optional(),
+				compositeIndexes: z.array(z.array(z.string())).optional(),
+			}).optional(),
+		},
+		handler: async (input) => {
+			const data = input.data;
+			const tableName = input.table_name ? String(input.table_name) : undefined;
+			const clientHints = input.schema_hints as SchemaHints | undefined;
+
+			if (data === undefined || data === null) {
+				return { __stage_error: true, message: "data is required" };
+			}
+
+			// Build merged schema hints: table_name is a shorthand for tableName
+			const mergedHints: SchemaHints | undefined =
+				tableName || clientHints
+					? { ...clientHints, ...(tableName ? { tableName } : {}) }
+					: undefined;
+
+			try {
+				const staged = await stageToDoAndRespond(
+					data,
+					doNamespace as Parameters<typeof stageToDoAndRespond>[1],
+					stagingPrefix,
+					mergedHints,
+					undefined,
+					stagingPrefix,
+				);
+
+				return {
+					data_access_id: staged.dataAccessId,
+					tables_created: staged.tablesCreated,
+					total_rows: staged.totalRows,
+					schema: staged.schema,
+					_staging: staged._staging,
+				};
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return { __stage_error: true, message };
 			}
 		},
 	};

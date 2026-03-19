@@ -23,6 +23,128 @@ import { stageData } from "./staging-engine";
 import type { DomainConfig, StagingContext, StagingHints } from "./types";
 import type { TableRelationship } from "./staging-metadata";
 
+// ---------------------------------------------------------------------------
+// Request body interfaces for handleProcess / handleQuery / handleRegister
+// ---------------------------------------------------------------------------
+
+interface ProcessRequestBody {
+	data?: unknown;
+	context?: {
+		toolName?: string;
+		serverName?: string;
+		args?: Record<string, unknown>;
+		apiUrl?: string;
+	};
+	schema_hints?: SchemaHints;
+}
+
+interface SqlQueryBody {
+	sql: string;
+}
+
+interface RegisterRequestBody {
+	session_id: string;
+	data_access_id: string;
+	tool_name?: string;
+	tables?: string[];
+	total_rows?: number;
+	tool_prefix?: string;
+}
+
+interface SessionRegistryRow {
+	data_access_id: string;
+	tool_name: string | null;
+	tables_json: string | null;
+	total_rows: number | null;
+	tool_prefix: string | null;
+	created_at: string;
+}
+
+interface ProvenanceRow {
+	tool_name: string | null;
+	server_name: string | null;
+	api_url: string | null;
+	staged_at: string | null;
+	input_rows: number | null;
+	stored_rows: number | null;
+	failed_rows: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Schema hints merging — client-provided hints override server defaults
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge server-side schema hints with client-provided hints.
+ * Client hints take precedence for overlapping keys (columnTypes, indexes, etc.).
+ * Returns undefined if both inputs are undefined.
+ */
+function mergeSchemaHints(
+	serverHints: SchemaHints | undefined,
+	clientHints: SchemaHints | undefined,
+): SchemaHints | undefined {
+	if (!serverHints && !clientHints) return undefined;
+	if (!serverHints) return clientHints;
+	if (!clientHints) return serverHints;
+
+	return {
+		// Client tableName wins if set
+		tableName: clientHints.tableName ?? serverHints.tableName,
+		// Merge columnTypes — client overrides per-column
+		columnTypes: serverHints.columnTypes || clientHints.columnTypes
+			? { ...serverHints.columnTypes, ...clientHints.columnTypes }
+			: undefined,
+		// Merge indexes — deduplicated union
+		indexes: serverHints.indexes || clientHints.indexes
+			? [...new Set([...(serverHints.indexes ?? []), ...(clientHints.indexes ?? [])])]
+			: undefined,
+		// Merge flatten depth overrides — client wins per-key
+		flatten: serverHints.flatten || clientHints.flatten
+			? { ...serverHints.flatten, ...clientHints.flatten }
+			: undefined,
+		// Merge exclude — deduplicated union
+		exclude: serverHints.exclude || clientHints.exclude
+			? [...new Set([...(serverHints.exclude ?? []), ...(clientHints.exclude ?? [])])]
+			: undefined,
+		// Merge skipChildTables — deduplicated union
+		skipChildTables: serverHints.skipChildTables || clientHints.skipChildTables
+			? [...new Set([...(serverHints.skipChildTables ?? []), ...(clientHints.skipChildTables ?? [])])]
+			: undefined,
+		// Client maxRecursionDepth wins if set
+		maxRecursionDepth: clientHints.maxRecursionDepth ?? serverHints.maxRecursionDepth,
+		// Merge compositeIndexes — concatenate (de-dup by serialized form)
+		compositeIndexes: serverHints.compositeIndexes || clientHints.compositeIndexes
+			? deduplicateCompositeIndexes([
+				...(serverHints.compositeIndexes ?? []),
+				...(clientHints.compositeIndexes ?? []),
+			])
+			: undefined,
+	};
+}
+
+/** Deduplicate composite indexes by their serialized column list. */
+function deduplicateCompositeIndexes(indexes: string[][]): string[][] {
+	const seen = new Set<string>();
+	const result: string[][] = [];
+	for (const idx of indexes) {
+		const key = idx.join(",");
+		if (!seen.has(key)) {
+			seen.add(key);
+			result.push(idx);
+		}
+	}
+	return result;
+}
+
+/** Safely parse JSON, returning undefined on failure. */
+function safeJsonParse(value: string): unknown {
+	try {
+		return JSON.parse(value);
+	} catch {
+		return undefined;
+	}
+}
+
 export class RestStagingDO extends DurableObject {
 	protected chunking = new ChunkingEngine();
 
@@ -192,18 +314,15 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	private async handleProcess(request: Request): Promise<Response> {
-		const json = (await request.json()) as unknown;
-		const container = (json as Record<string, unknown>) || {};
-		const data = (container as { data?: unknown }).data ?? json;
+		const raw: unknown = await request.json();
+		const container: ProcessRequestBody = (raw !== null && typeof raw === "object" ? raw : {}) as ProcessRequestBody;
+		const data = container.data ?? raw;
 
 		// Extract provenance context from request body
-		const stagingContext = (container as { context?: Record<string, unknown> }).context;
-		this.storeProvenance(stagingContext as {
-			toolName?: string;
-			serverName?: string;
-			args?: Record<string, unknown>;
-			apiUrl?: string;
-		});
+		this.storeProvenance(container.context);
+
+		// Extract client-provided schema hints (from isolate db.stage() calls)
+		const clientHints = container.schema_hints;
 
 		// Use consolidated staging engine if opted in
 		if (this.useConsolidatedEngine()) {
@@ -231,8 +350,9 @@ export class RestStagingDO extends DurableObject {
 			});
 		}
 
-		// Legacy Tier 1 pipeline
-		const hints = this.getSchemaHints(data);
+		// Legacy Tier 1 pipeline — merge server-side hints with client-provided hints
+		const serverHints = this.getSchemaHints(data);
+		const hints = mergeSchemaHints(serverHints, clientHints);
 		const arrays = detectArrays(data);
 
 		if (arrays.length > 0 && arrays.some((a) => a.rows.length > 0)) {
@@ -328,7 +448,8 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	private async handleQuery(request: Request): Promise<Response> {
-		const body = (await request.json()) as { sql: string };
+		const raw: unknown = await request.json();
+		const body: SqlQueryBody = (raw !== null && typeof raw === "object" ? raw : { sql: "" }) as SqlQueryBody;
 		const res = this.ctx.storage.sql.exec(body.sql);
 		const results = res.toArray();
 		return this.jsonResponse({
@@ -339,7 +460,8 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	private async handleQueryEnhanced(request: Request): Promise<Response> {
-		const body = (await request.json()) as { sql: string };
+		const rawEnhanced: unknown = await request.json();
+		const body: SqlQueryBody = (rawEnhanced !== null && typeof rawEnhanced === "object" ? rawEnhanced : { sql: "" }) as SqlQueryBody;
 		const res = this.ctx.storage.sql.exec(body.sql);
 		const rows = res.toArray();
 		const enhanced: Record<string, unknown>[] = [];
@@ -473,7 +595,7 @@ export class RestStagingDO extends DurableObject {
 		});
 
 		// Include provenance metadata if available
-		let provenance: Record<string, unknown> | undefined;
+		let provenance: ProvenanceRow | undefined;
 		try {
 			const metaResults = this.ctx.storage.sql
 				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_staging_metadata'`)
@@ -482,8 +604,17 @@ export class RestStagingDO extends DurableObject {
 				const metaRow = this.ctx.storage.sql
 					.exec(`SELECT tool_name, server_name, api_url, staged_at, input_rows, stored_rows, failed_rows FROM _staging_metadata ORDER BY id DESC LIMIT 1`)
 					.toArray();
-				if (metaRow.length > 0) {
-					provenance = metaRow[0] as Record<string, unknown>;
+				const first = metaRow[0];
+				if (first !== undefined) {
+					provenance = {
+						tool_name: typeof first.tool_name === "string" ? first.tool_name : null,
+						server_name: typeof first.server_name === "string" ? first.server_name : null,
+						api_url: typeof first.api_url === "string" ? first.api_url : null,
+						staged_at: typeof first.staged_at === "string" ? first.staged_at : null,
+						input_rows: typeof first.input_rows === "number" ? first.input_rows : null,
+						stored_rows: typeof first.stored_rows === "number" ? first.stored_rows : null,
+						failed_rows: typeof first.failed_rows === "number" ? first.failed_rows : null,
+					};
 				}
 			}
 		} catch {
@@ -510,14 +641,8 @@ export class RestStagingDO extends DurableObject {
 	 * Called on the __registry__ DO instance by stageToDoAndRespond().
 	 */
 	private async handleRegister(request: Request): Promise<Response> {
-		const body = (await request.json()) as {
-			session_id: string;
-			data_access_id: string;
-			tool_name?: string;
-			tables?: string[];
-			total_rows?: number;
-			tool_prefix?: string;
-		};
+		const rawRegister: unknown = await request.json();
+		const body: RegisterRequestBody = (rawRegister !== null && typeof rawRegister === "object" ? rawRegister : {}) as RegisterRequestBody;
 
 		if (!body.session_id || !body.data_access_id) {
 			return this.jsonResponse(
@@ -586,14 +711,20 @@ export class RestStagingDO extends DurableObject {
 			)
 			.toArray();
 
-		const datasets = rows.map((row: Record<string, unknown>) => ({
-			data_access_id: row.data_access_id as string,
-			tool_name: row.tool_name as string | null,
-			tables: row.tables_json ? JSON.parse(row.tables_json as string) : [],
-			total_rows: row.total_rows as number | null,
-			tool_prefix: row.tool_prefix as string | null,
-			created_at: row.created_at as string,
-		}));
+		const datasets = rows.map((row) => {
+			const r = row as unknown as SessionRegistryRow;
+			const parsedTables = typeof r.tables_json === "string"
+				? (safeJsonParse(r.tables_json) ?? [])
+				: [];
+			return {
+				data_access_id: r.data_access_id,
+				tool_name: r.tool_name,
+				tables: Array.isArray(parsedTables) ? parsedTables : [],
+				total_rows: r.total_rows,
+				tool_prefix: r.tool_prefix,
+				created_at: r.created_at,
+			};
+		});
 
 		return this.jsonResponse({ success: true, datasets });
 	}

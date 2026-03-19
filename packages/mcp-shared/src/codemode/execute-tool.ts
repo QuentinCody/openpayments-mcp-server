@@ -20,7 +20,8 @@ import { buildCatalogSearchSource } from "./catalog-search";
 import type { ResolvedSpec } from "./openapi-resolver";
 import { buildOpenApiSearchSource } from "./openapi-search";
 import { buildApiProxySource } from "./api-proxy";
-import { createApiProxyTool, createQueryProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
+import { createApiProxyTool, createQueryProxyTool, createStageProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
+import type { ToolContext } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
 
 // ---------------------------------------------------------------------------
@@ -57,12 +58,17 @@ class ToolDispatcher extends RpcTarget {
   }
 }
 
+/** Minimal interface for the Cloudflare Worker Loader binding. */
+export interface WorkerLoaderBinding {
+  get(name: string, factory: () => unknown): { getEntrypoint(): { evaluate(dispatcher: ToolDispatcher): Promise<ExecutorResult> } };
+}
+
 /** Executes code in an isolated V8 Worker via the Worker Loader binding. */
 class DynamicWorkerExecutor {
-  #loader: any;
+  #loader: WorkerLoaderBinding;
   #timeout: number;
 
-  constructor(options: { loader: unknown; timeout?: number }) {
+  constructor(options: { loader: WorkerLoaderBinding; timeout?: number }) {
     this.#loader = options.loader;
     this.#timeout = options.timeout ?? 30_000;
   }
@@ -100,7 +106,7 @@ class DynamicWorkerExecutor {
       "    const codemode = new Proxy({}, {",
       "      get: (_, toolName) => async (args) => {",
       "        const resJson = await dispatcher.call(String(toolName), JSON.stringify(args ?? {}));",
-      "        const data = JSON.parse(resJson);",
+      "        var data; try { data = JSON" + ".parse(resJson); } catch (e) { throw new Error('Failed to parse tool response: ' + e.message); }",
       "        if (data.error) throw new Error(data.error);",
       "        return data.result;",
       "      }",
@@ -159,7 +165,7 @@ export interface ExecuteToolOptions {
   apiFetch: ApiFetchFn;
   /** DO namespace for auto-staging large responses */
   doNamespace?: unknown;
-  /** Worker Loader binding for V8 isolate creation */
+  /** Worker Loader binding for V8 isolate creation (WorkerLoaderBinding) */
   loader: unknown;
   /** Byte threshold for auto-staging (default 100KB) */
   stagingThreshold?: number;
@@ -196,7 +202,7 @@ export function createExecuteTool(options: ExecuteToolOptions) {
     openApiSpec,
     apiFetch,
     doNamespace,
-    loader,
+    loader: rawLoader,
     stagingThreshold,
     timeout = 30_000,
     preamble,
@@ -205,6 +211,12 @@ export function createExecuteTool(options: ExecuteToolOptions) {
   if (!catalog && !openApiSpec) {
     throw new Error("createExecuteTool requires either 'catalog' or 'openApiSpec'");
   }
+
+  // Validate loader implements WorkerLoaderBinding
+  if (!rawLoader || typeof rawLoader !== "object" || !("get" in rawLoader) || typeof (rawLoader as WorkerLoaderBinding).get !== "function") {
+    throw new Error("createExecuteTool requires a valid Worker Loader binding");
+  }
+  const loader: WorkerLoaderBinding = rawLoader as WorkerLoaderBinding;
 
   const toolName = `${prefix}_execute`;
   const apiName = catalog?.name || openApiSpec?.info.title || prefix;
@@ -246,18 +258,44 @@ export function createExecuteTool(options: ExecuteToolOptions) {
     ? createQueryProxyTool({ doNamespace })
     : undefined;
 
+  // Build the __stage_proxy handler (only available if DO namespace exists)
+  const stageProxyTool = doNamespace
+    ? createStageProxyTool({ doNamespace, stagingPrefix: prefix })
+    : undefined;
+
+  // Stub ToolContext — proxy tools don't use sql, but the handler signature requires it
+  const stubCtx: ToolContext = {
+    sql: () => [],
+  };
+
+  /** Coerce executor args to the Record<string, unknown> that handlers expect. */
+  function toInput(args: unknown): Record<string, unknown> {
+    if (args !== null && typeof args === "object" && !Array.isArray(args)) {
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(args)) {
+        result[k] = v;
+      }
+      return result;
+    }
+    return {};
+  }
+
   // Build the function map for the executor
   const executorFns: ExecutorFns = {
     __api_proxy: async (args: unknown) => {
-      const input = (args ?? {}) as Record<string, unknown>;
-      return apiProxyTool.handler(input, {} as any);
+      return apiProxyTool.handler(toInput(args), stubCtx);
     },
     __query_proxy: async (args: unknown) => {
       if (!queryProxyTool) {
         return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
       }
-      const input = (args ?? {}) as Record<string, unknown>;
-      return queryProxyTool.handler(input, {} as any);
+      return queryProxyTool.handler(toInput(args), stubCtx);
+    },
+    __stage_proxy: async (args: unknown) => {
+      if (!stageProxyTool) {
+        return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
+      }
+      return stageProxyTool.handler(toInput(args), stubCtx);
     },
   };
 
@@ -270,7 +308,7 @@ export function createExecuteTool(options: ExecuteToolOptions) {
       `- api.get(path, params) — make GET requests (path params auto-interpolated from params object)\n` +
       `- api.post(path, body, params) — make POST requests\n` +
       searchDescription +
-      `- console.log() — output logging\n` +
+      `- console logging (log, warn, error, info) — captured output\n` +
       (preamble ? `\nDomain-specific helper functions are also available — see the catalog notes for details.\n` : "") +
       `\nUse ${prefix}_search first to discover endpoints, then write code here to call them.\n` +
       `The last expression or return value is the result.\n\n` +
@@ -285,6 +323,21 @@ export function createExecuteTool(options: ExecuteToolOptions) {
       `For advanced use: api.query(data_access_id, sql) and db.queryStaged(data_access_id, sql) are available to query staged data ` +
       `within the same execution (returns {results, row_count}, max 1000 rows, SELECT only). ` +
       `This is useful when you need to aggregate or filter staged data before returning.\n\n` +
+      `SCRATCHPAD: db.stage(data, tableName?) stages any array/object into SQLite and returns {data_access_id, tables_created, total_rows}. ` +
+      `Use this to persist computed or filtered results for SQL queries without re-entering the context window. ` +
+      `Example: const filtered = await api.query(id, "SELECT * WHERE score > 0.8"); const saved = await db.stage(filtered.results, "top_hits");\n\n` +
+      `TYPED STAGING: db.stage(data, { tableName, schema }) accepts schema hints to control SQL types and indexing:\n` +
+      `  const staged = await db.stage(myData, {\n` +
+      `    tableName: 'gene_scores',\n` +
+      `    schema: {\n` +
+      `      columnTypes: { score: 'REAL', chromosome: 'TEXT', is_significant: 'INTEGER' },\n` +
+      `      indexes: ['gene_symbol', 'score'],\n` +
+      `      compositeIndexes: [['gene_symbol', 'chromosome']],\n` +
+      `      exclude: ['internal_debug_field'],\n` +
+      `      skipChildTables: ['raw_annotations'],\n` +
+      `    }\n` +
+      `  });\n` +
+      `Schema hints override auto-inference. Available options: columnTypes (TEXT|INTEGER|REAL|JSON), indexes, compositeIndexes, exclude, skipChildTables, maxRecursionDepth.\n\n` +
       `IMPORTANT: Use limit/pagination params to keep responses small. If you need large datasets, let them auto-stage and return the staging info.` +
       notesSection,
     schema: {
@@ -342,12 +395,17 @@ export function createExecuteTool(options: ExecuteToolOptions) {
           // downstream clients can find data_access_id without digging into data.
           // Also strip large redundant fields (schema, _staging) to stay under
           // the 100KB structuredContent transport limit.
-          const resultObj = result.result as Record<string, unknown> | null | undefined;
-          const isStaged = resultObj && typeof resultObj === "object" && resultObj.__staged === true;
-          let responseData: unknown = result.result;
+          const raw = result.result;
+          const isStaged = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+            && "__staged" in raw && (raw as { __staged: unknown }).__staged === true;
+          let responseData: unknown = raw;
           const stagingMeta: Record<string, unknown> = {};
 
           if (isStaged) {
+            const resultObj: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(raw as object)) {
+              resultObj[k] = v;
+            }
             stagingMeta.staged = true;
             stagingMeta.data_access_id = resultObj.data_access_id;
             stagingMeta.tables_created = resultObj.tables_created;

@@ -5,7 +5,8 @@
  *   api.get(path, params)  — HTTP GET through server's fetch layer
  *   api.post(path, body, params) — HTTP POST
  *   api.query(dataAccessId, sql) — SQL query against staged data (alias for db.queryStaged)
- *   db.queryStaged(dataAccessId, sql) — SQL query against staged data (StorageContext design)
+ *   db.queryStaged(dataAccessId, sql) — SQL query against staged data
+ *   db.stage(data, tableName?) — stage arbitrary data into SQLite, returns { data_access_id, ... }
  *
  * API keys never enter the isolate — all HTTP goes through the host's apiFetch.
  *
@@ -41,6 +42,32 @@ function __wrapStaged(raw) {
       return target[prop];
     }
   });
+}
+
+/**
+ * Stage arbitrary data into SQLite. Returns staging metadata with data_access_id.
+ * @param data - Array of objects or single object to stage
+ * @param tableNameOrOptions - String table name (legacy) or options object with schema hints
+ */
+async function __stageData(data, tableNameOrOptions) {
+  if (data === undefined || data === null) throw new Error("db.stage() requires data (array or object)");
+  var tableName;
+  var schemaHints;
+  if (typeof tableNameOrOptions === "string") {
+    tableName = tableNameOrOptions;
+  } else if (tableNameOrOptions && typeof tableNameOrOptions === "object") {
+    tableName = tableNameOrOptions.tableName;
+    schemaHints = tableNameOrOptions.schema || undefined;
+  }
+  var result = await codemode.__stage_proxy({
+    data: data,
+    table_name: tableName || undefined,
+    schema_hints: schemaHints || undefined,
+  });
+  if (result && result.__stage_error) {
+    throw new Error("Staging failed: " + (result.message || "Unknown error"));
+  }
+  return result;
 }
 
 /** Query staged data via SQL. Shared implementation for api.query and db.queryStaged. */
@@ -148,6 +175,41 @@ var db = {
    */
   queryStaged: function(dataAccessId, sql) {
     return __queryStaged(dataAccessId, sql);
+  },
+
+  /**
+   * Stage arbitrary data into SQLite. Use this to persist computed/filtered
+   * results so they can be queried with SQL without re-entering the context window.
+   *
+   * Simple usage (table name only):
+   *   const staged = await db.stage(filtered.results, 'high_confidence');
+   *
+   * With schema hints (control column types, indexes, etc.):
+   *   const staged = await db.stage(myData, {
+   *     tableName: 'gene_scores',
+   *     schema: {
+   *       columnTypes: { score: 'REAL', chromosome: 'TEXT' },
+   *       indexes: ['gene_symbol', 'score'],
+   *       compositeIndexes: [['gene_symbol', 'chromosome']],
+   *       exclude: ['internal_id'],
+   *       skipChildTables: ['raw_annotations'],
+   *     }
+   *   });
+   *
+   * Schema hint options:
+   *   - columnTypes: { colName: 'TEXT'|'INTEGER'|'REAL'|'JSON' } — override inferred types
+   *   - indexes: ['col1', 'col2'] — add single-column indexes
+   *   - compositeIndexes: [['col1', 'col2']] — add multi-column indexes
+   *   - exclude: ['col'] — exclude columns from the table
+   *   - skipChildTables: ['col'] — keep array-of-objects columns as JSON instead of child tables
+   *   - maxRecursionDepth: 1 — limit child table nesting depth (default 2)
+   *
+   * @param data - Array of objects or single object to stage
+   * @param tableNameOrOptions - String table name, or { tableName?, schema? } options
+   * @returns { data_access_id, tables_created, total_rows, schema }
+   */
+  stage: function(data, tableNameOrOptions) {
+    return __stageData(data, tableNameOrOptions);
   },
 };
 // --- End API proxy helpers ---
