@@ -12,7 +12,7 @@ import type { ToolEntry } from "../registry/types";
 import type { ApiCatalog, ApiFetchFn } from "../codemode/catalog";
 import type { ResolvedSpec } from "../codemode/openapi-resolver";
 import type { SchemaHints } from "../staging/schema-inference";
-import { shouldStage, stageToDoAndRespond, queryDataFromDo } from "../staging/utils";
+import { shouldStage, stageToDoAndRespond, queryDataFromDo, type StageResult } from "../staging/utils";
 
 // ---------------------------------------------------------------------------
 // Interfaces for untyped/loosely-typed structures used in this module
@@ -100,6 +100,31 @@ function preserveEnvelopeScalars(
 			// Skip non-serializable values
 		}
 	}
+}
+
+/**
+ * Build a human-readable summary of staged tables for the message field.
+ * Example: "2 tables: transcript [10 rows], transcript_Exon [271 rows]"
+ */
+function buildStagedTableSummary(staged: StageResult): string {
+	const tables = staged.tablesCreated;
+	const rowCounts = staged._staging?.table_row_counts as
+		| Record<string, number>
+		| undefined;
+	if (!tables || tables.length === 0) {
+		return `${staged.totalRows ?? 0} rows`;
+	}
+	if (tables.length === 1) {
+		const rows = rowCounts?.[tables[0]] ?? staged.totalRows ?? 0;
+		return `table "${tables[0]}" [${rows} rows]`;
+	}
+	const details = tables
+		.map((t) => {
+			const rows = rowCounts?.[t];
+			return rows !== undefined ? `${t} [${rows}]` : t;
+		})
+		.join(", ");
+	return `${tables.length} tables: ${details}`;
 }
 
 type DriftHintKind =
@@ -468,6 +493,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						undefined,
 						stagingPrefix,
 					);
+					const tableDetail = buildStagedTableSummary(staged);
 					const response: Record<string, unknown> = {
 						__staged: true,
 						data_access_id: staged.dataAccessId,
@@ -475,7 +501,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						tables_created: staged.tablesCreated,
 						total_rows: staged.totalRows,
 						_staging: staged._staging,
-						message: `Response auto-staged (${(responseBytes / 1024).toFixed(1)}KB). Use query() or the query_data tool with data_access_id="${staged.dataAccessId}" to explore the data.`,
+						message: `Response auto-staged (${(responseBytes / 1024).toFixed(1)}KB → ${tableDetail}). Use api.query("${staged.dataAccessId}", sql) in-band, or return this object for the caller to use the query_data tool.`,
 					};
 
 					preserveEnvelopeScalars(result.data, response);
