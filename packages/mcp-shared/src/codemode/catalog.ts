@@ -35,6 +35,8 @@ export interface ApiEndpoint {
 	coveredByTool?: string;
 	/** Marks the endpoint as deprecated/discontinued — AI should avoid using it */
 	deprecated?: boolean;
+	/** Prioritize this endpoint for inclusion in the execute tool description summary */
+	featured?: boolean;
 }
 
 /** A multi-step recipe combining several API endpoints into a reusable workflow. */

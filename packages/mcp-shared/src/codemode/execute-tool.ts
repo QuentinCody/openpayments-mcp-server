@@ -23,6 +23,7 @@ import { buildApiProxySource } from "./api-proxy";
 import { createApiProxyTool, createQueryProxyTool, createStageProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
 import type { ToolContext } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
+import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
 
 // ---------------------------------------------------------------------------
 // Inlined from @cloudflare/codemode v0.1.1 — avoids bundling zod-to-ts →
@@ -242,6 +243,13 @@ export function createExecuteTool(options: ExecuteToolOptions) {
       `- listCategories() — list endpoint categories\n` +
       `- getEndpoint(path) — get full endpoint docs\n`;
 
+  // Generate compact API reference for the tool description
+  const apiSummary = openApiSpec
+    ? specToTypeScript(openApiSpec)
+    : catalog
+      ? catalogToTypeScript(catalog)
+      : "";
+
   // Create the __api_proxy handler
   const apiProxyToolOpts: ApiProxyToolOptions = {
     apiFetch,
@@ -310,8 +318,8 @@ export function createExecuteTool(options: ExecuteToolOptions) {
       searchDescription +
       `- console logging (log, warn, error, info) — captured output\n` +
       (preamble ? `\nDomain-specific helper functions are also available — see the catalog notes for details.\n` : "") +
-      `\nUse ${prefix}_search first to discover endpoints, then write code here to call them.\n` +
-      `The last expression or return value is the result.\n\n` +
+      `\nThe last expression or return value is the result.\n` +
+      (apiSummary ? `\n${apiSummary}\n\n` : `\nUse ${prefix}_search to discover endpoints, then write code here to call them.\n\n`) +
       `STAGING: Large responses (>30KB) are auto-staged into SQLite. When this happens, ` +
       `api.get/api.post returns {__staged: true, data_access_id, schema, tables_created, total_rows, message}. ` +
       `Scalar properties from the original response (.count, .total, .meta) are preserved on the staged object.\n\n` +
