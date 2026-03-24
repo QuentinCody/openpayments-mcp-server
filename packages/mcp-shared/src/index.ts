@@ -40,12 +40,15 @@ export {
 	detectArrays,
 	inferSchema,
 	materializeSchema,
+	computeColumnProfiles,
 	type SchemaHints,
 	type InferredColumn,
 	type InferredTable,
 	type InferredSchema,
 	type MaterializationResult,
 	type MaterializationWarning,
+	type ColumnProfile,
+	type TableProfile,
 } from "./staging/schema-inference";
 export { RestStagingDO } from "./staging/rest-staging-do";
 export {

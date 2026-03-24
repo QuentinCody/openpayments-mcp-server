@@ -37,6 +37,8 @@ interface QueryResponse {
 	results?: unknown[];
 	row_count?: number;
 	error?: string;
+	truncated?: boolean;
+	total_matching?: number;
 }
 
 interface ListDataset {
@@ -254,7 +256,7 @@ export async function queryDataFromDo(
 		new Request("http://localhost/query", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ sql: finalSql }),
+			body: JSON.stringify({ sql: finalSql, count_total: true }),
 		}),
 	);
 
@@ -267,6 +269,8 @@ export async function queryDataFromDo(
 	return {
 		rows: result.results ?? [],
 		row_count: result.row_count ?? (result.results?.length ?? 0),
+		...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+		...(result.total_matching !== undefined ? { total_matching: result.total_matching } : {}),
 		sql: finalSql,
 		data_access_id: dataAccessId,
 		executed_at: new Date().toISOString(),
@@ -339,10 +343,13 @@ export function createQueryDataHandler(
 			if (!sql) throw new Error("sql is required");
 
 			const result = await queryDataFromDo(doNamespace, dataAccessId, sql, limit);
+			const queryResult = result as Record<string, unknown>;
 			return createCodeModeResponse(result, {
 				meta: {
 					data_access_id: result.data_access_id,
 					row_count: result.row_count,
+					...(queryResult.truncated !== undefined ? { truncated: queryResult.truncated } : {}),
+					...(queryResult.total_matching !== undefined ? { total_matching: queryResult.total_matching } : {}),
 					executed_at: result.executed_at,
 				},
 			});

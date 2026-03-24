@@ -627,9 +627,12 @@ export function createQueryProxyTool(options: QueryProxyToolOptions): ToolEntry 
 					sql,
 					1000,
 				);
+				const queryResult = result as Record<string, unknown>;
 				return {
 					rows: result.rows,
 					row_count: result.row_count,
+					...(queryResult.truncated !== undefined ? { truncated: queryResult.truncated } : {}),
+					...(queryResult.total_matching !== undefined ? { total_matching: queryResult.total_matching } : {}),
 					sql: result.sql,
 					data_access_id: result.data_access_id,
 				};

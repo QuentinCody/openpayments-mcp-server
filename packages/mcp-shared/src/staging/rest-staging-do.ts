@@ -16,8 +16,10 @@ import {
 	detectArrays,
 	inferSchema,
 	materializeSchema,
+	computeColumnProfiles,
 	type InferredSchema,
 	type SchemaHints,
+	type TableProfile,
 } from "./schema-inference";
 import { stageData } from "./staging-engine";
 import type { DomainConfig, StagingContext, StagingHints } from "./types";
@@ -40,6 +42,8 @@ interface ProcessRequestBody {
 
 interface SqlQueryBody {
 	sql: string;
+	/** When true, also runs a COUNT(*) wrapper to report total matching rows */
+	count_total?: boolean;
 }
 
 interface RegisterRequestBody {
@@ -134,6 +138,12 @@ function deduplicateCompositeIndexes(indexes: string[][]): string[][] {
 		}
 	}
 	return result;
+}
+
+/** Strip LIMIT/OFFSET clause from a SQL query for COUNT(*) wrapping. */
+function stripLimit(sql: string): string {
+	// Remove trailing LIMIT n [OFFSET m] — case-insensitive
+	return sql.replace(/\s+LIMIT\s+\d+(\s+OFFSET\s+\d+)?\s*$/i, "");
 }
 
 /** Safely parse JSON, returning undefined on failure. */
@@ -296,6 +306,28 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	/**
+	 * Compute and persist column profiles after materialization.
+	 * Profiles are stored in _column_profiles so handleSchema() can include them.
+	 */
+	private persistColumnProfiles(schema: InferredSchema): void {
+		try {
+			const profiles = computeColumnProfiles(schema, this.ctx.storage.sql);
+			this.ctx.storage.sql.exec(
+				`CREATE TABLE IF NOT EXISTS _column_profiles (
+					id INTEGER PRIMARY KEY,
+					profiles_json TEXT
+				)`,
+			);
+			this.ctx.storage.sql.exec(
+				`INSERT OR REPLACE INTO _column_profiles (id, profiles_json) VALUES (1, ?)`,
+				JSON.stringify(profiles),
+			);
+		} catch {
+			// Non-critical — schema still works without profiles
+		}
+	}
+
+	/**
 	 * Extract parent→child relationships from an InferredSchema.
 	 */
 	private extractRelationships(schema: InferredSchema): TableRelationship[] {
@@ -360,6 +392,8 @@ export class RestStagingDO extends DurableObject {
 
 			// Persist inferred schema for enriched handleSchema() output
 			this.persistInferredSchema(schema);
+			// Compute and persist column profiles after schema inference
+			// (must come after materializeSchema — we do it below)
 
 			const rowsMap = new Map<string, unknown[]>();
 			for (const arr of arrays) {
@@ -385,6 +419,9 @@ export class RestStagingDO extends DurableObject {
 				result.failedRows,
 				result.warnings,
 			);
+
+			// Compute and persist column profiles (runs SQL against the just-populated tables)
+			this.persistColumnProfiles(schema);
 
 			// Extract relationships from schema
 			const relationships = this.extractRelationships(schema);
@@ -452,10 +489,30 @@ export class RestStagingDO extends DurableObject {
 		const body: SqlQueryBody = (raw !== null && typeof raw === "object" ? raw : { sql: "" }) as SqlQueryBody;
 		const res = this.ctx.storage.sql.exec(body.sql);
 		const results = res.toArray();
+
+		// If count_total requested, run a COUNT(*) wrapper to determine total matching rows
+		let totalMatching: number | undefined;
+		let truncated: boolean | undefined;
+		if (body.count_total) {
+			try {
+				// Wrap the user's query (with LIMIT stripped) in a COUNT(*)
+				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
+				const countResult = this.ctx.storage.sql.exec(countSql).one();
+				totalMatching = Number((countResult as { c: number })?.c ?? results.length);
+				truncated = totalMatching > results.length;
+			} catch {
+				// If COUNT wrapper fails (e.g. complex CTEs), just report based on results
+				truncated = undefined;
+				totalMatching = undefined;
+			}
+		}
+
 		return this.jsonResponse({
 			success: true,
 			results,
 			row_count: results.length,
+			...(truncated !== undefined ? { truncated } : {}),
+			...(totalMatching !== undefined ? { total_matching: totalMatching } : {}),
 		});
 	}
 
@@ -485,10 +542,28 @@ export class RestStagingDO extends DurableObject {
 			}
 			enhanced.push(out);
 		}
+
+		// Truncation support for enhanced queries
+		let totalMatching: number | undefined;
+		let truncated: boolean | undefined;
+		if (body.count_total) {
+			try {
+				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
+				const countResult = this.ctx.storage.sql.exec(countSql).one();
+				totalMatching = Number((countResult as { c: number })?.c ?? enhanced.length);
+				truncated = totalMatching > enhanced.length;
+			} catch {
+				truncated = undefined;
+				totalMatching = undefined;
+			}
+		}
+
 		return this.jsonResponse({
 			success: true,
 			results: enhanced,
 			row_count: enhanced.length,
+			...(truncated !== undefined ? { truncated } : {}),
+			...(totalMatching !== undefined ? { total_matching: totalMatching } : {}),
 		});
 	}
 
@@ -543,9 +618,35 @@ export class RestStagingDO extends DurableObject {
 			}
 		}
 
+		// Load persisted column profiles
+		let columnProfiles: TableProfile[] | undefined;
+		try {
+			const profileResults = this.ctx.storage.sql
+				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_column_profiles'`)
+				.toArray();
+			if (profileResults.length > 0) {
+				const profileRow = this.ctx.storage.sql
+					.exec(`SELECT profiles_json FROM _column_profiles WHERE id = 1`)
+					.one() as { profiles_json: string } | undefined;
+				if (profileRow?.profiles_json) {
+					columnProfiles = JSON.parse(profileRow.profiles_json) as TableProfile[];
+				}
+			}
+		} catch {
+			// Non-critical
+		}
+
+		// Build profile lookup: tableName → { colName → ColumnProfile }
+		const profileByTable = new Map<string, Record<string, unknown>>();
+		if (columnProfiles) {
+			for (const tp of columnProfiles) {
+				profileByTable.set(tp.table, tp.columns as unknown as Record<string, unknown>);
+			}
+		}
+
 		const tableResults = this.ctx.storage.sql
 			.exec(
-				`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_staging_%' AND name != '_inferred_schema'`,
+				`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_staging_%' AND name NOT IN ('_inferred_schema', '_column_profiles')`,
 			)
 			.toArray();
 
@@ -565,6 +666,8 @@ export class RestStagingDO extends DurableObject {
 				columns: columnResults.map((col: Record<string, unknown>) => {
 					const colName = col.name as string;
 					const meta = columnMeta.get(`${tableName}.${colName}`);
+					const tableProfiles = profileByTable.get(tableName) as Record<string, Record<string, unknown>> | undefined;
+					const colProfile = tableProfiles?.[colName];
 					return {
 						name: colName,
 						type: col.type as string,
@@ -572,6 +675,7 @@ export class RestStagingDO extends DurableObject {
 						primary_key: col.pk === 1,
 						...(meta?.jsonShape ? { json_shape: meta.jsonShape } : {}),
 						...(meta?.pipeDelimited ? { searchable_array: true } : {}),
+						...(colProfile ? { profile: colProfile } : {}),
 					};
 				}),
 			};
