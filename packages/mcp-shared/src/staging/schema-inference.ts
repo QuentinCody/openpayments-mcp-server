@@ -164,8 +164,8 @@ export function flattenObject(
 	obj: Record<string, unknown>,
 	maxDepth: number,
 	depthOverrides?: Record<string, number>,
-	prefix = "",
-	currentDepth = 0,
+	prefix: string = "",
+	currentDepth: number = 0,
 ): Record<string, unknown> {
 	const result: Record<string, unknown> = {};
 
@@ -291,9 +291,11 @@ function buildJsonShape(values: unknown[]): string | undefined {
 	for (const obj of objectValues.slice(0, 10)) {
 		for (const [k, v] of Object.entries(obj)) {
 			if (!keyTypes.has(k)) keyTypes.set(k, new Set());
-			if (v === null || v === undefined) keyTypes.get(k)!.add("null");
-			else if (Array.isArray(v)) keyTypes.get(k)!.add("array");
-			else keyTypes.get(k)!.add(typeof v);
+			const types = keyTypes.get(k);
+			if (!types) continue;
+			if (v === null || v === undefined) types.add("null");
+			else if (Array.isArray(v)) types.add("array");
+			else types.add(typeof v);
 		}
 	}
 
@@ -352,8 +354,9 @@ function inferChildTableSchema(
 	const columnValues = new Map<string, unknown[]>();
 	for (const flat of flatItems) {
 		for (const [col, val] of Object.entries(flat)) {
-			if (!columnValues.has(col)) columnValues.set(col, []);
-			columnValues.get(col)!.push(val);
+			let arr = columnValues.get(col);
+			if (!arr) { arr = []; columnValues.set(col, arr); }
+			arr.push(val);
 		}
 	}
 
@@ -460,8 +463,9 @@ export function inferSchema(
 		for (const row of flattenedSample) {
 			for (const [col, val] of Object.entries(row)) {
 				if (exclude.has(col)) continue;
-				if (!columnValues.has(col)) columnValues.set(col, []);
-				columnValues.get(col)!.push(val);
+				let arr = columnValues.get(col);
+				if (!arr) { arr = []; columnValues.set(col, arr); }
+				arr.push(val);
 			}
 		}
 
@@ -483,7 +487,7 @@ export function inferSchema(
 					}
 					// Collect values only for newly discovered columns
 					if (newColumns.has(col)) {
-						columnValues.get(col)!.push(val);
+						columnValues.get(col)?.push(val);
 					}
 				}
 			}
@@ -876,9 +880,11 @@ export function materializeSchema(
 	// Build child tables index: parentName → immediate children
 	const childTablesByParent = new Map<string, InferredTable[]>();
 	for (const ct of schema.tables.filter((t) => t.childOf)) {
-		const parentName = ct.childOf!.parentTable;
-		if (!childTablesByParent.has(parentName)) childTablesByParent.set(parentName, []);
-		childTablesByParent.get(parentName)!.push(ct);
+		const parentName = ct.childOf?.parentTable;
+		if (!parentName) continue;
+		let children = childTablesByParent.get(parentName);
+		if (!children) { children = []; childTablesByParent.set(parentName, children); }
+		children.push(ct);
 	}
 
 	/**
@@ -921,10 +927,11 @@ export function materializeSchema(
 
 			// Capture child array data before inserting
 			for (const ct of myChildTables) {
-				const sourceCol = ct.childOf!.sourceColumn;
+				const sourceCol = ct.childOf?.sourceColumn;
+				if (!sourceCol) continue;
 				const arr = (flat as Record<string, unknown>)[sourceCol];
 				if (Array.isArray(arr) && arr.length > 0) {
-					capturedChildData.get(ct.name)!.push({ parentIndex: i, items: arr });
+					capturedChildData.get(ct.name)?.push({ parentIndex: i, items: arr });
 				}
 			}
 
@@ -997,10 +1004,11 @@ export function materializeSchema(
 
 				// Capture grandchild array data before inserting child
 				for (const gct of myGrandchildTables) {
-					const sourceCol = gct.childOf!.sourceColumn;
+					const sourceCol = gct.childOf?.sourceColumn;
+					if (!sourceCol) continue;
 					const arr = (childFlat as Record<string, unknown>)[sourceCol];
 					if (Array.isArray(arr) && arr.length > 0) {
-						capturedGrandchildData.get(gct.name)!.push({ parentIndex: childRowIndex, items: arr });
+						capturedGrandchildData.get(gct.name)?.push({ parentIndex: childRowIndex, items: arr });
 					}
 				}
 

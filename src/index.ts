@@ -14,7 +14,7 @@ interface OpenPaymentsEnv {
 }
 
 export class MyMCP extends McpAgent {
-    server: any = new McpServer({
+    server = new McpServer({
         name: "openpayments",
         version: "0.1.0",
     });

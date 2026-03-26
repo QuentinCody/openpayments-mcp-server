@@ -51,11 +51,21 @@ export class ChunkingEngine {
 	}
 
 	async smartJsonParse(value: string, sql: SqlExec): Promise<unknown> {
-		if (!this.isContentReference(value)) return JSON.parse(value);
+		if (!this.isContentReference(value)) {
+			try {
+				return JSON.parse(value);
+			} catch {
+				throw new Error(`Failed to parse JSON value (${value.length} chars)`);
+			}
+		}
 		const id = this.extractContentId(value);
 		const content = await this.retrieveChunkedContent(id, sql);
 		if (content == null) throw new Error(`Missing chunked content ${id}`);
-		return JSON.parse(content);
+		try {
+			return JSON.parse(content);
+		} catch {
+			throw new Error(`Failed to parse stored chunked content ${id} (${content.length} chars)`);
+		}
 	}
 
 	private generateContentId(): string {
@@ -70,7 +80,7 @@ export class ChunkingEngine {
 		return chunks;
 	}
 
-	private ensureTables(sql: SqlExec) {
+	private ensureTables(sql: SqlExec): void {
 		sql.exec(`
 			CREATE TABLE IF NOT EXISTS content_chunks (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,

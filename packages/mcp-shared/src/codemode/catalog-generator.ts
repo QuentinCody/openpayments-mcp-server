@@ -806,7 +806,7 @@ export function applyOverrides(
 		endpoints = endpoints
 			.map((ep) => {
 				const key = `${ep.method} ${ep.path}`;
-				const override = overrides.endpoints![key];
+				const override = overrides.endpoints?.[key];
 				if (!override) return ep;
 				matchedKeys.add(key);
 				if (override.exclude) {

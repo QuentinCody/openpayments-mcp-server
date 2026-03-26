@@ -47,6 +47,13 @@ export interface SearchToolOptions {
 	openApiSpec?: ResolvedSpec;
 }
 
+export interface SearchToolResult {
+	name: string;
+	description: string;
+	schema: Record<string, z.ZodType>;
+	register: (server: { tool: (...args: unknown[]) => void }) => void;
+}
+
 /**
  * Token-based search over catalog endpoints.
  */
@@ -169,7 +176,12 @@ function formatOperation(op: OpenApiOperation): string {
  */
 function createOpenApiHelpers(specJson: string) {
 	const HTTP_METHODS = ["get", "post", "put", "delete", "patch", "options", "head", "trace"];
-	const spec = Object.freeze(JSON.parse(specJson)) as ResolvedSpec;
+	let spec: ResolvedSpec;
+	try {
+		spec = Object.freeze(JSON.parse(specJson)) as ResolvedSpec;
+	} catch (e) {
+		throw new Error(`Failed to parse OpenAPI spec JSON for search tool: ${e instanceof Error ? e.message : e}`);
+	}
 
 	function collectOperations(): OpenApiOperation[] {
 		const ops: OpenApiOperation[] = [];
@@ -1301,7 +1313,7 @@ function executeSearchCode(code: string, helpers: OpenApiHelpers, specJson: stri
  * with the full resolved OpenAPI spec and helper functions (searchPaths,
  * listTags, getOperation, describeOperation) available.
  */
-function createOpenApiSearchTool(prefix: string, spec: ResolvedSpec) {
+function createOpenApiSearchTool(prefix: string, spec: ResolvedSpec): SearchToolResult {
 	const toolName = `${prefix}_search`;
 	const operationCount = countSpecOperations(spec);
 	const specJson = JSON.stringify(spec);
@@ -1458,7 +1470,7 @@ function createOpenApiSearchTool(prefix: string, spec: ResolvedSpec) {
  * The tool accepts query/category/max_results parameters and performs
  * keyword-based search over the static ApiCatalog.
  */
-function createCatalogSearchTool(prefix: string, catalog: ApiCatalog) {
+function createCatalogSearchTool(prefix: string, catalog: ApiCatalog): SearchToolResult {
 	const toolName = `${prefix}_search`;
 
 	// Collect categories for the description
@@ -1511,7 +1523,7 @@ function createCatalogSearchTool(prefix: string, catalog: ApiCatalog) {
 					// Filter by category if specified
 					if (input.category) {
 						endpoints = endpoints.filter(
-							(ep) => ep.category.toLowerCase() === input.category!.toLowerCase(),
+							(ep) => ep.category.toLowerCase() === input.category?.toLowerCase(),
 						);
 					}
 
@@ -1569,7 +1581,7 @@ function createCatalogSearchTool(prefix: string, catalog: ApiCatalog) {
  * When `openApiSpec` is provided, creates a code-execution search tool.
  * When only `catalog` is provided, creates a keyword search tool (legacy).
  */
-export function createSearchTool(options: SearchToolOptions) {
+export function createSearchTool(options: SearchToolOptions): SearchToolResult {
 	const { prefix, catalog, openApiSpec } = options;
 
 	if (openApiSpec) {

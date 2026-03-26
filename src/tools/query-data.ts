@@ -6,7 +6,7 @@ interface QueryEnv {
     OPENPAYMENTS_DATA_DO?: unknown;
 }
 
-export function registerQueryData(server: McpServer, env?: QueryEnv) {
+export function registerQueryData(server: McpServer, env?: QueryEnv): void {
     const handler = createQueryDataHandler("OPENPAYMENTS_DATA_DO", "openpay");
 
     server.registerTool(

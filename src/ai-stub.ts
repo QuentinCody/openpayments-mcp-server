@@ -1,3 +1,3 @@
-export function jsonSchema() {
+export function jsonSchema(): unknown {
 	return {};
 }

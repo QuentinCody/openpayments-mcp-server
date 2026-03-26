@@ -21,7 +21,7 @@ import type { ResolvedSpec } from "./openapi-resolver";
 import { buildOpenApiSearchSource } from "./openapi-search";
 import { buildApiProxySource } from "./api-proxy";
 import { createApiProxyTool, createQueryProxyTool, createStageProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
-import type { ToolContext } from "../registry/types";
+import type { ToolContext, ToolEntry } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
 import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
 
@@ -193,10 +193,18 @@ ${userCode}
 }`;
 }
 
+export interface ExecuteToolResult {
+  name: string;
+  apiProxyTool: ToolEntry;
+  description: string;
+  schema: { code: z.ZodString };
+  register: (server: { tool: (...args: unknown[]) => void }) => void;
+}
+
 /**
  * Create an execute tool registration object.
  */
-export function createExecuteTool(options: ExecuteToolOptions) {
+export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResult {
   const {
     prefix,
     catalog,
@@ -228,7 +236,7 @@ export function createExecuteTool(options: ExecuteToolOptions) {
           ["get", "post", "put", "delete", "patch", "options", "head", "trace"].includes(method),
         ).length;
       }, 0)
-    : catalog!.endpointCount;
+    : catalog?.endpointCount ?? 0;
   const searchSource = openApiSpec
     ? buildOpenApiSearchSource(JSON.stringify(openApiSpec))
     : buildCatalogSearchSource(JSON.stringify(catalog));

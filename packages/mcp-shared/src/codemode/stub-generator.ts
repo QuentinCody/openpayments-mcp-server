@@ -201,8 +201,8 @@ function generateCatalogQuickRef(catalog: ApiCatalog, max: number, prefix: strin
 			if (!a.coveredByTool && b.coveredByTool) return -1;
 			if (a.coveredByTool && !b.coveredByTool) return 1;
 			// More required params = more useful to show
-			const aReq = (a.pathParams?.length || 0) + (a.queryParams?.filter(p => p.required).length || 0);
-			const bReq = (b.pathParams?.length || 0) + (b.queryParams?.filter(p => p.required).length || 0);
+			const aReq = (a.pathParams?.length ?? 0) + (a.queryParams?.filter(p => p.required).length ?? 0);
+			const bReq = (b.pathParams?.length ?? 0) + (b.queryParams?.filter(p => p.required).length ?? 0);
 			return bReq - aReq;
 		})
 		.slice(0, max);
@@ -274,7 +274,7 @@ function formatParamType(p: ParamDef): string {
  */
 function formatOpenApiParamType(p: OpenApiParameter): string {
 	if (p.schema?.enum && p.schema.enum.length > 0) {
-		const vals = (p.schema.enum as unknown[]).slice(0, 5).map(v => JSON.stringify(v));
+		const vals = p.schema.enum.slice(0, 5).map(v => JSON.stringify(v));
 		if (p.schema.enum.length > 5) vals.push("...");
 		return vals.join(" | ");
 	}

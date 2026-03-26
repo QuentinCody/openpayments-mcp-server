@@ -5,6 +5,9 @@
 import {
 	createCodeModeResponse,
 	createCodeModeError,
+	type CodeModeResponse,
+	type SuccessResponse,
+	type ErrorResponse,
 } from "../codemode/response";
 import type { SchemaHints } from "./schema-inference";
 import { buildStagingMetadata, type StagingMetadata, type TableRelationship } from "./staging-metadata";
@@ -212,7 +215,15 @@ export async function queryDataFromDo(
 	dataAccessId: string,
 	sql: string,
 	limit = 100,
-) {
+): Promise<{
+	rows: unknown[];
+	row_count: number;
+	truncated?: boolean;
+	total_matching?: number;
+	sql: string;
+	data_access_id: string;
+	executed_at: string;
+}> {
 	// SQL safety validation
 	const sanitizedSql = sql.replace(/--.*$/gm, "").trim();
 
@@ -283,7 +294,11 @@ export async function queryDataFromDo(
 export async function getSchemaFromDo(
 	doNamespace: DurableObjectNamespace,
 	dataAccessId: string,
-) {
+): Promise<{
+	data_access_id: string;
+	schema: unknown;
+	retrieved_at: string;
+}> {
 	const doId = doNamespace.idFromName(dataAccessId);
 	const doInstance = doNamespace.get(doId);
 
@@ -321,7 +336,7 @@ export async function getSchemaFromDo(
 export function createQueryDataHandler(
 	doBindingName: string,
 	toolPrefix: string,
-) {
+): (args: Record<string, unknown>, env: Record<string, unknown>) => Promise<CodeModeResponse<SuccessResponse<unknown>> | CodeModeResponse<ErrorResponse>> {
 	return async (
 		args: Record<string, unknown>,
 		env: Record<string, unknown>,
@@ -373,7 +388,7 @@ export function createQueryDataHandler(
 export function createGetSchemaHandler(
 	doBindingName: string,
 	toolPrefix: string,
-) {
+): (args: Record<string, unknown>, env: Record<string, unknown>, sessionId?: string) => Promise<CodeModeResponse<SuccessResponse<unknown>> | CodeModeResponse<ErrorResponse>> {
 	return async (
 		args: Record<string, unknown>,
 		env: Record<string, unknown>,

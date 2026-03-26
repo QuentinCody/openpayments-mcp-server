@@ -129,7 +129,7 @@ export function withCodeMode<TArgs, TResult>(
 		transformResult?: (result: TResult) => unknown;
 		extractMeta?: (result: TResult) => Record<string, unknown>;
 	},
-) {
+): (args: TArgs, env?: unknown) => Promise<CodeModeResponse<StructuredResponse>> {
 	return async (
 		args: TArgs,
 		env?: unknown,

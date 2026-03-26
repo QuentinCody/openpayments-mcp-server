@@ -29,7 +29,7 @@ export class ToolRegistry {
 	/**
 	 * Add tool entries to the registry.
 	 */
-	add(...entries: ToolEntry[]) {
+	add(...entries: ToolEntry[]): void {
 		this.tools.push(...entries);
 		for (const entry of entries) {
 			this.toolByName.set(entry.name, entry);
@@ -41,7 +41,7 @@ export class ToolRegistry {
 	 * Wraps each handler to produce MCP-formatted responses.
 	 * Hidden tools are skipped — they're only callable from V8 isolates.
 	 */
-	registerAll(server: McpServer) {
+	registerAll(server: McpServer): void {
 		for (const tool of this.tools) {
 			if (tool.hidden) continue;
 			const ctx = this.ctx;

@@ -12,6 +12,11 @@
  * since V8 isolates don't allow eval/new Function by default.
  */
 
+/** The entrypoint shape returned by Worker Loader for our generated module. */
+interface CodeModeWorkerEntrypoint {
+	evaluate(): Promise<unknown>;
+}
+
 const MODULE_SOURCE_PREFIX = [
 	'import { WorkerEntrypoint } from "cloudflare:workers";',
 	"",
@@ -85,7 +90,7 @@ export function createEvaluator(
 		proxy: Fetcher;
 		doId: string;
 	}
-) {
+): () => Promise<unknown> {
 	// Static boilerplate is precomputed once at module load; only doId and user code vary.
 	const moduleSource =
 		MODULE_SOURCE_PREFIX +
@@ -110,7 +115,7 @@ export function createEvaluator(
 			};
 		});
 
-		// @ts-expect-error Worker Loader types not fully typed
-		return await worker.getEntrypoint().evaluate();
+		const entrypoint: CodeModeWorkerEntrypoint = worker.getEntrypoint() as CodeModeWorkerEntrypoint;
+		return await entrypoint.evaluate();
 	};
 }

@@ -87,7 +87,7 @@ function zodToTypeString(schema: unknown): string {
 		}
 		case "object": {
 			const shape = (def as { shape?: Record<string, unknown> }).shape;
-			if (!shape || typeof shape !== "object") return "Record<string, any>";
+			if (!shape || typeof shape !== "object") return "Record<string, unknown>";
 			const entries = Object.entries(shape);
 			if (entries.length === 0) return "{}";
 			const fields = entries.map(([key, val]) => {
