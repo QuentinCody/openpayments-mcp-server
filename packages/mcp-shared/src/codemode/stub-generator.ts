@@ -61,9 +61,9 @@ function placeholderFromParam(p: ParamDef): string {
  */
 function placeholderFromOpenApiParam(p: OpenApiParameter): string {
 	if (p.example !== undefined) return JSON.stringify(p.example);
-	if (p.schema?.example !== undefined) return JSON.stringify(p.schema.example);
-	if (p.schema?.default !== undefined) return JSON.stringify(p.schema.default);
-	if (p.schema?.enum && p.schema.enum.length > 0) return JSON.stringify(p.schema.enum[0]);
+	if (p.schema?.example !== undefined) return JSON.stringify(p.schema?.example);
+	if (p.schema?.default !== undefined) return JSON.stringify(p.schema?.default);
+	if (p.schema?.enum && p.schema?.enum.length > 0) return JSON.stringify(p.schema?.enum[0]);
 
 	const desc = p.description || "";
 	const egMatch = desc.match(/(?:e\.g\.?,?\s*|for example,?\s*)["']?([^"'\s,)]+)/i);
@@ -201,8 +201,8 @@ function generateCatalogQuickRef(catalog: ApiCatalog, max: number, prefix: strin
 			if (!a.coveredByTool && b.coveredByTool) return -1;
 			if (a.coveredByTool && !b.coveredByTool) return 1;
 			// More required params = more useful to show
-			const aReq = (a.pathParams?.length ?? 0) + (a.queryParams?.filter(p => p.required).length ?? 0);
-			const bReq = (b.pathParams?.length ?? 0) + (b.queryParams?.filter(p => p.required).length ?? 0);
+			const aReq = (a.pathParams?.length ?? 0) + (a.queryParams?.filter(p => p.required)?.length ?? 0);
+			const bReq = (b.pathParams?.length ?? 0) + (b.queryParams?.filter(p => p.required)?.length ?? 0);
 			return bReq - aReq;
 		})
 		.slice(0, max);
@@ -273,9 +273,9 @@ function formatParamType(p: ParamDef): string {
  * Format an OpenAPI parameter type as a concise TS-style annotation.
  */
 function formatOpenApiParamType(p: OpenApiParameter): string {
-	if (p.schema?.enum && p.schema.enum.length > 0) {
-		const vals = p.schema.enum.slice(0, 5).map(v => JSON.stringify(v));
-		if (p.schema.enum.length > 5) vals.push("...");
+	if (p.schema?.enum && p.schema?.enum.length > 0) {
+		const vals = p.schema?.enum.slice(0, 5).map(v => JSON.stringify(v));
+		if (p.schema?.enum.length > 5) vals.push("...");
 		return vals.join(" | ");
 	}
 	return p.schema?.type || p.type || "string";
