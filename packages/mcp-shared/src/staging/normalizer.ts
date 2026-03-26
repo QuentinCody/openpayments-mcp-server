@@ -74,16 +74,17 @@ export function sanitizeColumnName(
 	}
 
 	// Apply semantic mappings first (RCSB-PDB style)
+	let colName = name;
 	if (config?.semanticMappings) {
-		const lower = name.toLowerCase();
-		const mapped = config.semanticMappings[lower] ?? config.semanticMappings[name];
+		const lower = colName.toLowerCase();
+		const mapped = config.semanticMappings[lower] ?? config.semanticMappings[colName];
 		if (mapped) {
-			name = mapped;
+			colName = mapped;
 		}
 	}
 
 	// Convert camelCase to snake_case
-	let snakeCase = name
+	let snakeCase = colName
 		.replace(/([A-Z])/g, "_$1")
 		.toLowerCase()
 		.replace(/[^a-zA-Z0-9_]/g, "_")
