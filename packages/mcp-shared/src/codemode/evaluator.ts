@@ -115,7 +115,7 @@ export function createEvaluator(
 			};
 		});
 
-		const entrypoint: CodeModeWorkerEntrypoint = worker.getEntrypoint() as CodeModeWorkerEntrypoint;
+		const entrypoint = worker.getEntrypoint() as unknown as CodeModeWorkerEntrypoint;
 		return await entrypoint.evaluate();
 	};
 }
