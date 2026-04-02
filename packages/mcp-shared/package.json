@@ -35,6 +35,14 @@
     "./http/*": {
       "types": "./dist/http/*.d.ts",
       "default": "./dist/http/*.js"
+    },
+    "./charting/*": {
+      "types": "./dist/charting/*.d.ts",
+      "default": "./dist/charting/*.js"
+    },
+    "./filesystem/*": {
+      "types": "./dist/filesystem/*.d.ts",
+      "default": "./dist/filesystem/*.js"
     }
   },
   "scripts": {

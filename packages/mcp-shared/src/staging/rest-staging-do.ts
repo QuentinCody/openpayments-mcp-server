@@ -24,6 +24,7 @@ import {
 import { stageData } from "./staging-engine";
 import type { DomainConfig, StagingContext, StagingHints } from "./types";
 import type { TableRelationship } from "./staging-metadata";
+import { VirtualFS } from "../filesystem/virtual-fs";
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for handleProcess / handleQuery / handleRegister
@@ -158,6 +159,83 @@ function safeJsonParse(value: string): unknown {
 export class RestStagingDO extends DurableObject {
 	protected chunking = new ChunkingEngine();
 
+	constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+		super(ctx, env);
+		ctx.blockConcurrencyWhile(async () => {
+			this.migrateMetadata();
+		});
+	}
+
+	/**
+	 * Versioned migration for internal metadata tables.
+	 * All metadata tables are created here so they exist before any handler runs.
+	 * Future schema changes (ALTER TABLE, new indexes) go as new version blocks.
+	 */
+	private migrateMetadata(): void {
+		this.ctx.storage.sql.exec(
+			`CREATE TABLE IF NOT EXISTS _do_migrations (
+				id INTEGER PRIMARY KEY,
+				applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+			)`,
+		);
+
+		const row = this.ctx.storage.sql
+			.exec("SELECT COALESCE(MAX(id), 0) as v FROM _do_migrations")
+			.one() as { v: number };
+		const version = row.v;
+
+		if (version < 1) {
+			this.ctx.storage.sql.exec(
+				`CREATE TABLE IF NOT EXISTS _staging_metadata (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					tool_name TEXT,
+					server_name TEXT,
+					args_json TEXT,
+					api_url TEXT,
+					staged_at TEXT DEFAULT CURRENT_TIMESTAMP,
+					input_rows INTEGER,
+					stored_rows INTEGER,
+					failed_rows INTEGER,
+					warnings_json TEXT
+				)`,
+			);
+			this.ctx.storage.sql.exec(
+				`CREATE TABLE IF NOT EXISTS _inferred_schema (
+					id INTEGER PRIMARY KEY,
+					schema_json TEXT
+				)`,
+			);
+			this.ctx.storage.sql.exec(
+				`CREATE TABLE IF NOT EXISTS _column_profiles (
+					id INTEGER PRIMARY KEY,
+					profiles_json TEXT
+				)`,
+			);
+			this.ctx.storage.sql.exec(
+				`CREATE TABLE IF NOT EXISTS _session_registry (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					session_id TEXT NOT NULL,
+					data_access_id TEXT NOT NULL,
+					tool_name TEXT,
+					tables_json TEXT,
+					total_rows INTEGER,
+					tool_prefix TEXT,
+					created_at TEXT DEFAULT CURRENT_TIMESTAMP
+				)`,
+			);
+			this.ctx.storage.sql.exec(
+				`CREATE INDEX IF NOT EXISTS idx_session_registry_session_time
+					ON _session_registry(session_id, created_at)`,
+			);
+			this.ctx.storage.sql.exec(
+				`INSERT INTO _do_migrations (id) VALUES (1)`,
+			);
+		}
+
+		// Future migrations go here:
+		// if (version < 2) { ... INSERT INTO _do_migrations (id) VALUES (2); }
+	}
+
 	/** Override in subclass to provide domain-specific schema hints (Tier 1) */
 	protected getSchemaHints(_data: unknown): SchemaHints | undefined {
 		return undefined;
@@ -220,6 +298,9 @@ export class RestStagingDO extends DurableObject {
 				await this.ctx.storage.deleteAll();
 				return this.jsonResponse({ success: true });
 			}
+			if (url.pathname.startsWith("/fs/") && request.method === "POST") {
+				return await this.handleFs(url.pathname.slice(4), request);
+			}
 			return new Response("Not Found", { status: 404 });
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -236,21 +317,6 @@ export class RestStagingDO extends DurableObject {
 		args?: Record<string, unknown>;
 		apiUrl?: string;
 	}): void {
-		this.ctx.storage.sql.exec(
-			`CREATE TABLE IF NOT EXISTS _staging_metadata (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				tool_name TEXT,
-				server_name TEXT,
-				args_json TEXT,
-				api_url TEXT,
-				staged_at TEXT DEFAULT CURRENT_TIMESTAMP,
-				input_rows INTEGER,
-				stored_rows INTEGER,
-				failed_rows INTEGER,
-				warnings_json TEXT
-			)`,
-		);
-
 		if (context) {
 			this.ctx.storage.sql.exec(
 				`INSERT INTO _staging_metadata (tool_name, server_name, args_json, api_url) VALUES (?, ?, ?, ?)`,
@@ -291,12 +357,6 @@ export class RestStagingDO extends DurableObject {
 	private persistInferredSchema(schema: InferredSchema): void {
 		try {
 			this.ctx.storage.sql.exec(
-				`CREATE TABLE IF NOT EXISTS _inferred_schema (
-					id INTEGER PRIMARY KEY,
-					schema_json TEXT
-				)`,
-			);
-			this.ctx.storage.sql.exec(
 				`INSERT OR REPLACE INTO _inferred_schema (id, schema_json) VALUES (1, ?)`,
 				JSON.stringify(schema),
 			);
@@ -312,12 +372,6 @@ export class RestStagingDO extends DurableObject {
 	private persistColumnProfiles(schema: InferredSchema): void {
 		try {
 			const profiles = computeColumnProfiles(schema, this.ctx.storage.sql);
-			this.ctx.storage.sql.exec(
-				`CREATE TABLE IF NOT EXISTS _column_profiles (
-					id INTEGER PRIMARY KEY,
-					profiles_json TEXT
-				)`,
-			);
 			this.ctx.storage.sql.exec(
 				`INSERT OR REPLACE INTO _column_profiles (id, profiles_json) VALUES (1, ?)`,
 				JSON.stringify(profiles),
@@ -755,19 +809,6 @@ export class RestStagingDO extends DurableObject {
 			);
 		}
 
-		this.ctx.storage.sql.exec(
-			`CREATE TABLE IF NOT EXISTS _session_registry (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				session_id TEXT NOT NULL,
-				data_access_id TEXT NOT NULL,
-				tool_name TEXT,
-				tables_json TEXT,
-				total_rows INTEGER,
-				tool_prefix TEXT,
-				created_at TEXT DEFAULT CURRENT_TIMESTAMP
-			)`,
-		);
-
 		// TTL cleanup: remove entries older than 24h
 		this.ctx.storage.sql.exec(
 			`DELETE FROM _session_registry WHERE created_at < datetime('now', '-24 hours')`,
@@ -831,6 +872,69 @@ export class RestStagingDO extends DurableObject {
 		});
 
 		return this.jsonResponse({ success: true, datasets });
+	}
+
+	// -----------------------------------------------------------------------
+	// Virtual Filesystem — persistent scratch storage for Code Mode isolates
+	// -----------------------------------------------------------------------
+
+	private _vfs: VirtualFS | undefined;
+	private get vfs(): VirtualFS {
+		if (!this._vfs) {
+			this._vfs = new VirtualFS(this.ctx.storage.sql);
+		}
+		return this._vfs;
+	}
+
+	private async handleFs(action: string, request: Request): Promise<Response> {
+		try {
+			const body = (await request.json()) as Record<string, unknown>;
+			let data: unknown;
+			switch (action) {
+				case "read":
+					data = this.vfs.readFile(String(body.path));
+					break;
+				case "write":
+					data = this.vfs.writeFile(String(body.path), String(body.content));
+					break;
+				case "append":
+					data = this.vfs.appendFile(String(body.path), String(body.content));
+					break;
+				case "mkdir":
+					this.vfs.mkdir(String(body.path), {
+						recursive: body.recursive !== false,
+					});
+					data = { success: true };
+					break;
+				case "readdir":
+					data = this.vfs.readdir(String(body.path || "/"));
+					break;
+				case "stat":
+					data = this.vfs.stat(String(body.path));
+					break;
+				case "exists":
+					data = this.vfs.exists(String(body.path));
+					break;
+				case "rm":
+					this.vfs.rm(String(body.path), {
+						recursive: body.recursive !== false,
+					});
+					data = { success: true };
+					break;
+				case "glob":
+					data = this.vfs.glob(String(body.pattern));
+					break;
+				default:
+					return this.jsonResponse(
+						{ success: false, error: `Unknown fs action: ${action}` },
+						404,
+					);
+			}
+			return this.jsonResponse({ success: true, data });
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			return this.jsonResponse({ success: false, error: message }, 400);
+		}
 	}
 
 	private jsonResponse(data: unknown, status = 200): Response {

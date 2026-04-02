@@ -15,6 +15,27 @@ export { CodeModeProxy } from "./codemode/proxy";
 export { createEvaluator } from "./codemode/evaluator";
 export { generateTypes } from "./codemode/types";
 
+// GraphQL Code Mode infrastructure
+export {
+	createGraphqlExecuteTool,
+	type GraphqlExecuteToolOptions,
+	type GraphqlExecuteToolResult,
+} from "./codemode/graphql-execute-tool";
+export {
+	fetchIntrospection,
+	trimIntrospectionResult,
+	flattenTypeRef,
+	INTROSPECTION_QUERY,
+	type GraphqlFetchFn,
+	type TrimmedIntrospection,
+	type TrimmedType,
+	type TrimmedField,
+} from "./codemode/graphql-introspection";
+export { buildGraphqlSchemaSource } from "./codemode/graphql-schema-source";
+export { buildGraphqlProxySource } from "./codemode/graphql-proxy";
+export { introspectionToSummary } from "./codemode/graphql-to-typescript";
+export { createGraphqlProxyTool, type GraphqlProxyToolOptions } from "./tools/graphql-proxy";
+
 // Code Mode response helpers
 export {
 	createCodeModeResponse,
@@ -116,3 +137,13 @@ export type {
 
 // HTTP utilities
 export { restFetch, buildQueryString, type RestFetchOptions } from "./http/rest-fetch";
+
+// Charting infrastructure
+export { createChartResponse, renderUnicodeChart, buildChartHtml } from "./charting/index";
+export type {
+	ChartSpec,
+	ChartType,
+	ChartSeries,
+	ChartResponseOptions,
+	ChartResponseResult,
+} from "./charting/index";

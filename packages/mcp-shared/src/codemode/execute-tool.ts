@@ -20,7 +20,9 @@ import { buildCatalogSearchSource } from "./catalog-search";
 import type { ResolvedSpec } from "./openapi-resolver";
 import { buildOpenApiSearchSource } from "./openapi-search";
 import { buildApiProxySource } from "./api-proxy";
+import { buildFsProxySource } from "./fs-proxy";
 import { createApiProxyTool, createQueryProxyTool, createStageProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
+import { createFsProxyHandlers } from "../tools/fs-proxy";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
 import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
@@ -31,9 +33,9 @@ import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
 // Only DynamicWorkerExecutor + ToolDispatcher are needed.
 // ---------------------------------------------------------------------------
 
-type ExecutorFns = Record<string, (...args: unknown[]) => Promise<unknown>>;
+export type ExecutorFns = Record<string, (...args: unknown[]) => Promise<unknown>>;
 
-interface ExecutorResult {
+export interface ExecutorResult {
   result?: unknown;
   error?: string;
   logs?: string[];
@@ -41,7 +43,7 @@ interface ExecutorResult {
 }
 
 /** RPC target that dispatches tool calls from the isolate back to the host. */
-class ToolDispatcher extends RpcTarget {
+export class ToolDispatcher extends RpcTarget {
   #fns: ExecutorFns;
   constructor(fns: ExecutorFns) {
     super();
@@ -65,7 +67,7 @@ export interface WorkerLoaderBinding {
 }
 
 /** Executes code in an isolated V8 Worker via the Worker Loader binding. */
-class DynamicWorkerExecutor {
+export class DynamicWorkerExecutor {
   #loader: WorkerLoaderBinding;
   #timeout: number;
 
@@ -122,7 +124,8 @@ class DynamicWorkerExecutor {
       ")(),",
       `        new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out")), ${timeoutMs}))`,
       "      ]);",
-      "      return { result, logs: __logs, __stagedResults: typeof __stagedResults !== 'undefined' && __stagedResults.length > 0 ? __stagedResults : undefined };",
+      "      var __safeResult = (result && typeof result === 'object') ? JSON.parse(JSON.stringify(result)) : result;",
+      "      return { result: __safeResult, logs: __logs, __stagedResults: typeof __stagedResults !== 'undefined' && __stagedResults.length > 0 ? __stagedResults : undefined };",
       "    } catch (err) {",
       "      return { result: undefined, error: err.message, logs: __logs, __stagedResults: typeof __stagedResults !== 'undefined' && __stagedResults.length > 0 ? __stagedResults : undefined };",
       "    }",
@@ -175,17 +178,22 @@ export interface ExecuteToolOptions {
   /** Optional JavaScript source injected into the isolate before user code.
    *  Use to provide domain-specific helper functions (e.g. stats.computePRR). */
   preamble?: string;
+  /** DO namespace for virtual filesystem. When provided, fs.* is available in isolates.
+   *  Uses idFromName("__fs__") for a shared filesystem DO instance. */
+  fsDoNamespace?: unknown;
 }
 
 /**
  * Build the user code wrapped with spec search + API proxy helpers.
  */
-function wrapUserCode(searchSource: string, userCode: string, preamble?: string): string {
+function wrapUserCode(searchSource: string, userCode: string, preamble?: string, includeFsProxy?: boolean): string {
   const apiProxy = buildApiProxySource();
+  const fsProxy = includeFsProxy ? buildFsProxySource() : "";
 
   return `async () => {
 ${searchSource}
 ${apiProxy}
+${fsProxy}
 ${preamble ? `\n// --- Preamble (domain helpers) ---\n${preamble}\n// --- End preamble ---\n` : ""}
 // --- User code ---
 ${userCode}
@@ -215,6 +223,7 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
     stagingThreshold,
     timeout = 30_000,
     preamble,
+    fsDoNamespace,
   } = options;
 
   if (!catalog && !openApiSpec) {
@@ -313,6 +322,10 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
       }
       return stageProxyTool.handler(toInput(args), stubCtx);
     },
+    // Filesystem proxy handlers (only when fsDoNamespace is provided)
+    ...(fsDoNamespace
+      ? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
+      : {}),
   };
 
   return {
@@ -325,6 +338,11 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
       `- api.post(path, body, params) — make POST requests\n` +
       searchDescription +
       `- console logging (log, warn, error, info) — captured output\n` +
+      (fsDoNamespace
+        ? `- fs.readFile(path), fs.writeFile(path, content), fs.readJSON(path), fs.writeJSON(path, data) — persistent virtual filesystem\n` +
+          `- fs.readdir(path), fs.mkdir(path), fs.stat(path), fs.exists(path), fs.rm(path), fs.glob(pattern) — directory operations\n` +
+          `- fs.appendFile(path, content) — append to file\n`
+        : "") +
       (preamble ? `\nDomain-specific helper functions are also available — see the catalog notes for details.\n` : "") +
       `\nThe last expression or return value is the result.\n` +
       (apiSummary ? `\n${apiSummary}\n\n` : `\nUse ${prefix}_search to discover endpoints, then write code here to call them.\n\n`) +
@@ -375,7 +393,7 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
         }
 
         try {
-          const wrappedCode = wrapUserCode(searchSource, code, preamble);
+          const wrappedCode = wrapUserCode(searchSource, code, preamble, !!fsDoNamespace);
 
           const executor = new DynamicWorkerExecutor({ loader, timeout });
           const result = await executor.execute(wrappedCode, executorFns);
