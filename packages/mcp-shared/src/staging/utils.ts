@@ -42,6 +42,8 @@ interface QueryResponse {
 	error?: string;
 	truncated?: boolean;
 	total_matching?: number;
+	diagnostics?: Array<{ severity: string; message: string; help?: string; kind: string }>;
+	validated?: boolean;
 }
 
 interface ListDataset {
@@ -274,7 +276,14 @@ export async function queryDataFromDo(
 	const result = await parseJsonResponse<QueryResponse>(response, { success: false, error: "Empty response from DO" });
 
 	if (!result.success) {
-		throw new Error(`Query failed: ${result.error || "Unknown error"}`);
+		const err = new Error(`Query failed: ${result.error || "Unknown error"}`);
+		if (result.diagnostics) {
+			(err as Error & { diagnostics: typeof result.diagnostics }).diagnostics = result.diagnostics;
+		}
+		if (result.validated) {
+			(err as Error & { validated: boolean }).validated = true;
+		}
+		throw err;
 	}
 
 	return {
@@ -374,6 +383,7 @@ export function createQueryDataHandler(
 			if (msg.includes("not allowed")) code = "INVALID_SQL";
 			if (msg.includes("not found") || msg.includes("not available"))
 				code = "DATA_ACCESS_ERROR";
+			if (err instanceof Error && "validated" in err) code = "SQL_VALIDATION_ERROR";
 			return createCodeModeError(code, `${toolPrefix}_query_data failed: ${msg}`);
 		}
 	};

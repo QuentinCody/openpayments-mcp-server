@@ -118,6 +118,10 @@ function formatEndpoint(ep: ApiEndpoint): string {
 		lines.push(`  Body: ${ep.body.contentType}${ep.body.description ? ` — ${ep.body.description}` : ""}`);
 	}
 
+	if (ep.usageHint) {
+		lines.push(`  Profile: ${ep.usageHint}`);
+	}
+
 	return lines.join("\n");
 }
 

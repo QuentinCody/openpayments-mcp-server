@@ -69,6 +69,8 @@ const MAX_SCAN_ROWS = 100;
 const MAX_DISCOVERY_ROWS = 1000;
 /** SQLite max columns safety limit — child tables exceeding this stay as JSON */
 const MAX_CHILD_TABLE_COLUMNS = 100;
+/** Parent table column cap — excess columns are folded into a single _overflow JSON column */
+const MAX_TABLE_COLUMNS = 200;
 /** Default max recursion depth for child table extraction (parent=0 → child=1 → grandchild=2) */
 const DEFAULT_MAX_RECURSION_DEPTH = 2;
 
@@ -573,9 +575,33 @@ export function inferSchema(
 			}
 		}
 
+		// Cap parent table columns to avoid SQLite limits — keep indexed/important
+		// columns first, demote the rest to a single _overflow JSON column
+		let finalColumns = columns;
+		if (columns.length > MAX_TABLE_COLUMNS) {
+			const indexedSet = new Set(indexes);
+			const kept: InferredColumn[] = [];
+			const overflowed: string[] = [];
+
+			for (const col of columns) {
+				if (kept.length < MAX_TABLE_COLUMNS - 1 || indexedSet.has(col.name)) {
+					kept.push(col);
+				} else {
+					overflowed.push(col.name);
+				}
+			}
+
+			kept.push({
+				name: "_overflow",
+				type: "JSON",
+				jsonShape: `{${overflowed.slice(0, 5).join(", ")}${overflowed.length > 5 ? `, ... (+${overflowed.length - 5} more)` : ""}}`,
+			});
+			finalColumns = kept;
+		}
+
 		tables.push({
 			name: tableName,
-			columns,
+			columns: finalColumns,
 			indexes,
 			...(compositeIndexes.length > 0 ? { compositeIndexes } : {}),
 		});
@@ -763,7 +789,7 @@ function profileColumn(
 				profile.sample_values = sampleRows.map((r) => {
 					const v = r.v;
 					// Truncate long strings in samples to save context
-					if (typeof v === "string" && v.length > 120) return v.slice(0, 117) + "...";
+					if (typeof v === "string" && v.length > 120) return `${v.slice(0, 117)}...`;
 					return v as string | number | null;
 				});
 			}
@@ -816,6 +842,14 @@ function sqlValue(v: unknown): unknown {
 }
 
 // ---------------------------------------------------------------------------
+// SQL identifier quoting — escape embedded double-quotes per SQL standard
+// ---------------------------------------------------------------------------
+
+function quoteIdent(name: string): string {
+	return `"${name.replace(/"/g, '""')}"`;
+}
+
+// ---------------------------------------------------------------------------
 // Table creation helper (shared by parent and child table materialization)
 // ---------------------------------------------------------------------------
 
@@ -825,16 +859,17 @@ function createTableAndIndexes(
 ): void {
 	const hasIdColumn = table.columns.some((c) => c.name === "id");
 	const colDefs = table.columns
-		.map((c) => `"${c.name}" ${c.type}`)
+		.map((c) => `${quoteIdent(c.name)} ${c.type}`)
 		.join(", ");
+	const tbl = quoteIdent(table.name);
 	const createSql = hasIdColumn
-		? `CREATE TABLE IF NOT EXISTS "${table.name}" (_rowid INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`
-		: `CREATE TABLE IF NOT EXISTS "${table.name}" (id INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`;
+		? `CREATE TABLE IF NOT EXISTS ${tbl} (_rowid INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`
+		: `CREATE TABLE IF NOT EXISTS ${tbl} (id INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`;
 	sql.exec(createSql);
 
 	for (const idx of table.indexes) {
 		sql.exec(
-			`CREATE INDEX IF NOT EXISTS "idx_${table.name}_${idx}" ON "${table.name}"("${idx}")`,
+			`CREATE INDEX IF NOT EXISTS ${quoteIdent(`idx_${table.name}_${idx}`)} ON ${tbl}(${quoteIdent(idx)})`,
 		);
 	}
 
@@ -842,9 +877,9 @@ function createTableAndIndexes(
 	if (table.compositeIndexes) {
 		for (const composite of table.compositeIndexes) {
 			const idxName = `idx_${table.name}_${composite.join("_")}`;
-			const colList = composite.map((c) => `"${c}"`).join(", ");
+			const colList = composite.map((c) => quoteIdent(c)).join(", ");
 			sql.exec(
-				`CREATE INDEX IF NOT EXISTS "${idxName}" ON "${table.name}"(${colList})`,
+				`CREATE INDEX IF NOT EXISTS ${quoteIdent(idxName)} ON ${tbl}(${colList})`,
 			);
 		}
 	}
@@ -908,7 +943,7 @@ export function materializeSchema(
 
 		const colNames = table.columns.map((c) => c.name);
 		const placeholders = colNames.map(() => "?").join(", ");
-		const insertSql = `INSERT INTO "${table.name}" (${colNames.map((n) => `"${n}"`).join(", ")}) VALUES (${placeholders})`;
+		const insertSql = `INSERT INTO ${quoteIdent(table.name)} (${colNames.map((n) => quoteIdent(n)).join(", ")}) VALUES (${placeholders})`;
 
 		// Track IDs for FK resolution and capture child array data
 		const idMap = new Map<number, number>();
@@ -936,6 +971,14 @@ export function materializeSchema(
 			}
 
 			const values = colNames.map((col) => {
+				if (col === "_overflow") {
+					const colSet = new Set(colNames);
+					const overflow: Record<string, unknown> = {};
+					for (const [k, v] of Object.entries(flat as Record<string, unknown>)) {
+						if (!colSet.has(k)) overflow[k] = v;
+					}
+					return Object.keys(overflow).length > 0 ? JSON.stringify(overflow) : null;
+				}
 				const v = (flat as Record<string, unknown>)[col];
 				return sqlValue(v);
 			});
@@ -980,7 +1023,7 @@ export function materializeSchema(
 
 		const childColNames = childTable.columns.map((c) => c.name);
 		const childPlaceholders = childColNames.map(() => "?").join(", ");
-		const childInsertSql = `INSERT INTO "${childTable.name}" (${childColNames.map((n) => `"${n}"`).join(", ")}) VALUES (${childPlaceholders})`;
+		const childInsertSql = `INSERT INTO ${quoteIdent(childTable.name)} (${childColNames.map((n) => quoteIdent(n)).join(", ")}) VALUES (${childPlaceholders})`;
 
 		// Track child IDs for grandchild FK resolution
 		const childIdMap = new Map<number, number>();

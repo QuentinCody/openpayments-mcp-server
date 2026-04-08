@@ -25,6 +25,7 @@ import { stageData } from "./staging-engine";
 import type { DomainConfig, StagingContext, StagingHints } from "./types";
 import type { TableRelationship } from "./staging-metadata";
 import { VirtualFS } from "../filesystem/virtual-fs";
+import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for handleProcess / handleQuery / handleRegister
@@ -158,12 +159,57 @@ function safeJsonParse(value: string): unknown {
 
 export class RestStagingDO extends DurableObject {
 	protected chunking = new ChunkingEngine();
+	private schemaValidator: SchemaValidator | null = null;
+	private schemaValidatorInitFailed = false;
 
 	constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
 		super(ctx, env);
 		ctx.blockConcurrencyWhile(async () => {
 			this.migrateMetadata();
 		});
+	}
+
+	/**
+	 * Lazily create a SchemaValidator using the stored inferred schema.
+	 * Returns null if schema is unavailable or parsing fails.
+	 * Cached for the lifetime of the DO instance; invalidated on new staging.
+	 */
+	private getSchemaValidator(): SchemaValidator | null {
+		if (this.schemaValidator) return this.schemaValidator;
+		if (this.schemaValidatorInitFailed) return null;
+		try {
+			const row = this.ctx.storage.sql
+				.exec("SELECT schema_json FROM _inferred_schema WHERE id = 1")
+				.one() as { schema_json: string } | undefined;
+			if (!row?.schema_json) return null;
+			const schema = JSON.parse(row.schema_json) as InferredSchema;
+			this.schemaValidator = new SchemaValidator(schema);
+			return this.schemaValidator;
+		} catch {
+			this.schemaValidatorInitFailed = true;
+			return null;
+		}
+	}
+
+	/**
+	 * Validate SQL before execution. Returns an error response if validation
+	 * finds errors (e.g., unknown columns with "did you mean?" suggestions),
+	 * or null if the query should proceed to execution.
+	 */
+	private validateSql(sql: string): Response | null {
+		const validator = this.getSchemaValidator();
+		if (!validator) return null;
+		const result = validator.validate(sql);
+		if (result.valid) return null;
+		return this.jsonResponse(
+			{
+				success: false,
+				error: SchemaValidator.formatErrorMessage(result),
+				diagnostics: result.diagnostics,
+				validated: true,
+			},
+			400,
+		);
 	}
 
 	/**
@@ -360,6 +406,9 @@ export class RestStagingDO extends DurableObject {
 				`INSERT OR REPLACE INTO _inferred_schema (id, schema_json) VALUES (1, ?)`,
 				JSON.stringify(schema),
 			);
+			// Invalidate cached validator so it rebuilds with the new schema
+			this.schemaValidator = null;
+			this.schemaValidatorInitFailed = false;
 		} catch {
 			// Non-critical — schema still works via PRAGMA, just without enrichment
 		}
@@ -541,6 +590,11 @@ export class RestStagingDO extends DurableObject {
 	private async handleQuery(request: Request): Promise<Response> {
 		const raw: unknown = await request.json();
 		const body: SqlQueryBody = (raw !== null && typeof raw === "object" ? raw : { sql: "" }) as SqlQueryBody;
+
+		// Pre-execution schema validation — catches column/table typos with suggestions
+		const validationError = this.validateSql(body.sql);
+		if (validationError) return validationError;
+
 		const res = this.ctx.storage.sql.exec(body.sql);
 		const results = res.toArray();
 
@@ -573,6 +627,11 @@ export class RestStagingDO extends DurableObject {
 	private async handleQueryEnhanced(request: Request): Promise<Response> {
 		const rawEnhanced: unknown = await request.json();
 		const body: SqlQueryBody = (rawEnhanced !== null && typeof rawEnhanced === "object" ? rawEnhanced : { sql: "" }) as SqlQueryBody;
+
+		// Pre-execution schema validation — catches column/table typos with suggestions
+		const validationError = this.validateSql(body.sql);
+		if (validationError) return validationError;
+
 		const res = this.ctx.storage.sql.exec(body.sql);
 		const rows = res.toArray();
 		const enhanced: Record<string, unknown>[] = [];
