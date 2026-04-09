@@ -47,6 +47,8 @@ export {
 	type ErrorResponse,
 	type StructuredResponse,
 	type ErrorCode,
+	type SectionSource,
+	type ResponseMeta,
 } from "./codemode/response";
 
 // Staging metadata (universal staging awareness)
@@ -136,7 +138,15 @@ export type {
 } from "./entities/types";
 
 // HTTP utilities
-export { restFetch, buildQueryString, type RestFetchOptions } from "./http/rest-fetch";
+export {
+	restFetch,
+	buildQueryString,
+	registerRateLimitPolicy,
+	resetRateLimitState,
+	type RestFetchOptions,
+	type RateLimitPolicy,
+	type CacheOptions,
+} from "./http/rest-fetch";
 
 // Charting infrastructure
 export { createChartResponse, renderUnicodeChart, buildChartHtml } from "./charting/index";

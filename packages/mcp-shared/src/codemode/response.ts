@@ -16,16 +16,30 @@ export interface CodeModeResponse<T = unknown> {
 	isError?: boolean;
 }
 
+/** Tracks which upstream data source provided a section of the response */
+export interface SectionSource {
+	/** Machine-readable key (e.g. "identity", "pathways", "clinvar") */
+	key: string;
+	/** Human-readable label (e.g. "ClinVar", "Pathways") */
+	label: string;
+	/** Upstream data sources (e.g. ["gnomAD", "MyVariant.info"]) */
+	sources: string[];
+}
+
+export interface ResponseMeta {
+	fetched_at?: string;
+	data_access_id?: string;
+	staged?: boolean;
+	row_count?: number;
+	/** Per-section provenance: which upstream API provided each piece of data */
+	provenance?: SectionSource[];
+	[key: string]: unknown;
+}
+
 export interface SuccessResponse<T = unknown> extends Record<string, unknown> {
 	success: true;
 	data: T;
-	_meta?: {
-		fetched_at?: string;
-		data_access_id?: string;
-		staged?: boolean;
-		row_count?: number;
-		[key: string]: unknown;
-	};
+	_meta?: ResponseMeta;
 }
 
 export interface ErrorResponse extends Record<string, unknown> {
