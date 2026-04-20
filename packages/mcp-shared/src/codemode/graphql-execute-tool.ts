@@ -177,7 +177,7 @@ interface ExecutionContext {
 	preamble: string | undefined;
 	includeFsProxy: boolean;
 	gqlProxySource: string;
-	executorFns: ExecutorFns;
+	buildExecutorFns: (sessionId: string | undefined) => ExecutorFns;
 	cache: {
 		introspection: TrimmedIntrospection | undefined;
 		schemaSource: string | undefined;
@@ -200,7 +200,7 @@ async function ensureIntrospection(ctx: ExecutionContext): Promise<void> {
 }
 
 /** Execute user code in a V8 isolate with GraphQL + schema helpers. */
-async function executeCode(ctx: ExecutionContext, code: string) {
+async function executeCode(ctx: ExecutionContext, code: string, sessionId: string | undefined) {
 	await ensureIntrospection(ctx);
 
 	const wrappedCode = wrapUserCode({
@@ -211,7 +211,7 @@ async function executeCode(ctx: ExecutionContext, code: string) {
 		includeFsProxy: ctx.includeFsProxy,
 	});
 	const executor = new DynamicWorkerExecutor({ loader: ctx.loader, timeout: ctx.timeout });
-	const result = await executor.execute(wrappedCode, ctx.executorFns);
+	const result = await executor.execute(wrappedCode, ctx.buildExecutorFns(sessionId));
 	return handleExecutorResult(result);
 }
 
@@ -219,33 +219,36 @@ async function executeCode(ctx: ExecutionContext, code: string) {
 // Factory
 // ---------------------------------------------------------------------------
 
-function buildExecutorFns(
+function createExecutorFnsBuilder(
 	graphqlProxyTool: ReturnType<typeof createGraphqlProxyTool>,
 	doNamespace: unknown,
 	prefix: string,
 	fsDoNamespace: unknown,
-): ExecutorFns {
-	const stubCtx: ToolContext = { sql: () => [] };
+): (sessionId: string | undefined) => ExecutorFns {
 	const queryProxyTool = doNamespace ? createQueryProxyTool({ doNamespace }) : undefined;
 	const stageProxyTool = doNamespace ? createStageProxyTool({ doNamespace, stagingPrefix: prefix }) : undefined;
+	const fsHandlers: ExecutorFns = fsDoNamespace
+		? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
+		: {};
 
-	return {
-		__graphql_proxy: async (args: unknown) => graphqlProxyTool.handler(toInput(args), stubCtx),
-		__query_proxy: async (args: unknown) => {
-			if (!queryProxyTool) {
-				return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
-			}
-			return queryProxyTool.handler(toInput(args), stubCtx);
-		},
-		__stage_proxy: async (args: unknown) => {
-			if (!stageProxyTool) {
-				return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
-			}
-			return stageProxyTool.handler(toInput(args), stubCtx);
-		},
-		...(fsDoNamespace
-			? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
-			: {}),
+	return (sessionId: string | undefined) => {
+		const ctx: ToolContext = { sql: () => [], sessionId };
+		return {
+			__graphql_proxy: async (args: unknown) => graphqlProxyTool.handler(toInput(args), ctx),
+			__query_proxy: async (args: unknown) => {
+				if (!queryProxyTool) {
+					return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
+				}
+				return queryProxyTool.handler(toInput(args), ctx);
+			},
+			__stage_proxy: async (args: unknown) => {
+				if (!stageProxyTool) {
+					return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
+				}
+				return stageProxyTool.handler(toInput(args), ctx);
+			},
+			...fsHandlers,
+		};
 	};
 }
 
@@ -261,7 +264,7 @@ export function createGraphqlExecuteTool(
 	const toolName = `${prefix}_execute`;
 
 	const graphqlProxyTool = createGraphqlProxyTool({ gqlFetch, doNamespace, stagingPrefix: prefix, stagingThreshold });
-	const executorFns = buildExecutorFns(graphqlProxyTool, doNamespace, prefix, fsDoNamespace);
+	const buildExecutorFns = createExecutorFnsBuilder(graphqlProxyTool, doNamespace, prefix, fsDoNamespace);
 
 	const ctx: ExecutionContext = {
 		gqlFetch,
@@ -271,7 +274,7 @@ export function createGraphqlExecuteTool(
 		preamble,
 		includeFsProxy: !!fsDoNamespace,
 		gqlProxySource: buildGraphqlProxySource(),
-		executorFns,
+		buildExecutorFns,
 		cache: { introspection: options.introspection, schemaSource: undefined, description: undefined },
 	};
 
@@ -289,13 +292,14 @@ export function createGraphqlExecuteTool(
 		},
 
 		register(server: { tool: (...args: unknown[]) => void }) {
-			server.tool(toolName, this.description, this.schema, async (input: { code: string }) => {
+			server.tool(toolName, this.description, this.schema, async (input: { code: string }, extra: unknown) => {
 				const code = input.code?.trim();
 				if (!code) {
 					return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
 				}
 				try {
-					return await executeCode(ctx, code);
+					const sessionId = (extra as { sessionId?: string } | undefined)?.sessionId;
+					return await executeCode(ctx, code, sessionId);
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					return createCodeModeError(ErrorCodes.UNKNOWN_ERROR, `${prefix}_execute failed: ${message}`);

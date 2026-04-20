@@ -62,7 +62,19 @@ export interface InferredSchema {
 	tables: InferredTable[];
 }
 
-const KNOWN_ARRAY_KEYS = ["data", "results", "items", "records", "hits", "entries", "rows"];
+const KNOWN_ARRAY_KEYS = [
+	"data",
+	"results",
+	"items",
+	"records",
+	"hits",
+	"entries",
+	"rows",
+	// JSON-LD / ENCODE portal search wrapper — must be recognized so that
+	// secondary arrays on the same envelope (facets, columns, etc.) don't
+	// compete for the primary table slot.
+	"@graph",
+];
 const ID_PATTERN = /^(id|.*_id|.*Id)$/;
 const MAX_SCAN_ROWS = 100;
 /** Scan up to this many rows for column name discovery (beyond MAX_SCAN_ROWS) */
@@ -448,11 +460,20 @@ export function inferSchema(
 	const tables: InferredTable[] = [];
 	const exclude = new Set(hints?.exclude ?? []);
 	const skipChildTables = new Set(hints?.skipChildTables ?? []);
+	// Track which table names we've already emitted to prevent duplicates when
+	// detectArrays finds multiple top-level arrays and hints.tableName is fixed.
+	// Single-object / object-lookup responses (ENCODE `/experiments/{id}/` with
+	// frame=embedded) fan out into 10-20 array properties, each of which would
+	// otherwise produce a duplicate `encode_object` table definition and 16×
+	// duplicate entries in tables_created. Keep only the first occurrence.
+	const seenNames = new Set<string>();
 
 	for (const { key, rows } of arrays) {
 		if (rows.length === 0) continue;
 
 		const tableName = hints?.tableName ?? sanitizeTableName(key);
+		if (seenNames.has(tableName)) continue;
+		seenNames.add(tableName);
 
 		// --- Pass 1: Flatten sample rows for type inference ---
 		const sampleRows = rows.slice(0, MAX_SCAN_ROWS);

@@ -3,18 +3,36 @@
 	"name": "openpayments-mcp-server",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"alias": {
 		"ai": "./src/ai-stub.ts"
 	},
 	"migrations": [
 		{
-			"new_sqlite_classes": ["OpenPaymentsDataDO"],
+			"new_sqlite_classes": [
+				"OpenPaymentsDataDO"
+			],
 			"tag": "v1"
 		},
 		{
-			"new_sqlite_classes": ["MyMCP"],
+			"new_sqlite_classes": [
+				"MyMCP"
+			],
 			"tag": "v2"
+		},
+		{
+			"tag": "v3-purge-mymcp",
+			"deleted_classes": [
+				"MyMCP"
+			]
+		},
+		{
+			"tag": "v4-readd-mymcp",
+			"new_sqlite_classes": [
+				"MyMCP"
+			]
 		}
 	],
 	"durable_objects": {
@@ -29,9 +47,10 @@
 			}
 		]
 	},
-	// Worker Loader for V8 isolate creation (Code Mode execute tool)
 	"worker_loaders": [
-		{ "binding": "CODE_MODE_LOADER" }
+		{
+			"binding": "CODE_MODE_LOADER"
+		}
 	],
 	"observability": {
 		"enabled": true

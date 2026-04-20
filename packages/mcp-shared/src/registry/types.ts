@@ -14,6 +14,17 @@ export type SqlTaggedTemplate = <T = Record<string, string | number | boolean | 
  */
 export interface ToolContext {
 	sql: SqlTaggedTemplate;
+	/**
+	 * MCP session identifier for the current request. Required for the
+	 * session-scoped staging registry (`__registry__` DO) so
+	 * `<prefix>_get_schema` without a data_access_id can enumerate all
+	 * datasets staged in the same session.
+	 *
+	 * Code Mode proxy tools (api-proxy, stage-proxy, graphql-proxy,
+	 * sparql-proxy) read this to thread sessionId into
+	 * stageToDoAndRespond()'s 7th parameter.
+	 */
+	sessionId?: string;
 }
 
 /**

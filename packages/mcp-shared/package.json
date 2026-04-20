@@ -43,6 +43,14 @@
     "./filesystem/*": {
       "types": "./dist/filesystem/*.d.ts",
       "default": "./dist/filesystem/*.js"
+    },
+    "./variants/*": {
+      "types": "./dist/variants/*.d.ts",
+      "default": "./dist/variants/*.js"
+    },
+    "./adapters/*": {
+      "types": "./dist/adapters/*.d.ts",
+      "default": "./dist/adapters/*.js"
     }
   },
   "scripts": {

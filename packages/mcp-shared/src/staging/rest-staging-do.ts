@@ -18,6 +18,7 @@ import {
 	materializeSchema,
 	computeColumnProfiles,
 	type InferredSchema,
+	type InferredTable,
 	type SchemaHints,
 	type TableProfile,
 } from "./schema-inference";
@@ -402,15 +403,41 @@ export class RestStagingDO extends DurableObject {
 	 */
 	private persistInferredSchema(schema: InferredSchema): void {
 		try {
+			// MERGE with existing schema instead of overwriting: when a single DO
+			// receives multiple stageToDoAndRespond() calls (e.g. l2g_gather fans
+			// out to anchors/loci/candidate_genes/... across separate calls), each
+			// call previously clobbered the validator's view of prior tables.
+			// Dedupe by table name — last-writer-wins for the same table.
+			const existing = this.readInferredSchemaUnsafe();
+			const byName = new Map<string, InferredTable>();
+			if (existing) {
+				for (const t of existing.tables) byName.set(t.name, t);
+			}
+			for (const t of schema.tables) byName.set(t.name, t);
+			const merged: InferredSchema = { tables: Array.from(byName.values()) };
+
 			this.ctx.storage.sql.exec(
 				`INSERT OR REPLACE INTO _inferred_schema (id, schema_json) VALUES (1, ?)`,
-				JSON.stringify(schema),
+				JSON.stringify(merged),
 			);
-			// Invalidate cached validator so it rebuilds with the new schema
+			// Invalidate cached validator so it rebuilds with the merged schema
 			this.schemaValidator = null;
 			this.schemaValidatorInitFailed = false;
 		} catch {
 			// Non-critical — schema still works via PRAGMA, just without enrichment
+		}
+	}
+
+	/** Read the persisted inferred schema, or null if absent / malformed. */
+	private readInferredSchemaUnsafe(): InferredSchema | null {
+		try {
+			const row = this.ctx.storage.sql
+				.exec("SELECT schema_json FROM _inferred_schema WHERE id = 1")
+				.one() as { schema_json: string } | undefined;
+			if (!row?.schema_json) return null;
+			return JSON.parse(row.schema_json) as InferredSchema;
+		} catch {
+			return null;
 		}
 	}
 

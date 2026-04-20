@@ -288,11 +288,6 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
     ? createStageProxyTool({ doNamespace, stagingPrefix: prefix })
     : undefined;
 
-  // Stub ToolContext — proxy tools don't use sql, but the handler signature requires it
-  const stubCtx: ToolContext = {
-    sql: () => [],
-  };
-
   /** Coerce executor args to the Record<string, unknown> that handlers expect. */
   function toInput(args: unknown): Record<string, unknown> {
     if (args !== null && typeof args === "object" && !Array.isArray(args)) {
@@ -305,28 +300,35 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
     return {};
   }
 
-  // Build the function map for the executor
-  const executorFns: ExecutorFns = {
-    __api_proxy: async (args: unknown) => {
-      return apiProxyTool.handler(toInput(args), stubCtx);
-    },
-    __query_proxy: async (args: unknown) => {
-      if (!queryProxyTool) {
-        return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
-      }
-      return queryProxyTool.handler(toInput(args), stubCtx);
-    },
-    __stage_proxy: async (args: unknown) => {
-      if (!stageProxyTool) {
-        return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
-      }
-      return stageProxyTool.handler(toInput(args), stubCtx);
-    },
-    // Filesystem proxy handlers (only when fsDoNamespace is provided)
-    ...(fsDoNamespace
-      ? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
-      : {}),
-  };
+  // Filesystem proxy handlers (only when fsDoNamespace is provided) — built once.
+  const fsHandlers: ExecutorFns = fsDoNamespace
+    ? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
+    : {};
+
+  /**
+   * Build the function map for the executor with a per-request ToolContext.
+   * sessionId flows in from the MCP `extra` argument so auto-staging can
+   * register datasets with the session-scoped __registry__ DO.
+   */
+  function buildExecutorFns(sessionId: string | undefined): ExecutorFns {
+    const ctx: ToolContext = { sql: () => [], sessionId };
+    return {
+      __api_proxy: async (args: unknown) => apiProxyTool.handler(toInput(args), ctx),
+      __query_proxy: async (args: unknown) => {
+        if (!queryProxyTool) {
+          return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
+        }
+        return queryProxyTool.handler(toInput(args), ctx);
+      },
+      __stage_proxy: async (args: unknown) => {
+        if (!stageProxyTool) {
+          return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
+        }
+        return stageProxyTool.handler(toInput(args), ctx);
+      },
+      ...fsHandlers,
+    };
+  }
 
   return {
     name: toolName,
@@ -386,7 +388,7 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
       const description = this.description;
       const schema = this.schema;
 
-      server.tool(toolName, description, schema, async (input: { code: string }) => {
+      server.tool(toolName, description, schema, async (input: { code: string }, extra: unknown) => {
         const code = input.code?.trim();
         if (!code) {
           return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
@@ -395,6 +397,8 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
         try {
           const wrappedCode = wrapUserCode(searchSource, code, preamble, !!fsDoNamespace);
 
+          const sessionId = (extra as { sessionId?: string } | undefined)?.sessionId;
+          const executorFns = buildExecutorFns(sessionId);
           const executor = new DynamicWorkerExecutor({ loader, timeout });
           const result = await executor.execute(wrappedCode, executorFns);
 

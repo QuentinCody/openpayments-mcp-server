@@ -265,6 +265,41 @@ export async function queryDataFromDo(
 	const doId = doNamespace.idFromName(dataAccessId);
 	const doInstance = doNamespace.get(doId);
 
+	// Validate the DAI actually resolves to a populated DO. `idFromName` always
+	// succeeds and `get()` creates a new empty DO on first access, so unknown
+	// IDs would silently return no-rows (or `SELECT 1` answers). Reject up front.
+	//
+	// The /schema response shape is:
+	//   { success: true, schema: { table_count: N, tables: { "tbl1": {...}, ... } } }
+	// NOT an array. Check tables map keys (ignoring internal names).
+	try {
+		const probe = await doInstance.fetch(new Request("http://localhost/schema"));
+		if (probe.ok) {
+			const probeJson = (await probe.json()) as {
+				schema?: { tables?: Record<string, unknown>; table_count?: number };
+			};
+			const tables = probeJson.schema?.tables ?? {};
+			const userTableNames = Object.keys(tables).filter(
+				(name) =>
+					typeof name === "string" &&
+					!name.startsWith("_") &&
+					!name.startsWith("sqlite_") &&
+					!name.startsWith("_staging_"),
+			);
+			if (userTableNames.length === 0) {
+				const err = new Error(
+					`Unknown or empty data_access_id: ${dataAccessId}. No staged data found. Re-stage with <prefix>_search/execute or fan-out tools first.`,
+				) as Error & { status: number };
+				err.status = 404;
+				throw err;
+			}
+		}
+	} catch (err) {
+		// Only rethrow our deliberate 404; swallow probe-level errors so a
+		// transient schema-probe failure doesn't block a legitimate query.
+		if ((err as Error & { status?: number })?.status === 404) throw err;
+	}
+
 	const response = await doInstance.fetch(
 		new Request("http://localhost/query", {
 			method: "POST",

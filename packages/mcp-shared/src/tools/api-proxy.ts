@@ -457,7 +457,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 			params: z.record(z.string(), z.unknown()).optional(),
 			body: z.unknown().optional(),
 		},
-		handler: async (input) => {
+		handler: async (input, ctx) => {
 			const method = String(input.method || "GET");
 			const rawPath = String(input.path || "/");
 			const rawParams: Record<string, unknown> = isRecord(input.params) ? input.params : {};
@@ -492,6 +492,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						undefined,
 						undefined,
 						stagingPrefix,
+						ctx?.sessionId,
 					);
 					const tableDetail = buildStagedTableSummary(staged);
 					const response: Record<string, unknown> = {
@@ -570,7 +571,7 @@ export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry 
 				compositeIndexes: z.array(z.array(z.string())).optional(),
 			}).optional(),
 		},
-		handler: async (input) => {
+		handler: async (input, ctx) => {
 			const data = input.data;
 			const tableName = input.table_name ? String(input.table_name) : undefined;
 			const clientHints = input.schema_hints as SchemaHints | undefined;
@@ -593,6 +594,7 @@ export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry 
 					mergedHints,
 					undefined,
 					stagingPrefix,
+					ctx?.sessionId,
 				);
 
 				return {

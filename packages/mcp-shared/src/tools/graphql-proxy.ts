@@ -96,6 +96,7 @@ async function tryAutoStage(
 	resultData: unknown,
 	responseBytes: number,
 	config: StagingConfig,
+	sessionId: string | undefined,
 ): Promise<Record<string, unknown> | undefined> {
 	if (!config.doNamespace || !shouldStage(responseBytes, config.threshold)) {
 		return undefined;
@@ -108,6 +109,7 @@ async function tryAutoStage(
 		undefined,
 		undefined,
 		config.prefix,
+		sessionId,
 	);
 	const tableDetail = buildStagedTableSummary(staged);
 	const envelope: Record<string, unknown> = {
@@ -132,6 +134,7 @@ async function executeAndMaybeStage(
 	query: string,
 	variables: Record<string, unknown> | undefined,
 	staging: StagingConfig,
+	sessionId: string | undefined,
 ): Promise<unknown> {
 	const response = await gqlFetch(query, variables);
 
@@ -148,7 +151,7 @@ async function executeAndMaybeStage(
 	const resultData = response.data ?? {};
 
 	const responseBytes = JSON.stringify(resultData).length;
-	const staged = await tryAutoStage(resultData, responseBytes, staging);
+	const staged = await tryAutoStage(resultData, responseBytes, staging, sessionId);
 	const output = staged ?? resultData;
 
 	// Attach partial errors if present (errors-only case is handled above)
@@ -165,8 +168,8 @@ async function executeAndMaybeStage(
 function buildHandler(
 	gqlFetch: GraphqlFetchFn,
 	staging: StagingConfig,
-): (input: Record<string, unknown>) => Promise<unknown> {
-	return async (input) => {
+): (input: Record<string, unknown>, ctx: import("../registry/types").ToolContext) => Promise<unknown> {
+	return async (input, ctx) => {
 		const query = String(input.query || "");
 		const variables = input.variables as Record<string, unknown> | undefined;
 
@@ -175,7 +178,7 @@ function buildHandler(
 		}
 
 		try {
-			return await executeAndMaybeStage(gqlFetch, query, variables, staging);
+			return await executeAndMaybeStage(gqlFetch, query, variables, staging, ctx?.sessionId);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return { __gql_error: true, message, errors: [{ message }] };
