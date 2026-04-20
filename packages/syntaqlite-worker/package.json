@@ -1,0 +1,16 @@
+{
+  "name": "@bio-mcp/syntaqlite-worker",
+  "version": "0.1.0",
+  "description": "Workers-compatible wrapper for syntaqlite WASM SQL validator",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["src", "wasm"],
+  "dependencies": {
+    "syntaqlite": "0.2.17"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
+}
