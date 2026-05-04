@@ -96,9 +96,7 @@ function preserveEnvelopeScalars(
 			if (serialized !== undefined && serialized.length <= ENVELOPE_SCALAR_LIMIT) {
 				staging[key] = value;
 			}
-		} catch {
-			// Skip non-serializable values
-		}
+		} catch { /* best-effort: Skip non-serializable values */ }
 	}
 }
 

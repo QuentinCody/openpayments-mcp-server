@@ -40,8 +40,9 @@ describe("registerRateLimitPolicy", () => {
 
 	it("overwrites a policy with the same key", () => {
 		registerRateLimitPolicy({ key: "test-api", minIntervalMs: 500 });
-		registerRateLimitPolicy({ key: "test-api", minIntervalMs: 1000 });
-		// No assertion needed beyond no-throw — internal state is private
+		expect(() =>
+			registerRateLimitPolicy({ key: "test-api", minIntervalMs: 1000 }),
+		).not.toThrow();
 	});
 });
 
@@ -50,8 +51,9 @@ describe("resetRateLimitState", () => {
 		registerRateLimitPolicy({ key: "a", minIntervalMs: 100 });
 		registerRateLimitPolicy({ key: "b", minIntervalMs: 200 });
 		resetRateLimitState();
-		// After reset, registering the same key should work (implicitly tested)
-		registerRateLimitPolicy({ key: "a", minIntervalMs: 300 });
+		expect(() =>
+			registerRateLimitPolicy({ key: "a", minIntervalMs: 300 }),
+		).not.toThrow();
 	});
 });
 

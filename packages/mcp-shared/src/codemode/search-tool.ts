@@ -14,7 +14,6 @@
 import { z } from "zod";
 import type { ApiCatalog, ApiEndpoint } from "./catalog";
 import type { ResolvedSpec } from "./openapi-resolver";
-import { buildOpenApiSearchSource } from "./openapi-search";
 
 interface OpenApiOperation {
 	path: string;
@@ -394,36 +393,12 @@ function parseLiteralArg(token: string): unknown {
 	return unsupportedExpression();
 }
 
-/** Parse a comma-separated argument string, supporting only literal values. */
+/** Parse a comma-separated argument string using the safe expression interpreter. */
 function parseArgs(argsStr: string): unknown[] {
-	const args: unknown[] = [];
-	let pos = 0;
-
-	while (pos < argsStr.length) {
-		while (pos < argsStr.length && /\s/.test(argsStr[pos])) pos++;
-		if (pos >= argsStr.length) break;
-
-		const ch = argsStr[pos];
-		if (ch === '"' || ch === "'") {
-			const parsed = readQuotedString(argsStr, pos);
-			args.push(parsed.value);
-			pos = parsed.nextPos;
-		} else {
-			let end = pos;
-			while (end < argsStr.length && argsStr[end] !== ",") end++;
-			const token = argsStr.slice(pos, end).trim();
-			if (!token) return unsupportedExpression();
-			args.push(parseLiteralArg(token));
-			pos = end;
-		}
-
-		while (pos < argsStr.length && /\s/.test(argsStr[pos])) pos++;
-		if (pos >= argsStr.length) break;
-		if (argsStr[pos] !== ",") return unsupportedExpression();
-		pos++;
-	}
-
-	return args;
+	if (!argsStr.trim()) return [];
+	return splitTopLevelExpressions(argsStr).map((token) =>
+		evaluateCallbackExpression(token, {}),
+	);
 }
 
 function parseSpecLookupTokens(expr: string): string[] | null {
@@ -1110,6 +1085,55 @@ function evaluateCallbackExpression(
 		return Number(expr);
 	}
 
+	const relational = findTopLevelOperator(expr, [">=", "<=", ">", "<"]);
+	if (relational) {
+		const left = evaluateCallbackExpression(expr.slice(0, relational.index), scope);
+		const right = evaluateCallbackExpression(
+			expr.slice(relational.index + relational.operator.length),
+			scope,
+		);
+		switch (relational.operator) {
+			case ">=":
+				return Number(left) >= Number(right);
+			case "<=":
+				return Number(left) <= Number(right);
+			case ">":
+				return Number(left) > Number(right);
+			case "<":
+				return Number(left) < Number(right);
+			default:
+				return unsupportedExpression();
+		}
+	}
+
+	const additive = findTopLevelOperator(expr, ["+", "-"]);
+	if (additive && additive.index > 0) {
+		const left = evaluateCallbackExpression(expr.slice(0, additive.index), scope);
+		const right = evaluateCallbackExpression(
+			expr.slice(additive.index + additive.operator.length),
+			scope,
+		);
+		if (additive.operator === "+") {
+			return typeof left === "string" || typeof right === "string"
+				? `${left ?? ""}${right ?? ""}`
+				: Number(left) + Number(right);
+		}
+		return Number(left) - Number(right);
+	}
+
+	const multiplicative = findTopLevelOperator(expr, ["*", "/"]);
+	if (multiplicative) {
+		const left = evaluateCallbackExpression(expr.slice(0, multiplicative.index), scope);
+		const right = evaluateCallbackExpression(
+			expr.slice(multiplicative.index + multiplicative.operator.length),
+			scope,
+		);
+		if (multiplicative.operator === "*") {
+			return Number(left) * Number(right);
+		}
+		return Number(left) / Number(right);
+	}
+
 	return evaluateMemberAccess(expr, scope);
 }
 
@@ -1156,6 +1180,119 @@ function evaluateArrayMethod(
 
 function evaluateSafeExpression(expr: string, helpers: OpenApiHelpers): unknown {
 	const normalized = stripOuterParens(expr);
+
+	const nullish = findTopLevelOperator(normalized, ["??"]);
+	if (nullish) {
+		const left = evaluateSafeExpression(normalized.slice(0, nullish.index), helpers);
+		return left ?? evaluateSafeExpression(
+			normalized.slice(nullish.index + nullish.operator.length),
+			helpers,
+		);
+	}
+
+	const logicalOr = findTopLevelOperator(normalized, ["||"]);
+	if (logicalOr) {
+		return (
+			evaluateSafeExpression(normalized.slice(0, logicalOr.index), helpers) ||
+			evaluateSafeExpression(
+				normalized.slice(logicalOr.index + logicalOr.operator.length),
+				helpers,
+			)
+		);
+	}
+
+	const logicalAnd = findTopLevelOperator(normalized, ["&&"]);
+	if (logicalAnd) {
+		return (
+			evaluateSafeExpression(normalized.slice(0, logicalAnd.index), helpers) &&
+			evaluateSafeExpression(
+				normalized.slice(logicalAnd.index + logicalAnd.operator.length),
+				helpers,
+			)
+		);
+	}
+
+	const comparison = findTopLevelOperator(normalized, ["===", "!==", "==", "!="]);
+	if (comparison) {
+		const left = evaluateSafeExpression(normalized.slice(0, comparison.index), helpers);
+		const right = evaluateSafeExpression(
+			normalized.slice(comparison.index + comparison.operator.length),
+			helpers,
+		);
+		switch (comparison.operator) {
+			case "===":
+				return left === right;
+			case "!==":
+				return left !== right;
+			case "==":
+				return left === right;
+			case "!=":
+				return left !== right;
+			default:
+				return unsupportedExpression();
+		}
+	}
+
+	const relational = findTopLevelOperator(normalized, [">=", "<=", ">", "<"]);
+	if (relational) {
+		const left = evaluateSafeExpression(normalized.slice(0, relational.index), helpers);
+		const right = evaluateSafeExpression(
+			normalized.slice(relational.index + relational.operator.length),
+			helpers,
+		);
+		switch (relational.operator) {
+			case ">=":
+				return Number(left) >= Number(right);
+			case "<=":
+				return Number(left) <= Number(right);
+			case ">":
+				return Number(left) > Number(right);
+			case "<":
+				return Number(left) < Number(right);
+			default:
+				return unsupportedExpression();
+		}
+	}
+
+	const additive = findTopLevelOperator(normalized, ["+", "-"]);
+	if (additive && additive.index > 0) {
+		const left = evaluateSafeExpression(normalized.slice(0, additive.index), helpers);
+		const right = evaluateSafeExpression(
+			normalized.slice(additive.index + additive.operator.length),
+			helpers,
+		);
+		if (additive.operator === "+") {
+			return typeof left === "string" || typeof right === "string"
+				? `${left ?? ""}${right ?? ""}`
+				: Number(left) + Number(right);
+		}
+		return Number(left) - Number(right);
+	}
+
+	const multiplicative = findTopLevelOperator(normalized, ["*", "/"]);
+	if (multiplicative) {
+		const left = evaluateSafeExpression(normalized.slice(0, multiplicative.index), helpers);
+		const right = evaluateSafeExpression(
+			normalized.slice(multiplicative.index + multiplicative.operator.length),
+			helpers,
+		);
+		if (multiplicative.operator === "*") {
+			return Number(left) * Number(right);
+		}
+		return Number(left) / Number(right);
+	}
+
+	if (normalized[0] === '"' || normalized[0] === "'") {
+		return readQuotedString(normalized, 0).value;
+	}
+	if (normalized === "true") return true;
+	if (normalized === "false") return false;
+	if (normalized === "null") return null;
+	if (normalized === "undefined") return undefined;
+	if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized)) {
+		return Number(normalized);
+	}
+
 	const helperFns: Record<string, (...a: unknown[]) => unknown> = {
 		searchPaths: (q?: unknown, m?: unknown) => helpers.searchPaths(String(q ?? ""), Number(m) || 10),
 		searchSpec: (q?: unknown, m?: unknown) => helpers.searchSpec(String(q ?? ""), Number(m) || 10),
@@ -1289,25 +1426,10 @@ function interpretSearchCode(code: string, helpers: OpenApiHelpers): unknown {
 }
 
 /**
- * Execute search code against OpenAPI helpers.
- * Tries the safe interpreter first; falls back to new Function() for
- * arbitrary JavaScript (e.g. `.map()`, `.filter()`, `Object.entries()`).
+ * Execute search code against OpenAPI helpers with the safe interpreter only.
  */
-function executeSearchCode(code: string, helpers: OpenApiHelpers, specJson: string): unknown {
-	try {
-		return interpretSearchCode(code, helpers);
-	} catch (err) {
-		if (err instanceof SyntaxError && err.message === "UNSUPPORTED_EXPRESSION") {
-			// Fall back to new Function() with the full search helpers injected.
-			// This works in Node.js and may work in some Workers runtimes;
-			// if blocked, the error propagates naturally.
-			const searchSource = buildOpenApiSearchSource(specJson);
-			const wrappedCode = `${searchSource}\n${code}`;
-			const fn = new Function(wrappedCode);
-			return fn();
-		}
-		throw err;
-	}
+function executeSearchCode(code: string, helpers: OpenApiHelpers): unknown {
+	return interpretSearchCode(code, helpers);
 }
 
 /**
@@ -1433,7 +1555,7 @@ function createOpenApiSearchTool(prefix: string, spec: ResolvedSpec): SearchTool
 				try {
 					// Try safe interpreter first, fall back to new Function()
 					// for complex JS (map/filter chains, Object.entries, etc.).
-					const result = executeSearchCode(code, helpers, specJson);
+					const result = executeSearchCode(code, helpers);
 
 					let textOutput: string;
 					if (typeof result === "string") {

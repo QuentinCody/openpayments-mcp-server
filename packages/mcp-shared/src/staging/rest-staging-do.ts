@@ -170,6 +170,10 @@ export class RestStagingDO extends DurableObject {
 		});
 	}
 
+	protected get sql() {
+		return this.ctx.storage.sql;
+	}
+
 	/**
 	 * Lazily create a SchemaValidator using the stored inferred schema.
 	 * Returns null if schema is unavailable or parsing fails.
@@ -179,7 +183,7 @@ export class RestStagingDO extends DurableObject {
 		if (this.schemaValidator) return this.schemaValidator;
 		if (this.schemaValidatorInitFailed) return null;
 		try {
-			const row = this.ctx.storage.sql
+			const row = this.sql
 				.exec("SELECT schema_json FROM _inferred_schema WHERE id = 1")
 				.one() as { schema_json: string } | undefined;
 			if (!row?.schema_json) return null;
@@ -219,20 +223,20 @@ export class RestStagingDO extends DurableObject {
 	 * Future schema changes (ALTER TABLE, new indexes) go as new version blocks.
 	 */
 	private migrateMetadata(): void {
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`CREATE TABLE IF NOT EXISTS _do_migrations (
 				id INTEGER PRIMARY KEY,
 				applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 			)`,
 		);
 
-		const row = this.ctx.storage.sql
+		const row = this.sql
 			.exec("SELECT COALESCE(MAX(id), 0) as v FROM _do_migrations")
 			.one() as { v: number };
 		const version = row.v;
 
 		if (version < 1) {
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`CREATE TABLE IF NOT EXISTS _staging_metadata (
 					id INTEGER PRIMARY KEY AUTOINCREMENT,
 					tool_name TEXT,
@@ -246,19 +250,19 @@ export class RestStagingDO extends DurableObject {
 					warnings_json TEXT
 				)`,
 			);
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`CREATE TABLE IF NOT EXISTS _inferred_schema (
 					id INTEGER PRIMARY KEY,
 					schema_json TEXT
 				)`,
 			);
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`CREATE TABLE IF NOT EXISTS _column_profiles (
 					id INTEGER PRIMARY KEY,
 					profiles_json TEXT
 				)`,
 			);
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`CREATE TABLE IF NOT EXISTS _session_registry (
 					id INTEGER PRIMARY KEY AUTOINCREMENT,
 					session_id TEXT NOT NULL,
@@ -270,11 +274,11 @@ export class RestStagingDO extends DurableObject {
 					created_at TEXT DEFAULT CURRENT_TIMESTAMP
 				)`,
 			);
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`CREATE INDEX IF NOT EXISTS idx_session_registry_session_time
 					ON _session_registry(session_id, created_at)`,
 			);
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`INSERT INTO _do_migrations (id) VALUES (1)`,
 			);
 		}
@@ -365,7 +369,7 @@ export class RestStagingDO extends DurableObject {
 		apiUrl?: string;
 	}): void {
 		if (context) {
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`INSERT INTO _staging_metadata (tool_name, server_name, args_json, api_url) VALUES (?, ?, ?, ?)`,
 				context.toolName ?? null,
 				context.serverName ?? null,
@@ -385,16 +389,14 @@ export class RestStagingDO extends DurableObject {
 		warnings: unknown[],
 	): void {
 		try {
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`UPDATE _staging_metadata SET input_rows = ?, stored_rows = ?, failed_rows = ?, warnings_json = ? WHERE id = (SELECT MAX(id) FROM _staging_metadata)`,
 				inputRows,
 				storedRows,
 				failedRows,
 				warnings.length > 0 ? JSON.stringify(warnings) : null,
 			);
-		} catch {
-			// Don't fail staging if metadata update fails
-		}
+		} catch { /* best-effort: Don't fail staging if metadata update fails */ }
 	}
 
 	/**
@@ -416,22 +418,20 @@ export class RestStagingDO extends DurableObject {
 			for (const t of schema.tables) byName.set(t.name, t);
 			const merged: InferredSchema = { tables: Array.from(byName.values()) };
 
-			this.ctx.storage.sql.exec(
+			this.sql.exec(
 				`INSERT OR REPLACE INTO _inferred_schema (id, schema_json) VALUES (1, ?)`,
 				JSON.stringify(merged),
 			);
 			// Invalidate cached validator so it rebuilds with the merged schema
 			this.schemaValidator = null;
 			this.schemaValidatorInitFailed = false;
-		} catch {
-			// Non-critical — schema still works via PRAGMA, just without enrichment
-		}
+		} catch { /* best-effort: — schema still works via PRAGMA, just without enrichment */ }
 	}
 
 	/** Read the persisted inferred schema, or null if absent / malformed. */
 	private readInferredSchemaUnsafe(): InferredSchema | null {
 		try {
-			const row = this.ctx.storage.sql
+			const row = this.sql
 				.exec("SELECT schema_json FROM _inferred_schema WHERE id = 1")
 				.one() as { schema_json: string } | undefined;
 			if (!row?.schema_json) return null;
@@ -447,14 +447,12 @@ export class RestStagingDO extends DurableObject {
 	 */
 	private persistColumnProfiles(schema: InferredSchema): void {
 		try {
-			const profiles = computeColumnProfiles(schema, this.ctx.storage.sql);
-			this.ctx.storage.sql.exec(
+			const profiles = computeColumnProfiles(schema, this.sql);
+			this.sql.exec(
 				`INSERT OR REPLACE INTO _column_profiles (id, profiles_json) VALUES (1, ?)`,
 				JSON.stringify(profiles),
 			);
-		} catch {
-			// Non-critical — schema still works without profiles
-		}
+		} catch { /* best-effort: — schema still works without profiles */ }
 	}
 
 	/**
@@ -495,7 +493,7 @@ export class RestStagingDO extends DurableObject {
 			const result = this.ctx.storage.transactionSync(() =>
 				stageData(
 					data,
-					this.ctx.storage.sql,
+					this.sql,
 					context,
 					stagingHints,
 					domainConfig,
@@ -538,7 +536,7 @@ export class RestStagingDO extends DurableObject {
 				materializeSchema(
 					schema,
 					rowsMap,
-					this.ctx.storage.sql,
+					this.sql,
 				),
 			);
 
@@ -588,7 +586,7 @@ export class RestStagingDO extends DurableObject {
 		}
 
 		// Fallback: store entire payload as chunked JSON
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`CREATE TABLE IF NOT EXISTS payloads (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				root_json TEXT,
@@ -597,14 +595,14 @@ export class RestStagingDO extends DurableObject {
 		);
 		const jsonStr = await this.chunking.smartJsonStringify(
 			data,
-			this.ctx.storage.sql,
+			this.sql,
 		);
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`INSERT INTO payloads (root_json) VALUES (?)`,
 			jsonStr,
 		);
 		const count =
-			(this.ctx.storage.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as { c: number })
+			(this.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as { c: number })
 				?.c ?? 0;
 		return this.jsonResponse({
 			success: true,
@@ -622,7 +620,7 @@ export class RestStagingDO extends DurableObject {
 		const validationError = this.validateSql(body.sql);
 		if (validationError) return validationError;
 
-		const res = this.ctx.storage.sql.exec(body.sql);
+		const res = this.sql.exec(body.sql);
 		const results = res.toArray();
 
 		// If count_total requested, run a COUNT(*) wrapper to determine total matching rows
@@ -632,7 +630,7 @@ export class RestStagingDO extends DurableObject {
 			try {
 				// Wrap the user's query (with LIMIT stripped) in a COUNT(*)
 				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
-				const countResult = this.ctx.storage.sql.exec(countSql).one();
+				const countResult = this.sql.exec(countSql).one();
 				totalMatching = Number((countResult as { c: number })?.c ?? results.length);
 				truncated = totalMatching > results.length;
 			} catch {
@@ -659,7 +657,7 @@ export class RestStagingDO extends DurableObject {
 		const validationError = this.validateSql(body.sql);
 		if (validationError) return validationError;
 
-		const res = this.ctx.storage.sql.exec(body.sql);
+		const res = this.sql.exec(body.sql);
 		const rows = res.toArray();
 		const enhanced: Record<string, unknown>[] = [];
 		for (const row of rows) {
@@ -669,7 +667,7 @@ export class RestStagingDO extends DurableObject {
 					const id = this.chunking.extractContentId(v);
 					const content = await this.chunking.retrieveChunkedContent(
 						id,
-						this.ctx.storage.sql,
+						this.sql,
 					);
 					try {
 						out[k] = content ? JSON.parse(content) : null;
@@ -689,7 +687,7 @@ export class RestStagingDO extends DurableObject {
 		if (body.count_total) {
 			try {
 				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
-				const countResult = this.ctx.storage.sql.exec(countSql).one();
+				const countResult = this.sql.exec(countSql).one();
 				totalMatching = Number((countResult as { c: number })?.c ?? enhanced.length);
 				truncated = totalMatching > enhanced.length;
 			} catch {
@@ -727,20 +725,18 @@ export class RestStagingDO extends DurableObject {
 		// Load persisted inferred schema for enrichment
 		let inferredSchema: InferredSchema | undefined;
 		try {
-			const schemaResults = this.ctx.storage.sql
+			const schemaResults = this.sql
 				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_inferred_schema'`)
 				.toArray();
 			if (schemaResults.length > 0) {
-				const schemaRow = this.ctx.storage.sql
+				const schemaRow = this.sql
 					.exec(`SELECT schema_json FROM _inferred_schema WHERE id = 1`)
 					.one() as { schema_json: string } | undefined;
 				if (schemaRow?.schema_json) {
 					inferredSchema = JSON.parse(schemaRow.schema_json) as InferredSchema;
 				}
 			}
-		} catch {
-			// Non-critical — fall back to PRAGMA-only output
-		}
+		} catch { /* best-effort: — fall back to PRAGMA-only output */ }
 
 		// Build column metadata lookup from inferred schema
 		const columnMeta = new Map<string, { jsonShape?: string; pipeDelimited?: boolean }>();
@@ -761,20 +757,18 @@ export class RestStagingDO extends DurableObject {
 		// Load persisted column profiles
 		let columnProfiles: TableProfile[] | undefined;
 		try {
-			const profileResults = this.ctx.storage.sql
+			const profileResults = this.sql
 				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_column_profiles'`)
 				.toArray();
 			if (profileResults.length > 0) {
-				const profileRow = this.ctx.storage.sql
+				const profileRow = this.sql
 					.exec(`SELECT profiles_json FROM _column_profiles WHERE id = 1`)
 					.one() as { profiles_json: string } | undefined;
 				if (profileRow?.profiles_json) {
 					columnProfiles = JSON.parse(profileRow.profiles_json) as TableProfile[];
 				}
 			}
-		} catch {
-			// Non-critical
-		}
+		} catch { /* best-effort: non-critical fallback */ }
 
 		// Build profile lookup: tableName → { colName → ColumnProfile }
 		const profileByTable = new Map<string, Record<string, unknown>>();
@@ -784,7 +778,7 @@ export class RestStagingDO extends DurableObject {
 			}
 		}
 
-		const tableResults = this.ctx.storage.sql
+		const tableResults = this.sql
 			.exec(
 				`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_staging_%' AND name NOT IN ('_inferred_schema', '_column_profiles')`,
 			)
@@ -792,10 +786,10 @@ export class RestStagingDO extends DurableObject {
 
 		for (const table of tableResults) {
 			const tableName = table.name as string;
-			const columnResults = this.ctx.storage.sql
+			const columnResults = this.sql
 				.exec(`PRAGMA table_info(${tableName})`)
 				.toArray();
-			const countResult = this.ctx.storage.sql
+			const countResult = this.sql
 				.exec(`SELECT COUNT(*) as count FROM "${tableName}"`)
 				.one();
 			const rowCount = Number((countResult as { count: number })?.count || 0);
@@ -841,11 +835,11 @@ export class RestStagingDO extends DurableObject {
 		// Include provenance metadata if available
 		let provenance: ProvenanceRow | undefined;
 		try {
-			const metaResults = this.ctx.storage.sql
+			const metaResults = this.sql
 				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_staging_metadata'`)
 				.toArray();
 			if (metaResults.length > 0) {
-				const metaRow = this.ctx.storage.sql
+				const metaRow = this.sql
 					.exec(`SELECT tool_name, server_name, api_url, staged_at, input_rows, stored_rows, failed_rows FROM _staging_metadata ORDER BY id DESC LIMIT 1`)
 					.toArray();
 				const first = metaRow[0];
@@ -861,9 +855,7 @@ export class RestStagingDO extends DurableObject {
 					};
 				}
 			}
-		} catch {
-			// Ignore — provenance is optional
-		}
+		} catch { /* best-effort: Ignore — provenance is optional */ }
 
 		return this.jsonResponse({
 			success: true,
@@ -896,11 +888,11 @@ export class RestStagingDO extends DurableObject {
 		}
 
 		// TTL cleanup: remove entries older than 24h
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`DELETE FROM _session_registry WHERE created_at < datetime('now', '-24 hours')`,
 		);
 
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`INSERT INTO _session_registry (session_id, data_access_id, tool_name, tables_json, total_rows, tool_prefix) VALUES (?, ?, ?, ?, ?, ?)`,
 			body.session_id,
 			body.data_access_id,
@@ -919,7 +911,7 @@ export class RestStagingDO extends DurableObject {
 	 */
 	private async handleList(sessionId?: string): Promise<Response> {
 		// Check if the registry table exists
-		const tableExists = this.ctx.storage.sql
+		const tableExists = this.sql
 			.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='_session_registry'`)
 			.toArray();
 		if (tableExists.length === 0) {
@@ -927,7 +919,7 @@ export class RestStagingDO extends DurableObject {
 		}
 
 		// TTL cleanup
-		this.ctx.storage.sql.exec(
+		this.sql.exec(
 			`DELETE FROM _session_registry WHERE created_at < datetime('now', '-24 hours')`,
 		);
 
@@ -935,7 +927,7 @@ export class RestStagingDO extends DurableObject {
 			return this.jsonResponse({ success: true, datasets: [] });
 		}
 
-		const rows = this.ctx.storage.sql
+		const rows = this.sql
 			.exec(
 				`SELECT data_access_id, tool_name, tables_json, total_rows, tool_prefix, created_at FROM _session_registry WHERE session_id = ? ORDER BY created_at DESC`,
 				sessionId,
@@ -967,7 +959,7 @@ export class RestStagingDO extends DurableObject {
 	private _vfs: VirtualFS | undefined;
 	private get vfs(): VirtualFS {
 		if (!this._vfs) {
-			this._vfs = new VirtualFS(this.ctx.storage.sql);
+			this._vfs = new VirtualFS(this.sql);
 		}
 		return this._vfs;
 	}

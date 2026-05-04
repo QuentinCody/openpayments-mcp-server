@@ -51,6 +51,10 @@
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
       "default": "./dist/adapters/*.js"
+    },
+    "./biothings/*": {
+      "types": "./dist/biothings/*.d.ts",
+      "default": "./dist/biothings/*.js"
     }
   },
   "scripts": {

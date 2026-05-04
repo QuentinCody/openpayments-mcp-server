@@ -152,9 +152,7 @@ export const adminPurgeMixin = {
 				)
 				.toArray()
 				.map((r) => String(r.name));
-		} catch {
-			// empty or non-SQL storage
-		}
+		} catch { /* best-effort: empty or non-SQL storage */ }
 		return { sqliteSizeBytes: safeDatabaseSize(storage), tables };
 	},
 };
