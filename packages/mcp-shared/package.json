@@ -55,6 +55,10 @@
     "./biothings/*": {
       "types": "./dist/biothings/*.d.ts",
       "default": "./dist/biothings/*.js"
+    },
+    "./coding/*": {
+      "types": "./dist/coding/*.d.ts",
+      "default": "./dist/coding/*.js"
     }
   },
   "scripts": {
