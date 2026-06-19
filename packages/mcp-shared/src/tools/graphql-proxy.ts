@@ -8,9 +8,10 @@
  */
 
 import { z } from "zod";
-import type { ToolEntry } from "../registry/types";
+import type { ToolContext, ToolEntry } from "../registry/types";
 import type { GraphqlFetchFn } from "../codemode/graphql-introspection";
 import { shouldStage, stageToDoAndRespond, type StageResult } from "../staging/utils";
+import { buildStageOptions } from "./api-proxy";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,23 +79,30 @@ export interface GraphqlProxyToolOptions {
 	stagingPrefix: string;
 	/** Byte threshold for auto-staging (default from shouldStage) */
 	stagingThreshold?: number;
+	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, auto-staging routes there (ADR-006 Phase 0). */
+	workspaceNamespace?: unknown;
 }
 
 interface StagingConfig {
 	doNamespace: unknown;
 	prefix: string;
 	threshold: number | undefined;
+	workspaceNamespace?: unknown;
 }
 
 /**
  * Try to auto-stage a large response into the DO.
  * Returns the staging envelope if staged, or undefined if not applicable.
+ *
+ * When `ctx.workspace` is set AND the server wired a `workspaceNamespace`,
+ * staging is routed into the shared WorkspaceDO via {@link buildStageOptions}
+ * (ADR-006 Phase 0). Otherwise the per-server DO path is used — unchanged.
  */
 async function tryAutoStage(
 	resultData: unknown,
 	responseBytes: number,
 	config: StagingConfig,
-	sessionId: string | undefined,
+	ctx: ToolContext | undefined,
 ): Promise<Record<string, unknown> | undefined> {
 	if (!config.doNamespace || !shouldStage(responseBytes, config.threshold)) {
 		return undefined;
@@ -107,7 +115,8 @@ async function tryAutoStage(
 		undefined,
 		undefined,
 		config.prefix,
-		sessionId,
+		ctx?.sessionId,
+		buildStageOptions(ctx, config.workspaceNamespace, config.prefix),
 	);
 	const tableDetail = buildStagedTableSummary(staged);
 	const envelope: Record<string, unknown> = {
@@ -132,7 +141,7 @@ async function executeAndMaybeStage(
 	query: string,
 	variables: Record<string, unknown> | undefined,
 	staging: StagingConfig,
-	sessionId: string | undefined,
+	ctx: ToolContext | undefined,
 ): Promise<unknown> {
 	const response = await gqlFetch(query, variables);
 
@@ -149,7 +158,7 @@ async function executeAndMaybeStage(
 	const resultData = response.data ?? {};
 
 	const responseBytes = JSON.stringify(resultData).length;
-	const staged = await tryAutoStage(resultData, responseBytes, staging, sessionId);
+	const staged = await tryAutoStage(resultData, responseBytes, staging, ctx);
 	const output = staged ?? resultData;
 
 	// Attach partial errors if present (errors-only case is handled above)
@@ -166,7 +175,7 @@ async function executeAndMaybeStage(
 function buildHandler(
 	gqlFetch: GraphqlFetchFn,
 	staging: StagingConfig,
-): (input: Record<string, unknown>, ctx: import("../registry/types").ToolContext) => Promise<unknown> {
+): (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> {
 	return async (input, ctx) => {
 		const query = String(input.query || "");
 		const variables = input.variables as Record<string, unknown> | undefined;
@@ -176,7 +185,7 @@ function buildHandler(
 		}
 
 		try {
-			return await executeAndMaybeStage(gqlFetch, query, variables, staging, ctx?.sessionId);
+			return await executeAndMaybeStage(gqlFetch, query, variables, staging, ctx);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return { __gql_error: true, message, errors: [{ message }] };
@@ -192,6 +201,7 @@ export function createGraphqlProxyTool(options: GraphqlProxyToolOptions): ToolEn
 		doNamespace: options.doNamespace,
 		prefix: options.stagingPrefix,
 		threshold: options.stagingThreshold,
+		workspaceNamespace: options.workspaceNamespace,
 	};
 
 	return {

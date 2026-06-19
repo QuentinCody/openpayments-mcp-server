@@ -100,40 +100,49 @@ function detectTier(data: unknown, config?: DomainConfig): 1 | 2 {
 }
 
 /**
+ * First items of every child-entity container shape inside a property value:
+ * a direct array, or each non-empty {nodes}/{edges:[{node}]}/{rows} wrapper.
+ * All wrapper keys are yielded independently — a node-less first edge must not
+ * mask a rows match.
+ */
+function nestedItemCandidates(value: unknown): unknown[] {
+	if (Array.isArray(value)) {
+		return value.length > 0 ? [value[0]] : [];
+	}
+	if (!value || typeof value !== "object") return [];
+	const wrapper = value as Record<string, unknown>;
+	const candidates: unknown[] = [];
+	if (Array.isArray(wrapper.nodes) && wrapper.nodes.length > 0) {
+		candidates.push(wrapper.nodes[0]);
+	}
+	if (Array.isArray(wrapper.edges) && wrapper.edges.length > 0) {
+		const firstNode = (wrapper.edges as Array<Record<string, unknown>>)[0]?.node;
+		if (firstNode) candidates.push(firstNode);
+	}
+	if (Array.isArray(wrapper.rows) && wrapper.rows.length > 0) {
+		candidates.push(wrapper.rows[0]);
+	}
+	return candidates;
+}
+
+/**
  * Check whether an object has nested entity relationships
  * (objects with IDs containing arrays of other ID-bearing objects).
  */
-function hasNestedEntities(obj: unknown, config?: DomainConfig): boolean {
+export function hasNestedEntities(obj: unknown, config?: DomainConfig): boolean {
 	if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
 
 	if (!isEntity(obj, config)) return false;
 
-	const record = obj as Record<string, unknown>;
-
-	for (const value of Object.values(record)) {
-		// Check direct arrays
-		if (Array.isArray(value) && value.length > 0) {
-			if (isEntity(value[0], config)) return true;
+	for (const value of Object.values(obj as Record<string, unknown>)) {
+		if (nestedItemCandidates(value).some((item) => isEntity(item, config))) {
+			return true;
 		}
 
-		// Check wrapper objects: {nodes: [...]}, {edges: [{node:}]}, {rows: [...]}
-		if (value && typeof value === "object" && !Array.isArray(value)) {
-			const wrapper = value as Record<string, unknown>;
-			if (wrapper.nodes && Array.isArray(wrapper.nodes) && wrapper.nodes.length > 0) {
-				if (isEntity(wrapper.nodes[0], config)) return true;
-			}
-			if (wrapper.edges && Array.isArray(wrapper.edges) && wrapper.edges.length > 0) {
-				const firstNode = (wrapper.edges as Array<Record<string, unknown>>)[0]?.node;
-				if (firstNode && isEntity(firstNode, config)) return true;
-			}
-			if (wrapper.rows && Array.isArray(wrapper.rows) && wrapper.rows.length > 0) {
-				if (isEntity(wrapper.rows[0], config)) return true;
-			}
-
-			// Check if it's a nested entity itself (1:1 relationship) that has its own nested entities
-			if (isEntity(value, config) && hasNestedEntities(value, config)) {
-				return true;
-			}
+		// A nested entity itself (1:1 relationship) may carry its own nested entities
+		const isNonArrayObject = value && typeof value === "object" && !Array.isArray(value);
+		if (isNonArrayObject && isEntity(value, config) && hasNestedEntities(value, config)) {
+			return true;
 		}
 	}
 

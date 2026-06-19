@@ -12,7 +12,7 @@ import { shouldStage, stageToDoAndRespond, type StageResult } from "../staging/u
 
 const ENVELOPE_SCALAR_LIMIT = 1024;
 
-function preserveEnvelopeScalars(
+export function preserveEnvelopeScalars(
 	original: unknown,
 	staging: Record<string, unknown>,
 ): void {
@@ -28,7 +28,7 @@ function preserveEnvelopeScalars(
 	}
 }
 
-function buildStagedTableSummary(staged: StageResult): string {
+export function buildStagedTableSummary(staged: StageResult): string {
 	const tables = staged.tablesCreated;
 	const rowCounts = staged._staging?.table_row_counts as
 		| Record<string, number>
@@ -85,7 +85,7 @@ interface ParsedSparqlEnvelope {
  * ASK queries (boolean) and CONSTRUCT/DESCRIBE (non-bindings) fall through
  * unchanged — the staging engine handles them as-is.
  */
-function shapeForStaging(parsed: ParsedSparqlEnvelope): unknown {
+export function shapeForStaging(parsed: ParsedSparqlEnvelope): unknown {
 	const bindings = parsed?.results?.bindings;
 	if (Array.isArray(bindings)) {
 		return bindings.map((b) => {

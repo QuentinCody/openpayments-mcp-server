@@ -32,6 +32,8 @@ export function registerCodeMode(server: McpServer, env: CodeModeEnv): void {
     // Register the execute tool (V8 isolate via DynamicWorkerExecutor)
     const executeTool = createExecuteTool({
         prefix: "openpay",
+        // Verifiable provenance: openpay_execute results carry a _meta.citation.
+        source: { id: "openpay", name: "CMS Open Payments", url: "https://openpaymentsdata.cms.gov", license: "U.S. Public Domain" },
         catalog: openPaymentsCatalog,
         apiFetch,
         doNamespace: env.OPENPAYMENTS_DATA_DO,

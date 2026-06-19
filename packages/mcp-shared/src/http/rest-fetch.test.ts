@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
 	buildQueryString,
 	registerRateLimitPolicy,
 	resetRateLimitState,
+	restFetch,
 } from "./rest-fetch";
 
 describe("buildQueryString", () => {
@@ -58,11 +59,99 @@ describe("resetRateLimitState", () => {
 });
 
 describe("restFetch", () => {
-	// restFetch calls global fetch which isn't available in unit test context
-	// without a full HTTP mock. Integration-level tests cover the retry/cache
-	// behavior. Here we verify the module exports are well-formed.
-	it("exports restFetch as a function", async () => {
-		const { restFetch } = await import("./rest-fetch");
-		expect(typeof restFetch).toBe("function");
+	let fetchMock: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		resetRateLimitState();
+		fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+	});
+
+	const mkRes = (status: number, body = "{}", headers: Record<string, string> = {}) =>
+		new Response(body, { status, headers });
+
+	const callOf = (n: number) => fetchMock.mock.calls[n] as [string, RequestInit & { headers: Record<string, string> }];
+
+	it("performs a GET with query string and default headers, returning the response", async () => {
+		fetchMock.mockResolvedValueOnce(mkRes(200, '{"ok":true}'));
+		const res = await restFetch("https://api.test/", "/items", { q: "x", n: 2 });
+		expect(res.status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [url, init] = callOf(0);
+		expect(url).toBe("https://api.test/items?q=x&n=2");
+		expect(init.method).toBe("GET");
+		expect(init.headers.Accept).toBe("application/json");
+		expect(init.headers["User-Agent"]).toBe("bio-mcp-server/1.0");
+	});
+
+	it("serializes an object body as JSON and sets Content-Type", async () => {
+		fetchMock.mockResolvedValueOnce(mkRes(200));
+		await restFetch("https://api.test", "/x", undefined, { method: "POST", body: { a: 1 } });
+		const init = callOf(0)[1];
+		expect(init.body).toBe('{"a":1}');
+		expect(init.headers["Content-Type"]).toBe("application/json");
+	});
+
+	it("passes a string body through unchanged", async () => {
+		fetchMock.mockResolvedValueOnce(mkRes(200));
+		await restFetch("https://api.test", "/x", undefined, { method: "POST", body: "raw-payload" });
+		expect(callOf(0)[1].body).toBe("raw-payload");
+	});
+
+	it("returns a non-retryable error status without retrying", async () => {
+		fetchMock.mockResolvedValueOnce(mkRes(404));
+		const res = await restFetch("https://api.test", "/missing");
+		expect(res.status).toBe(404);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("retries on a 429 and returns the eventual success", async () => {
+		vi.useFakeTimers();
+		fetchMock.mockResolvedValueOnce(mkRes(429)).mockResolvedValueOnce(mkRes(200, '{"ok":1}'));
+		const p = restFetch("https://api.test", "/x", undefined, { retries: 2 });
+		await vi.advanceTimersByTimeAsync(5000);
+		expect((await p).status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("honors a Retry-After header on a retryable status", async () => {
+		vi.useFakeTimers();
+		fetchMock
+			.mockResolvedValueOnce(mkRes(503, "", { "Retry-After": "1" }))
+			.mockResolvedValueOnce(mkRes(200));
+		const p = restFetch("https://api.test", "/x", undefined, { retries: 1 });
+		await vi.advanceTimersByTimeAsync(2000);
+		expect((await p).status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("recovers when a thrown network error is followed by success", async () => {
+		vi.useFakeTimers();
+		fetchMock.mockRejectedValueOnce(new Error("flaky")).mockResolvedValueOnce(mkRes(200));
+		const p = restFetch("https://api.test", "/x", undefined, { retries: 1 });
+		await vi.advanceTimersByTimeAsync(5000);
+		expect((await p).status).toBe(200);
+	});
+
+	it("throws the last error after exhausting retries on persistent failure", async () => {
+		vi.useFakeTimers();
+		fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+		const p = restFetch("https://api.test", "/x", undefined, { retries: 1 });
+		const expectation = expect(p).rejects.toThrow("ECONNRESET");
+		await vi.advanceTimersByTimeAsync(5000);
+		await expectation;
+		expect(fetchMock).toHaveBeenCalledTimes(2); // initial attempt + 1 retry
+	});
+
+	it("serializes requests that share a rate-limit policy key", async () => {
+		registerRateLimitPolicy({ key: "throttled", minIntervalMs: 1000 });
+		fetchMock.mockResolvedValue(mkRes(200));
+		await restFetch("https://api.test", "/first", undefined, { rateLimitKey: "throttled" });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

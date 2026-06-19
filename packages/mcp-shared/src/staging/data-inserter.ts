@@ -250,7 +250,130 @@ function insertEntityRecord(
 // Map entity fields to schema columns
 // ---------------------------------------------------------------------------
 
-function mapEntityToSchema(
+/** Outcome of one column-resolution strategy: `{ value }` = use it,
+ *  `"skip-column"` = omit the column entirely, `null` = try the next strategy. */
+type ColumnResolution = { value: unknown } | "skip-column" | null;
+
+/** Auto-increment integer PKs are assigned by SQLite, never mapped from data. */
+function isAutoIncrementPk(columnName: string, schema: TableSchema): boolean {
+	return columnName === "id" && schema.columns[columnName].includes("AUTOINCREMENT");
+}
+
+/** Strategy 1: a `<base>_json` column gets the JSON-stringified `<base>` object. */
+function resolveJsonColumn(
+	columnName: string,
+	record: Record<string, unknown>,
+	config?: DomainConfig,
+): ColumnResolution {
+	if (!columnName.endsWith("_json")) return null;
+	const originalKey = findOriginalKey(record, columnName.slice(0, -5), config);
+	if (
+		originalKey &&
+		record[originalKey] !== undefined &&
+		typeof record[originalKey] === "object" &&
+		record[originalKey] !== null
+	) {
+		return { value: JSON.stringify(record[originalKey]) };
+	}
+	return null;
+}
+
+/** Strategy 2: direct key match (camelCase→snake_case), with boolean coercion.
+ *  Entity values belong to the FK/junction strategies: an array of entities
+ *  skips the column; a single nested entity falls through (returns null). */
+function resolveDirectColumn(
+	columnName: string,
+	record: Record<string, unknown>,
+	config?: DomainConfig,
+): ColumnResolution {
+	const originalKey = findOriginalKey(record, columnName, config);
+	if (!originalKey || record[originalKey] === undefined) return null;
+
+	let value = record[originalKey];
+	if (typeof value === "boolean") value = value ? 1 : 0;
+
+	if (Array.isArray(value) && value.length > 0 && isEntity(value[0], config)) {
+		return "skip-column";
+	}
+	if (value && typeof value === "object" && !Array.isArray(value) && isEntity(value, config)) {
+		return null;
+	}
+	return { value };
+}
+
+/** Strategy 3: a `<base>_id` column resolves to the related entity's inserted id
+ *  (the processed-entity registry first, else the entity's own `id`). */
+function resolveForeignKey(
+	columnName: string,
+	record: Record<string, unknown>,
+	state: InsertionState,
+	config?: DomainConfig,
+): ColumnResolution {
+	if (!columnName.endsWith("_id")) return null;
+	const originalKey = findOriginalKey(record, columnName.slice(0, -3), config);
+	if (!originalKey || !record[originalKey] || typeof record[originalKey] !== "object") {
+		return null;
+	}
+	const nestedEntity = record[originalKey];
+
+	for (const [, entityMap] of state.processedEntities.entries()) {
+		if (entityMap.has(nestedEntity)) {
+			return { value: entityMap.get(nestedEntity)! };
+		}
+	}
+
+	const ownId = (nestedEntity as Record<string, unknown>).id;
+	return ownId !== undefined ? { value: ownId } : null;
+}
+
+/** Strategy 4: a `<prefix>_<subfield>` column resolves to `record[prefix][subfield]`. */
+function resolveNestedField(
+	columnName: string,
+	record: Record<string, unknown>,
+	config?: DomainConfig,
+): ColumnResolution {
+	if (!columnName.includes("_") || columnName.endsWith("_json") || columnName.endsWith("_id")) {
+		return null;
+	}
+	const parts = columnName.split("_");
+	for (let splitPoint = 1; splitPoint < parts.length; splitPoint++) {
+		const baseKey = parts.slice(0, splitPoint).join("_");
+		const subKey = parts.slice(splitPoint).join("_");
+		const originalKey = findOriginalKey(record, baseKey, config);
+		if (
+			originalKey &&
+			record[originalKey] &&
+			typeof record[originalKey] === "object" &&
+			!Array.isArray(record[originalKey])
+		) {
+			const nestedObj = record[originalKey] as Record<string, unknown>;
+			const originalSubKey = findOriginalKey(nestedObj, subKey, config);
+			if (originalSubKey && nestedObj[originalSubKey] !== undefined) {
+				let value = nestedObj[originalSubKey];
+				if (typeof value === "boolean") value = value ? 1 : 0;
+				return { value };
+			}
+		}
+	}
+	return null;
+}
+
+/** Resolve a column's value by running the strategies in priority order. */
+function resolveColumn(
+	columnName: string,
+	record: Record<string, unknown>,
+	state: InsertionState,
+	config?: DomainConfig,
+): ColumnResolution {
+	return (
+		resolveJsonColumn(columnName, record, config) ??
+		resolveDirectColumn(columnName, record, config) ??
+		resolveForeignKey(columnName, record, state, config) ??
+		resolveNestedField(columnName, record, config)
+	);
+}
+
+export function mapEntityToSchema(
 	obj: unknown,
 	schema: TableSchema,
 	state: InsertionState,
@@ -265,139 +388,13 @@ function mapEntityToSchema(
 	}
 
 	for (const columnName of Object.keys(schema.columns)) {
-		// Skip auto-increment PK
-		if (
-			columnName === "id" &&
-			schema.columns[columnName].includes("AUTOINCREMENT")
-		) {
-			continue;
-		}
+		if (isAutoIncrementPk(columnName, schema)) continue;
 
-		let value: unknown = null;
-		let found = false;
+		const resolution = resolveColumn(columnName, record, state, config);
+		if (resolution === "skip-column" || resolution === null) continue;
 
-		// 1. JSON columns
-		if (columnName.endsWith("_json")) {
-			const baseKey = columnName.slice(0, -5);
-			const originalKey = findOriginalKey(record, baseKey, config);
-			if (
-				originalKey &&
-				record[originalKey] !== undefined &&
-				typeof record[originalKey] === "object" &&
-				record[originalKey] !== null
-			) {
-				value = JSON.stringify(record[originalKey]);
-				found = true;
-			}
-		}
-
-		// 2. Direct column match (camelCase → snake_case)
-		if (!found) {
-			const originalKey = findOriginalKey(record, columnName, config);
-			if (originalKey && record[originalKey] !== undefined) {
-				value = record[originalKey];
-				if (typeof value === "boolean") value = value ? 1 : 0;
-
-				// Skip arrays of entities (junction tables handle these)
-				if (
-					Array.isArray(value) &&
-					(value as unknown[]).length > 0 &&
-					isEntity((value as unknown[])[0], config)
-				) {
-					continue;
-				}
-
-				// Skip nested entity objects (FK columns handle these)
-				if (
-					value &&
-					typeof value === "object" &&
-					!Array.isArray(value) &&
-					isEntity(value, config)
-				) {
-					value = null;
-				} else {
-					found = true;
-				}
-			}
-		}
-
-		// 3. Foreign key resolution — look up related entity's inserted ID
-		if (!found && columnName.endsWith("_id")) {
-			const baseKey = columnName.slice(0, -3);
-			const originalKey = findOriginalKey(record, baseKey, config);
-			if (
-				originalKey &&
-				record[originalKey] &&
-				typeof record[originalKey] === "object"
-			) {
-				const nestedEntity = record[originalKey];
-
-				// Check processedEntities first for the database-assigned ID
-				for (const [, entityMap] of state.processedEntities.entries()) {
-					if (entityMap.has(nestedEntity)) {
-						value = entityMap.get(nestedEntity)!;
-						found = true;
-						break;
-					}
-				}
-
-				// Fall back to the entity's own id field
-				if (
-					!found &&
-					(nestedEntity as Record<string, unknown>).id !== undefined
-				) {
-					value = (nestedEntity as Record<string, unknown>).id;
-					found = true;
-				}
-			}
-		}
-
-		// 4. Nested field extraction (prefix_subfield from prefix.subfield)
-		if (
-			!found &&
-			columnName.includes("_") &&
-			!columnName.endsWith("_json") &&
-			!columnName.endsWith("_id")
-		) {
-			const parts = columnName.split("_");
-			for (
-				let splitPoint = 1;
-				splitPoint < parts.length;
-				splitPoint++
-			) {
-				const baseKey = parts.slice(0, splitPoint).join("_");
-				const subKey = parts.slice(splitPoint).join("_");
-				const originalKey = findOriginalKey(record, baseKey, config);
-				if (
-					originalKey &&
-					record[originalKey] &&
-					typeof record[originalKey] === "object" &&
-					!Array.isArray(record[originalKey])
-				) {
-					const nestedObj = record[originalKey] as Record<
-						string,
-						unknown
-					>;
-					const originalSubKey = findOriginalKey(
-						nestedObj,
-						subKey,
-						config,
-					);
-					if (
-						originalSubKey &&
-						nestedObj[originalSubKey] !== undefined
-					) {
-						value = nestedObj[originalSubKey];
-						if (typeof value === "boolean") value = value ? 1 : 0;
-						found = true;
-						break;
-					}
-				}
-			}
-		}
-
-		if (found && value !== null && value !== undefined) {
-			rowData[columnName] = value;
+		if (resolution.value !== null && resolution.value !== undefined) {
+			rowData[columnName] = resolution.value;
 		}
 	}
 
@@ -408,7 +405,7 @@ function mapEntityToSchema(
 // Track relationships for junction tables
 // ---------------------------------------------------------------------------
 
-function trackEntityRelationships(
+export function trackEntityRelationships(
 	entity: Record<string, unknown>,
 	entityType: string,
 	entityId: number | string,

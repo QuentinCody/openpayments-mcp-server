@@ -28,6 +28,10 @@
       "types": "./dist/staging/*.d.ts",
       "default": "./dist/staging/*.js"
     },
+    "./workspace/*": {
+      "types": "./dist/workspace/*.d.ts",
+      "default": "./dist/workspace/*.js"
+    },
     "./entities/*": {
       "types": "./dist/entities/*.d.ts",
       "default": "./dist/entities/*.js"

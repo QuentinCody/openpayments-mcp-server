@@ -30,8 +30,10 @@ import { createGraphqlProxyTool } from "../tools/graphql-proxy";
 import { createQueryProxyTool, createStageProxyTool } from "../tools/api-proxy";
 import { createFsProxyHandlers } from "../tools/fs-proxy";
 import { buildFsProxySource } from "./fs-proxy";
+import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
+import { type Citation, type SourceDescriptor, buildCitation } from "../provenance/provenance";
 
 // ---------------------------------------------------------------------------
 // Options & result types
@@ -58,12 +60,21 @@ export interface GraphqlExecuteToolOptions {
 	introspection?: TrimmedIntrospection;
 	/** Display name for the API in tool description */
 	apiName?: string;
+	/** WorkspaceDO namespace (ADR-006 Phase 0). When provided AND the `_execute`
+	 *  call passes a `workspace` id, auto-staging routes into the shared
+	 *  WorkspaceDO (`idFromName("ws:" + workspace)`) so datasets from different
+	 *  servers land in one SQLite and can be JOINed. Omit for per-server staging. */
+	workspaceNamespace?: unknown;
+	/** Canonical upstream source identity. When declared, every result carries a
+	 *  verifiable `_meta.citation` (source + query/result hashes + timestamp) so a
+	 *  connected agent can attribute and re-verify each claim. Opt-in per server. */
+	source?: SourceDescriptor;
 }
 
 export interface GraphqlExecuteToolResult {
 	name: string;
 	description: string;
-	schema: { code: z.ZodString };
+	schema: { code: z.ZodString; workspace?: z.ZodOptional<z.ZodString> };
 	register: (server: { tool: (...args: unknown[]) => void }) => void;
 }
 
@@ -177,7 +188,7 @@ interface ExecutionContext {
 	preamble: string | undefined;
 	includeFsProxy: boolean;
 	gqlProxySource: string;
-	buildExecutorFns: (sessionId: string | undefined) => ExecutorFns;
+	buildExecutorFns: (sessionId: string | undefined, workspace?: string) => ExecutorFns;
 	cache: {
 		introspection: TrimmedIntrospection | undefined;
 		schemaSource: string | undefined;
@@ -200,7 +211,12 @@ async function ensureIntrospection(ctx: ExecutionContext): Promise<void> {
 }
 
 /** Execute user code in a V8 isolate with GraphQL + schema helpers. */
-async function executeCode(ctx: ExecutionContext, code: string, sessionId: string | undefined) {
+async function executeCode(
+	ctx: ExecutionContext,
+	code: string,
+	sessionId: string | undefined,
+	workspace?: string,
+) {
 	await ensureIntrospection(ctx);
 
 	const wrappedCode = wrapUserCode({
@@ -211,8 +227,13 @@ async function executeCode(ctx: ExecutionContext, code: string, sessionId: strin
 		includeFsProxy: ctx.includeFsProxy,
 	});
 	const executor = new DynamicWorkerExecutor({ loader: ctx.loader, timeout: ctx.timeout });
-	const result = await executor.execute(wrappedCode, ctx.buildExecutorFns(sessionId));
-	return handleExecutorResult(result);
+	const result = await executor.execute(wrappedCode, ctx.buildExecutorFns(sessionId, workspace));
+	return await handleExecutorResult(result, {
+		source: ctx.options.source,
+		server: ctx.options.prefix,
+		tool: `${ctx.options.prefix}_execute`,
+		query: code,
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -224,15 +245,16 @@ function createExecutorFnsBuilder(
 	doNamespace: unknown,
 	prefix: string,
 	fsDoNamespace: unknown,
-): (sessionId: string | undefined) => ExecutorFns {
-	const queryProxyTool = doNamespace ? createQueryProxyTool({ doNamespace }) : undefined;
-	const stageProxyTool = doNamespace ? createStageProxyTool({ doNamespace, stagingPrefix: prefix }) : undefined;
+	workspaceNamespace?: unknown,
+): (sessionId: string | undefined, workspace?: string) => ExecutorFns {
+	const queryProxyTool = doNamespace ? createQueryProxyTool({ doNamespace, workspaceNamespace }) : undefined;
+	const stageProxyTool = doNamespace ? createStageProxyTool({ doNamespace, stagingPrefix: prefix, workspaceNamespace }) : undefined;
 	const fsHandlers: ExecutorFns = fsDoNamespace
 		? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
 		: {};
 
-	return (sessionId: string | undefined) => {
-		const ctx: ToolContext = { sql: () => [], sessionId };
+	return (sessionId: string | undefined, workspace?: string) => {
+		const ctx: ToolContext = { sql: () => [], sessionId, workspace };
 		return {
 			__graphql_proxy: async (args: unknown) => graphqlProxyTool.handler(toInput(args), ctx),
 			__query_proxy: async (args: unknown) => {
@@ -258,13 +280,13 @@ function createExecutorFnsBuilder(
 export function createGraphqlExecuteTool(
 	options: GraphqlExecuteToolOptions,
 ): GraphqlExecuteToolResult {
-	const { prefix, gqlFetch, doNamespace, loader: rawLoader, stagingThreshold, timeout = 30_000, preamble, fsDoNamespace } = options;
+	const { prefix, gqlFetch, doNamespace, loader: rawLoader, stagingThreshold, timeout = 30_000, preamble, fsDoNamespace, workspaceNamespace } = options;
 
 	const loader = validateLoader(rawLoader);
 	const toolName = `${prefix}_execute`;
 
-	const graphqlProxyTool = createGraphqlProxyTool({ gqlFetch, doNamespace, stagingPrefix: prefix, stagingThreshold });
-	const buildExecutorFns = createExecutorFnsBuilder(graphqlProxyTool, doNamespace, prefix, fsDoNamespace);
+	const graphqlProxyTool = createGraphqlProxyTool({ gqlFetch, doNamespace, stagingPrefix: prefix, stagingThreshold, workspaceNamespace });
+	const buildExecutorFns = createExecutorFnsBuilder(graphqlProxyTool, doNamespace, prefix, fsDoNamespace, workspaceNamespace);
 
 	const ctx: ExecutionContext = {
 		gqlFetch,
@@ -289,17 +311,20 @@ export function createGraphqlExecuteTool(
 				"The last expression or explicit return value becomes the result. " +
 				'Example: const r = await gql.query(\'{ target(q: { sym: "EGFR" }) { name tdl } }\'); return r;',
 			),
+			workspace: z.string().optional().describe(
+				"Shared workspace id — stage into a cross-server workspace DO so other servers' datasets can be JOINed in one query. Omit for per-server staging.",
+			),
 		},
 
 		register(server: { tool: (...args: unknown[]) => void }) {
-			server.tool(toolName, this.description, this.schema, async (input: { code: string }, extra: unknown) => {
+			server.tool(toolName, this.description, this.schema, async (input: { code: string; workspace?: string }, extra: unknown) => {
 				const code = input.code?.trim();
 				if (!code) {
 					return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
 				}
 				try {
-					const sessionId = (extra as { sessionId?: string } | undefined)?.sessionId;
-					return await executeCode(ctx, code, sessionId);
+					const scope = getRequestScope(extra as MaybeExtra | undefined);
+					return await executeCode(ctx, code, scope, input.workspace);
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					return createCodeModeError(ErrorCodes.UNKNOWN_ERROR, `${prefix}_execute failed: ${message}`);
@@ -313,23 +338,65 @@ export function createGraphqlExecuteTool(
 // Result handling (shared with REST execute-tool pattern)
 // ---------------------------------------------------------------------------
 
-function handleExecutorResult(
+/** Provenance context threaded from the factory options into result handling. */
+interface CitationCtx {
+	source?: SourceDescriptor;
+	server: string;
+	tool: string;
+	query: unknown;
+}
+
+/** Records returned, for the citation: staged total_rows, else array length. */
+function countRecords(data: unknown, totalRows: unknown): number | undefined {
+	if (typeof totalRows === "number") return totalRows;
+	if (Array.isArray(data)) return data.length;
+	return undefined;
+}
+
+/** Build the optional `citation` meta when the server declared a source. */
+async function buildCitationMeta(
+	prov: CitationCtx | undefined,
+	data: unknown,
+	recordCount: number | undefined,
+	dataAccessId: string | undefined,
+	retrievedAt: string,
+): Promise<{ citation?: Citation }> {
+	if (!prov?.source) return {};
+	const citation = await buildCitation({
+		source: prov.source,
+		server: prov.server,
+		tool: prov.tool,
+		query: prov.query,
+		result: data,
+		retrievedAt,
+		recordCount,
+		dataAccessId,
+	});
+	return { citation };
+}
+
+async function handleExecutorResult(
 	result: { result?: unknown; error?: string; logs?: string[]; __stagedResults?: Array<Record<string, unknown>> },
+	prov?: CitationCtx,
 ) {
+	const retrievedAt = new Date().toISOString();
+
 	if (result.error) {
 		// Recover staging metadata if the error was from accessing staged arrays
 		if (result.__stagedResults?.length) {
 			const staged = result.__stagedResults[result.__stagedResults.length - 1];
 			const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
 			const { schema: _s, _staging: _st, ...slim } = staged;
+			const cite = await buildCitationMeta(prov, slim, staged.total_rows as number | undefined, staged.data_access_id as string | undefined, retrievedAt);
 			return createCodeModeResponse(slim, {
 				meta: {
 					staged: true,
 					data_access_id: staged.data_access_id as string,
 					tables_created: staged.tables_created,
 					total_rows: staged.total_rows,
+					...cite,
 					...(logOutput ? { console_output: logOutput } : {}),
-					executed_at: new Date().toISOString(),
+					executed_at: retrievedAt,
 				},
 			});
 		}
@@ -362,11 +429,20 @@ function handleExecutorResult(
 		responseData = slim;
 	}
 
+	const cite = await buildCitationMeta(
+		prov,
+		responseData,
+		countRecords(responseData, stagingMeta.total_rows),
+		stagingMeta.data_access_id as string | undefined,
+		retrievedAt,
+	);
+
 	return createCodeModeResponse(responseData, {
 		meta: {
 			...stagingMeta,
+			...cite,
 			...(logOutput ? { console_output: logOutput } : {}),
-			executed_at: new Date().toISOString(),
+			executed_at: retrievedAt,
 		},
 	});
 }

@@ -1,6 +1,7 @@
 // Unified tool registry
 export { ToolRegistry, type ToolDefinition } from "./registry/registry";
 export type { ToolEntry, ToolContext, SqlTaggedTemplate } from "./registry/types";
+export { getRequestScope, type MaybeExtra } from "./registry/request-scope";
 
 // Tool definitions
 export { sqlTools } from "./tools/sql";
@@ -36,6 +37,24 @@ export { buildGraphqlProxySource } from "./codemode/graphql-proxy";
 export { introspectionToSummary } from "./codemode/graphql-to-typescript";
 export { createGraphqlProxyTool, type GraphqlProxyToolOptions } from "./tools/graphql-proxy";
 
+// Provenance / citation (verifiable per-result source attribution)
+export {
+	buildCitation,
+	canonicalJson,
+	sha256Hex,
+	verifyCitation,
+	verifyResultHash,
+	type SourceDescriptor,
+	type Citation,
+	type BuildCitationInput,
+	type VerifyResult,
+} from "./provenance/provenance";
+export {
+	createVerifyCitationTool,
+	type VerifyCitationToolResult,
+	type VerifyCitationSchema,
+} from "./codemode/verify-citation-tool";
+
 // Code Mode response helpers
 export {
 	createCodeModeResponse,
@@ -50,6 +69,18 @@ export {
 	type SectionSource,
 	type ResponseMeta,
 } from "./codemode/response";
+
+// Completeness signal (machine-readable "is this the whole result?" verdict)
+export {
+	asCount,
+	inferUpstreamTotal,
+	paginationCompleteness,
+	deriveMaterializationCompleteness,
+	mergeCompleteness,
+	type Completeness,
+	type Truncation,
+	type TruncationReason,
+} from "./completeness";
 
 // Staging metadata (universal staging awareness)
 export {
@@ -84,6 +115,7 @@ export {
 	createGetSchemaHandler,
 	type StageResult,
 	type StagingProvenance,
+	type StageOptions,
 } from "./staging/utils";
 
 // Consolidated staging engine (Tier 1 + Tier 2)

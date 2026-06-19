@@ -32,8 +32,10 @@ import { createSparqlProxyTool } from "../tools/sparql-proxy";
 import { createQueryProxyTool, createStageProxyTool } from "../tools/api-proxy";
 import { createFsProxyHandlers } from "../tools/fs-proxy";
 import { buildFsProxySource } from "./fs-proxy";
+import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
+import { type Citation, type SourceDescriptor, buildCitation } from "../provenance/provenance";
 
 export interface SparqlExecuteToolOptions {
 	/** Tool name prefix (e.g., "bgee" → "bgee_execute") */
@@ -60,6 +62,51 @@ export interface SparqlExecuteToolOptions {
 	apiName?: string;
 	/** Custom prefix map to inject into isolate (defaults to COMMON_PREFIXES) */
 	prefixes?: Record<string, string>;
+	/** Canonical upstream source identity. When declared, every result carries a
+	 *  verifiable `_meta.citation` (source + query/result hashes + timestamp) so a
+	 *  connected agent can attribute and re-verify each claim. Opt-in per server. */
+	source?: SourceDescriptor;
+}
+
+// ---------------------------------------------------------------------------
+// Provenance / citation context (shared with GraphQL/REST execute-tool pattern)
+// ---------------------------------------------------------------------------
+
+/** Provenance context threaded from the factory options into result handling. */
+interface CitationCtx {
+	source?: SourceDescriptor;
+	server: string;
+	tool: string;
+	query: unknown;
+}
+
+/** Records returned, for the citation: staged total_rows, else array length. */
+function countRecords(data: unknown, totalRows: unknown): number | undefined {
+	if (typeof totalRows === "number") return totalRows;
+	if (Array.isArray(data)) return data.length;
+	return undefined;
+}
+
+/** Build the optional `citation` meta when the server declared a source. */
+async function buildCitationMeta(
+	prov: CitationCtx | undefined,
+	data: unknown,
+	recordCount: number | undefined,
+	dataAccessId: string | undefined,
+	retrievedAt: string,
+): Promise<{ citation?: Citation }> {
+	if (!prov?.source) return {};
+	const citation = await buildCitation({
+		source: prov.source,
+		server: prov.server,
+		tool: prov.tool,
+		query: prov.query,
+		result: data,
+		retrievedAt,
+		recordCount,
+		dataAccessId,
+	});
+	return { citation };
 }
 
 export interface SparqlExecuteToolResult {
@@ -230,7 +277,12 @@ async function executeCode(ctx: ExecutionContext, code: string, sessionId: strin
 	});
 	const executor = new DynamicWorkerExecutor({ loader: ctx.loader, timeout: ctx.timeout });
 	const result = await executor.execute(wrappedCode, ctx.buildExecutorFns(sessionId));
-	return handleExecutorResult(result);
+	return await handleExecutorResult(result, {
+		source: ctx.options.source,
+		server: ctx.options.prefix,
+		tool: `${ctx.options.prefix}_execute`,
+		query: code,
+	});
 }
 
 function createExecutorFnsBuilder(
@@ -334,8 +386,8 @@ export function createSparqlExecuteTool(options: SparqlExecuteToolOptions): Spar
 					return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
 				}
 				try {
-					const sessionId = (extra as { sessionId?: string } | undefined)?.sessionId;
-					return await executeCode(ctx, code, sessionId);
+					const scope = getRequestScope(extra as MaybeExtra | undefined);
+					return await executeCode(ctx, code, scope);
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					return createCodeModeError(ErrorCodes.UNKNOWN_ERROR, `${prefix}_execute failed: ${message}`);
@@ -345,22 +397,27 @@ export function createSparqlExecuteTool(options: SparqlExecuteToolOptions): Spar
 	};
 }
 
-function handleExecutorResult(
+async function handleExecutorResult(
 	result: { result?: unknown; error?: string; logs?: string[]; __stagedResults?: Array<Record<string, unknown>> },
+	prov?: CitationCtx,
 ) {
+	const retrievedAt = new Date().toISOString();
+
 	if (result.error) {
 		if (result.__stagedResults?.length) {
 			const staged = result.__stagedResults[result.__stagedResults.length - 1];
 			const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
 			const { schema: _s, _staging: _st, ...slim } = staged;
+			const cite = await buildCitationMeta(prov, slim, staged.total_rows as number | undefined, staged.data_access_id as string | undefined, retrievedAt);
 			return createCodeModeResponse(slim, {
 				meta: {
 					staged: true,
 					data_access_id: staged.data_access_id as string,
 					tables_created: staged.tables_created,
 					total_rows: staged.total_rows,
+					...cite,
 					...(logOutput ? { console_output: logOutput } : {}),
-					executed_at: new Date().toISOString(),
+					executed_at: retrievedAt,
 				},
 			});
 		}
@@ -387,11 +444,19 @@ function handleExecutorResult(
 		const { schema: _s, _staging: _st, ...slim } = resultObj;
 		responseData = slim;
 	}
+	const cite = await buildCitationMeta(
+		prov,
+		responseData,
+		countRecords(responseData, stagingMeta.total_rows),
+		stagingMeta.data_access_id as string | undefined,
+		retrievedAt,
+	);
 	return createCodeModeResponse(responseData, {
 		meta: {
 			...stagingMeta,
+			...cite,
 			...(logOutput ? { console_output: logOutput } : {}),
-			executed_at: new Date().toISOString(),
+			executed_at: retrievedAt,
 		},
 	});
 }

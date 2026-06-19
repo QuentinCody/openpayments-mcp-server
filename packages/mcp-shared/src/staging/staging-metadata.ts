@@ -6,6 +6,8 @@
  * models can reliably detect and use staged data without regex parsing.
  */
 
+import type { Completeness } from "../completeness";
+
 /** Describes a parent→child table relationship created by child table extraction */
 export interface TableRelationship {
 	child_table: string;
@@ -46,6 +48,12 @@ export interface StagingMetadata {
 	schema_tool: string;
 	/** Parent→child table relationships (from child table extraction) */
 	relationships?: TableRelationship[];
+	/**
+	 * Whether this staged set is the COMPLETE result for the query, or was cut
+	 * short. When `complete === false`, `truncation` explains why and how to
+	 * recover. Absent when no completeness determination could be made.
+	 */
+	completeness?: Completeness;
 }
 
 /**
@@ -61,6 +69,7 @@ export function buildStagingMetadata(opts: {
 	payloadSizeBytes?: number;
 	toolPrefix: string;
 	relationships?: TableRelationship[];
+	completeness?: Completeness;
 }): StagingMetadata {
 	return {
 		staged: true,
@@ -80,5 +89,6 @@ export function buildStagingMetadata(opts: {
 		...(opts.relationships && opts.relationships.length > 0
 			? { relationships: opts.relationships }
 			: {}),
+		...(opts.completeness ? { completeness: opts.completeness } : {}),
 	};
 }

@@ -81,7 +81,12 @@ async function __queryStaged(dataAccessId, sql) {
   if (result && result.__query_error) {
     throw new Error("Query failed: " + (result.message || "Unknown error"));
   }
-  return { results: result.rows || [], row_count: result.row_count || 0 };
+  // Surface truncated/total_matching so isolate code can tell whether it saw
+  // the full result set or only the first page (max 1000 rows per query).
+  var out = { results: result.rows || [], row_count: result.row_count || 0 };
+  if (result.truncated !== undefined) out.truncated = result.truncated;
+  if (result.total_matching !== undefined) out.total_matching = result.total_matching;
+  return out;
 }
 
 var api = {
@@ -110,6 +115,35 @@ var api = {
       err.status = result.status;
       err.data = result.data;
       err.driftHint = result.drift_hint;
+      throw err;
+    }
+    if (result && result.__staged) {
+      return __wrapStaged(result);
+    }
+    return result;
+  },
+
+  /**
+   * Fetch EVERY page of a paged endpoint and return the combined records.
+   * Prevents silent under-counting (fetching only page 1 of N).
+   *   const all = await api.getAll("/search", { db: "nuccore", term: "..." },
+   *     { strategy: "offset", offsetParam: "retstart", limitParam: "retmax", pageSize: 500 });
+   *   // all = { items, count, pages, total_available, completeness }
+   * opts: strategy ("offset"|"page"|"cursor"), pageSize, offsetParam, limitParam,
+   *   pageParam, pageSizeParam, cursorParam, nextField, itemsField, max, maxPages.
+   * Check result.completeness.complete — if false, result.completeness.truncation
+   * explains what was cut off and how to get the rest. Large sets auto-stage.
+   */
+  getAll: async function(path, params, opts) {
+    var result = await codemode.__paginate_proxy({
+      path: path,
+      params: params || {},
+      opts: opts || {},
+    });
+    if (result && result.__api_error) {
+      var err = new Error("API error " + result.status + ": " + (result.message || "Unknown error"));
+      err.status = result.status;
+      err.data = result.data;
       throw err;
     }
     if (result && result.__staged) {

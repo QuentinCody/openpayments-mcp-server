@@ -443,16 +443,7 @@ function inferChildTableSchema(
 // Schema inference
 // ---------------------------------------------------------------------------
 
-/**
- * Infer a complete schema from detected arrays.
- *
- * Two-pass column discovery:
- *   Pass 1: Flatten up to MAX_SCAN_ROWS for type inference.
- *   Pass 2: Scan up to MAX_DISCOVERY_ROWS beyond the sample to find
- *           sparse columns that only appear in later rows.
- *
- * Column classification is cached from the first pass to avoid redundant scans.
- */
+/** Infer a complete schema from detected arrays. Each phase lives in a helper below. */
 export function inferSchema(
 	arrays: Array<{ key: string; rows: unknown[] }>,
 	hints?: SchemaHints,
@@ -475,154 +466,21 @@ export function inferSchema(
 		if (seenNames.has(tableName)) continue;
 		seenNames.add(tableName);
 
-		// --- Pass 1: Flatten sample rows for type inference ---
-		const sampleRows = rows.slice(0, MAX_SCAN_ROWS);
-		const flattenedSample = sampleRows.map((row) => {
-			if (typeof row !== "object" || row === null) return { value: row };
-			return flattenObject(row as Record<string, unknown>, 2, hints?.flatten);
-		});
-
-		const columnValues = new Map<string, unknown[]>();
-		for (const row of flattenedSample) {
-			for (const [col, val] of Object.entries(row)) {
-				if (exclude.has(col)) continue;
-				let arr = columnValues.get(col);
-				if (!arr) { arr = []; columnValues.set(col, arr); }
-				arr.push(val);
-			}
-		}
-
-		// --- Pass 2: Discover sparse columns beyond the sample ---
-		// Only enumerates keys from additional rows; values are collected
-		// only for newly discovered columns to preserve classification thresholds.
-		if (rows.length > MAX_SCAN_ROWS) {
-			const discoveryEnd = Math.min(rows.length, MAX_DISCOVERY_ROWS);
-			const newColumns = new Set<string>();
-			for (let i = MAX_SCAN_ROWS; i < discoveryEnd; i++) {
-				const row = rows[i];
-				if (typeof row !== "object" || row === null) continue;
-				const flat = flattenObject(row as Record<string, unknown>, 2, hints?.flatten);
-				for (const [col, val] of Object.entries(flat)) {
-					if (exclude.has(col)) continue;
-					if (!columnValues.has(col)) {
-						columnValues.set(col, []);
-						newColumns.add(col);
-					}
-					// Collect values only for newly discovered columns
-					if (newColumns.has(col)) {
-						columnValues.get(col)?.push(val);
-					}
-				}
-			}
-		}
-
-		// --- Classify columns (cached for reuse in second pass) ---
+		const columnValues = collectColumnValues(rows, exclude, hints?.flatten);
 		const classificationCache = new Map<string, ArrayClassification>();
-
-		// First pass: classify and extract child tables
-		const childTables: InferredTable[] = [];
-		const childSourceColumns = new Set<string>();
-		const maxRecursionDepth = hints?.maxRecursionDepth ?? DEFAULT_MAX_RECURSION_DEPTH;
-
-		for (const [colName, values] of columnValues) {
-			if (skipChildTables.has(colName)) continue;
-
-			const classification = classifyColumn(values);
-			classificationCache.set(colName, classification);
-
-			if (classification === "object_array") {
-				const childTableResults = inferChildTableSchema(tableName, colName, values, 0, maxRecursionDepth);
-				const immediateChild = childTableResults[0];
-				if (immediateChild.columns.length <= MAX_CHILD_TABLE_COLUMNS) {
-					childTables.push(...childTableResults);
-					childSourceColumns.add(colName);
-				}
-			}
-		}
-
-		// Second pass: build parent columns (using cached classifications)
-		const columns: InferredColumn[] = [];
-		const indexes: string[] = [...(hints?.indexes ?? [])];
-
-		for (const [colName, values] of columnValues) {
-			// Skip columns that became child tables
-			if (childSourceColumns.has(colName)) continue;
-
-			const overrideType = hints?.columnTypes?.[colName];
-			let type: InferredColumn["type"];
-			let jsonShape: string | undefined;
-
-			let isPipeDelimited = false;
-
-			if (overrideType) {
-				type = overrideType as InferredColumn["type"];
-			} else {
-				// Use cached classification from first pass, or compute if not cached
-				const classification = classificationCache.get(colName) ?? classifyColumn(values);
-				if (classification === "scalar_array") {
-					type = "TEXT";
-					isPipeDelimited = true;
-				} else {
-					type = inferColumnType(values);
-				}
-			}
-
-			// Add jsonShape for JSON columns
-			if (type === "JSON") {
-				jsonShape = buildJsonShape(values);
-			}
-
-			columns.push({
-				name: colName,
-				type,
-				...(jsonShape ? { jsonShape } : {}),
-				...(isPipeDelimited ? { pipeDelimited: true } : {}),
-			});
-
-			// Auto-index: ID patterns + biological identifiers
-			if (shouldAutoIndex(colName) && !indexes.includes(colName)) {
-				indexes.push(colName);
-			}
-		}
-
-		// Composite indexes from hints (only if all columns exist in the table)
-		const compositeIndexes: string[][] = [];
-		if (hints?.compositeIndexes) {
-			const colNameSet = new Set(columns.map((c) => c.name));
-			for (const composite of hints.compositeIndexes) {
-				if (composite.every((col) => colNameSet.has(col))) {
-					compositeIndexes.push(composite);
-				}
-			}
-		}
-
-		// Cap parent table columns to avoid SQLite limits — keep indexed/important
-		// columns first, demote the rest to a single _overflow JSON column
-		let finalColumns = columns;
-		if (columns.length > MAX_TABLE_COLUMNS) {
-			const indexedSet = new Set(indexes);
-			const kept: InferredColumn[] = [];
-			const overflowed: string[] = [];
-
-			for (const col of columns) {
-				if (kept.length < MAX_TABLE_COLUMNS - 1 || indexedSet.has(col.name)) {
-					kept.push(col);
-				} else {
-					overflowed.push(col.name);
-				}
-			}
-
-			kept.push({
-				name: "_overflow",
-				type: "JSON",
-				jsonShape: `{${overflowed.slice(0, 5).join(", ")}${overflowed.length > 5 ? `, ... (+${overflowed.length - 5} more)` : ""}}`,
-			});
-			finalColumns = kept;
-		}
+		const { childTables, childSourceColumns } = extractChildTables(
+			tableName,
+			columnValues,
+			skipChildTables,
+			hints?.maxRecursionDepth ?? DEFAULT_MAX_RECURSION_DEPTH,
+			classificationCache,
+		);
+		const { columns, indexes } = buildParentColumns(columnValues, childSourceColumns, classificationCache, hints);
+		const compositeIndexes = selectCompositeIndexes(columns, hints);
 
 		tables.push({
 			name: tableName,
-			columns: finalColumns,
+			columns: capTableColumns(columns, indexes),
 			indexes,
 			...(compositeIndexes.length > 0 ? { compositeIndexes } : {}),
 		});
@@ -631,6 +489,145 @@ export function inferSchema(
 	}
 
 	return { tables };
+}
+
+// Two-pass column-value collection: pass 1 flattens up to MAX_SCAN_ROWS for type
+// inference; pass 2 scans up to MAX_DISCOVERY_ROWS for sparse columns, collecting
+// values only for newly discovered columns so pass-1 thresholds stay intact.
+function collectColumnValues(rows: unknown[], exclude: Set<string>, flatten?: SchemaHints["flatten"]): Map<string, unknown[]> {
+	const flattenedSample = rows.slice(0, MAX_SCAN_ROWS).map((row) => {
+		if (typeof row !== "object" || row === null) return { value: row };
+		return flattenObject(row as Record<string, unknown>, 2, flatten);
+	});
+
+	const columnValues = new Map<string, unknown[]>();
+	for (const row of flattenedSample) {
+		for (const [col, val] of Object.entries(row)) {
+			if (exclude.has(col)) continue;
+			let arr = columnValues.get(col);
+			if (!arr) { arr = []; columnValues.set(col, arr); }
+			arr.push(val);
+		}
+	}
+
+	if (rows.length > MAX_SCAN_ROWS) {
+		const discoveryEnd = Math.min(rows.length, MAX_DISCOVERY_ROWS);
+		const newColumns = new Set<string>();
+		for (let i = MAX_SCAN_ROWS; i < discoveryEnd; i++) {
+			const row = rows[i];
+			if (typeof row !== "object" || row === null) continue;
+			const flat = flattenObject(row as Record<string, unknown>, 2, flatten);
+			for (const [col, val] of Object.entries(flat)) {
+				if (exclude.has(col)) continue;
+				if (!columnValues.has(col)) {
+					columnValues.set(col, []);
+					newColumns.add(col);
+				}
+				if (newColumns.has(col)) {
+					columnValues.get(col)?.push(val);
+				}
+			}
+		}
+	}
+
+	return columnValues;
+}
+
+/** Classify columns (filling `cache`) and extract object-array columns into child tables. */
+function extractChildTables(
+	tableName: string,
+	columnValues: Map<string, unknown[]>,
+	skipChildTables: Set<string>,
+	maxRecursionDepth: number,
+	cache: Map<string, ArrayClassification>,
+): { childTables: InferredTable[]; childSourceColumns: Set<string> } {
+	const childTables: InferredTable[] = [];
+	const childSourceColumns = new Set<string>();
+	for (const [colName, values] of columnValues) {
+		if (skipChildTables.has(colName)) continue;
+		const classification = classifyColumn(values);
+		cache.set(colName, classification);
+		if (classification === "object_array") {
+			const childTableResults = inferChildTableSchema(tableName, colName, values, 0, maxRecursionDepth);
+			if (childTableResults[0].columns.length <= MAX_CHILD_TABLE_COLUMNS) {
+				childTables.push(...childTableResults);
+				childSourceColumns.add(colName);
+			}
+		}
+	}
+	return { childTables, childSourceColumns };
+}
+
+/** Build parent-table columns from classified values, honoring overrides and auto-indexing. */
+function buildParentColumns(
+	columnValues: Map<string, unknown[]>,
+	childSourceColumns: Set<string>,
+	cache: Map<string, ArrayClassification>,
+	hints?: SchemaHints,
+): { columns: InferredColumn[]; indexes: string[] } {
+	const columns: InferredColumn[] = [];
+	const indexes: string[] = [...(hints?.indexes ?? [])];
+	for (const [colName, values] of columnValues) {
+		// Skip columns that became child tables
+		if (childSourceColumns.has(colName)) continue;
+
+		const overrideType = hints?.columnTypes?.[colName];
+		let type: InferredColumn["type"];
+		let isPipeDelimited = false;
+		if (overrideType) {
+			type = overrideType as InferredColumn["type"];
+		} else {
+			const classification = cache.get(colName) ?? classifyColumn(values);
+			if (classification === "scalar_array") {
+				type = "TEXT";
+				isPipeDelimited = true;
+			} else {
+				type = inferColumnType(values);
+			}
+		}
+
+		const jsonShape = type === "JSON" ? buildJsonShape(values) : undefined;
+		columns.push({
+			name: colName,
+			type,
+			...(jsonShape ? { jsonShape } : {}),
+			...(isPipeDelimited ? { pipeDelimited: true } : {}),
+		});
+
+		// Auto-index: ID patterns + biological identifiers
+		if (shouldAutoIndex(colName) && !indexes.includes(colName)) {
+			indexes.push(colName);
+		}
+	}
+	return { columns, indexes };
+}
+
+/** Composite indexes from hints, kept only when every column exists in the table. */
+function selectCompositeIndexes(columns: InferredColumn[], hints?: SchemaHints): string[][] {
+	if (!hints?.compositeIndexes) return [];
+	const colNameSet = new Set(columns.map((c) => c.name));
+	return hints.compositeIndexes.filter((composite) => composite.every((col) => colNameSet.has(col)));
+}
+
+/** Cap wide tables: indexed/early columns stay, the rest demote into one _overflow JSON column. */
+function capTableColumns(columns: InferredColumn[], indexes: string[]): InferredColumn[] {
+	if (columns.length <= MAX_TABLE_COLUMNS) return columns;
+	const indexedSet = new Set(indexes);
+	const kept: InferredColumn[] = [];
+	const overflowed: string[] = [];
+	for (const col of columns) {
+		if (kept.length < MAX_TABLE_COLUMNS - 1 || indexedSet.has(col.name)) {
+			kept.push(col);
+		} else {
+			overflowed.push(col.name);
+		}
+	}
+	kept.push({
+		name: "_overflow",
+		type: "JSON",
+		jsonShape: `{${overflowed.slice(0, 5).join(", ")}${overflowed.length > 5 ? `, ... (+${overflowed.length - 5} more)` : ""}}`,
+	});
+	return kept;
 }
 
 function sanitizeTableName(key: string): string {
@@ -660,184 +657,9 @@ export interface MaterializationResult {
 // Column profiling — lightweight statistics computed post-materialization
 // ---------------------------------------------------------------------------
 
-export interface ColumnProfile {
-	/** Number of NULL values */
-	null_count: number;
-	/** Number of distinct non-null values (capped at 101 to detect high-cardinality) */
-	distinct_count: number;
-	/** true when actual distinct count exceeds the cap — real cardinality is higher */
-	distinct_capped?: boolean;
-	/** Minimum value (for INTEGER/REAL: number; for TEXT: shortest string; omitted for JSON) */
-	min?: string | number | null;
-	/** Maximum value (for INTEGER/REAL: number; for TEXT: longest string; omitted for JSON) */
-	max?: string | number | null;
-	/** 3-5 representative non-null sample values */
-	sample_values?: (string | number | null)[];
-	/** Top values by frequency for low-cardinality columns (distinct ≤ 20) */
-	top_values?: Array<{ value: string | number | null; count: number }>;
-}
-
-export interface TableProfile {
-	table: string;
-	row_count: number;
-	/** Column profiles keyed by column name */
-	columns: Record<string, ColumnProfile>;
-}
-
-/** Max distinct values to count before capping */
-const PROFILE_DISTINCT_CAP = 101;
-/** Max distinct values to report top_values for */
-const PROFILE_TOP_VALUES_THRESHOLD = 20;
-/** Max sample values to include */
-const PROFILE_SAMPLE_COUNT = 5;
-/** Max top_values entries */
-const PROFILE_TOP_VALUES_COUNT = 10;
-
-/**
- * Compute column profiles for all tables after materialization.
- *
- * Runs lightweight SQL queries against the just-populated SQLite tables.
- * Designed to be called inside the same transaction as materializeSchema()
- * so there's no extra I/O cost.
- */
-export function computeColumnProfiles(
-	schema: InferredSchema,
-	sql: { exec: (query: string, ...bindings: unknown[]) => { toArray: () => Record<string, unknown>[]; one: () => Record<string, unknown> | undefined } },
-): TableProfile[] {
-	const profiles: TableProfile[] = [];
-
-	for (const table of schema.tables) {
-		const rowCountResult = sql.exec(`SELECT COUNT(*) as c FROM "${table.name}"`).one();
-		const rowCount = Number((rowCountResult as { c: number })?.c ?? 0);
-		if (rowCount === 0) {
-			profiles.push({ table: table.name, row_count: 0, columns: {} });
-			continue;
-		}
-
-		const columnProfiles: Record<string, ColumnProfile> = {};
-
-		for (const col of table.columns) {
-			// Skip the synthetic parent_id FK — not useful to profile
-			if (col.name === "parent_id") continue;
-
-			const profile = profileColumn(table.name, col, rowCount, sql);
-			columnProfiles[col.name] = profile;
-		}
-
-		profiles.push({ table: table.name, row_count: rowCount, columns: columnProfiles });
-	}
-
-	return profiles;
-}
-
-/** Detect if a string value looks like a URL */
-function isUrlLike(v: unknown): boolean {
-	return typeof v === "string" && /^https?:\/\//.test(v);
-}
-
-/** Detect if a column is a high-cardinality identifier/URL column with no analytical value */
-function isLowValueColumn(col: InferredColumn, distinctCount: number, rowCount: number, sampleValue: unknown): boolean {
-	// URL columns: all unique, no one queries by URL
-	if (distinctCount >= rowCount * 0.9 && isUrlLike(sampleValue)) return true;
-	// _links_* columns are always low-value
-	if (col.name.startsWith("_links_")) return true;
-	return false;
-}
-
-function profileColumn(
-	tableName: string,
-	col: InferredColumn,
-	rowCount: number,
-	sql: { exec: (query: string, ...bindings: unknown[]) => { toArray: () => Record<string, unknown>[]; one: () => Record<string, unknown> | undefined } },
-): ColumnProfile {
-	const colRef = `"${col.name}"`;
-
-	// Null count
-	const nullResult = sql.exec(
-		`SELECT COUNT(*) as c FROM "${tableName}" WHERE ${colRef} IS NULL`,
-	).one();
-	const nullCount = Number((nullResult as { c: number })?.c ?? 0);
-
-	// Distinct count (capped at PROFILE_DISTINCT_CAP to avoid scanning huge cardinalities)
-	const distinctResult = sql.exec(
-		`SELECT COUNT(*) as c FROM (SELECT DISTINCT ${colRef} FROM "${tableName}" WHERE ${colRef} IS NOT NULL LIMIT ${PROFILE_DISTINCT_CAP})`,
-	).one();
-	const rawDistinct = Number((distinctResult as { c: number })?.c ?? 0);
-	const distinctCapped = rawDistinct >= PROFILE_DISTINCT_CAP;
-
-	// Peek at one value to check for URL/low-value columns
-	let peekValue: unknown = null;
-	try {
-		const peek = sql.exec(`SELECT ${colRef} as v FROM "${tableName}" WHERE ${colRef} IS NOT NULL LIMIT 1`).one();
-		peekValue = peek?.v;
-	} catch { /* non-critical */ }
-
-	const lowValue = isLowValueColumn(col, rawDistinct, rowCount, peekValue);
-
-	const profile: ColumnProfile = {
-		null_count: nullCount,
-		distinct_count: rawDistinct,
-		...(distinctCapped ? { distinct_capped: true } : {}),
-	};
-
-	// For low-value columns (URLs, _links_*), only report null_count and distinct_count
-	if (lowValue) {
-		return profile;
-	}
-
-	// Min/Max — skip for JSON columns (not meaningful)
-	if (col.type !== "JSON") {
-		try {
-			const minMaxResult = sql.exec(
-				`SELECT MIN(${colRef}) as min_val, MAX(${colRef}) as max_val FROM "${tableName}" WHERE ${colRef} IS NOT NULL`,
-			).one();
-			if (minMaxResult) {
-				profile.min = minMaxResult.min_val as string | number | null;
-				profile.max = minMaxResult.max_val as string | number | null;
-			}
-		} catch {
-			// Non-critical
-		}
-	}
-
-	// Sample values — skip for JSON columns (already have json_shape metadata)
-	if (col.type !== "JSON") {
-		try {
-			const sampleRows = sql.exec(
-				`SELECT DISTINCT ${colRef} as v FROM "${tableName}" WHERE ${colRef} IS NOT NULL LIMIT ${PROFILE_SAMPLE_COUNT}`,
-			).toArray();
-			if (sampleRows.length > 0) {
-				profile.sample_values = sampleRows.map((r) => {
-					const v = r.v;
-					// Truncate long strings in samples to save context
-					if (typeof v === "string" && v.length > 120) return `${v.slice(0, 117)}...`;
-					return v as string | number | null;
-				});
-			}
-		} catch {
-			// Non-critical
-		}
-	}
-
-	// Top values — only for low-cardinality columns
-	if (rawDistinct <= PROFILE_TOP_VALUES_THRESHOLD && rawDistinct > 0) {
-		try {
-			const topRows = sql.exec(
-				`SELECT ${colRef} as v, COUNT(*) as c FROM "${tableName}" WHERE ${colRef} IS NOT NULL GROUP BY ${colRef} ORDER BY c DESC LIMIT ${PROFILE_TOP_VALUES_COUNT}`,
-			).toArray();
-			if (topRows.length > 0) {
-				profile.top_values = topRows.map((r) => ({
-					value: r.v as string | number | null,
-					count: Number(r.c),
-				}));
-			}
-		} catch {
-			// Non-critical
-		}
-	}
-
-	return profile;
-}
+// Column profiling lives in ./column-profiles (extracted to keep this file
+// under the size cap); re-exported so existing import sites keep working.
+export { computeColumnProfiles, type ColumnProfile, type TableProfile } from "./column-profiles";
 
 /**
  * Convert a value for SQL insertion.

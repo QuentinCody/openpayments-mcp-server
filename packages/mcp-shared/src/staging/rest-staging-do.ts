@@ -27,6 +27,15 @@ import type { DomainConfig, StagingContext, StagingHints } from "./types";
 import type { TableRelationship } from "./staging-metadata";
 import { VirtualFS } from "../filesystem/virtual-fs";
 import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
+import { mergeSchemaHints } from "./schema-hints";
+import {
+	buildColumnDescriptor,
+	buildColumnMeta,
+	buildProfileByTable,
+	buildRelationshipJoins,
+	normalizeProvenance,
+	type ProvenanceRow,
+} from "./schema-response";
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for handleProcess / handleQuery / handleRegister
@@ -67,81 +76,9 @@ interface SessionRegistryRow {
 	created_at: string;
 }
 
-interface ProvenanceRow {
-	tool_name: string | null;
-	server_name: string | null;
-	api_url: string | null;
-	staged_at: string | null;
-	input_rows: number | null;
-	stored_rows: number | null;
-	failed_rows: number | null;
-}
-
-// ---------------------------------------------------------------------------
-// Schema hints merging — client-provided hints override server defaults
-// ---------------------------------------------------------------------------
-
-/**
- * Merge server-side schema hints with client-provided hints.
- * Client hints take precedence for overlapping keys (columnTypes, indexes, etc.).
- * Returns undefined if both inputs are undefined.
- */
-function mergeSchemaHints(
-	serverHints: SchemaHints | undefined,
-	clientHints: SchemaHints | undefined,
-): SchemaHints | undefined {
-	if (!serverHints && !clientHints) return undefined;
-	if (!serverHints) return clientHints;
-	if (!clientHints) return serverHints;
-
-	return {
-		// Client tableName wins if set
-		tableName: clientHints.tableName ?? serverHints.tableName,
-		// Merge columnTypes — client overrides per-column
-		columnTypes: serverHints.columnTypes || clientHints.columnTypes
-			? { ...serverHints.columnTypes, ...clientHints.columnTypes }
-			: undefined,
-		// Merge indexes — deduplicated union
-		indexes: serverHints.indexes || clientHints.indexes
-			? [...new Set([...(serverHints.indexes ?? []), ...(clientHints.indexes ?? [])])]
-			: undefined,
-		// Merge flatten depth overrides — client wins per-key
-		flatten: serverHints.flatten || clientHints.flatten
-			? { ...serverHints.flatten, ...clientHints.flatten }
-			: undefined,
-		// Merge exclude — deduplicated union
-		exclude: serverHints.exclude || clientHints.exclude
-			? [...new Set([...(serverHints.exclude ?? []), ...(clientHints.exclude ?? [])])]
-			: undefined,
-		// Merge skipChildTables — deduplicated union
-		skipChildTables: serverHints.skipChildTables || clientHints.skipChildTables
-			? [...new Set([...(serverHints.skipChildTables ?? []), ...(clientHints.skipChildTables ?? [])])]
-			: undefined,
-		// Client maxRecursionDepth wins if set
-		maxRecursionDepth: clientHints.maxRecursionDepth ?? serverHints.maxRecursionDepth,
-		// Merge compositeIndexes — concatenate (de-dup by serialized form)
-		compositeIndexes: serverHints.compositeIndexes || clientHints.compositeIndexes
-			? deduplicateCompositeIndexes([
-				...(serverHints.compositeIndexes ?? []),
-				...(clientHints.compositeIndexes ?? []),
-			])
-			: undefined,
-	};
-}
-
-/** Deduplicate composite indexes by their serialized column list. */
-function deduplicateCompositeIndexes(indexes: string[][]): string[][] {
-	const seen = new Set<string>();
-	const result: string[][] = [];
-	for (const idx of indexes) {
-		const key = idx.join(",");
-		if (!seen.has(key)) {
-			seen.add(key);
-			result.push(idx);
-		}
-	}
-	return result;
-}
+// Schema-hint merging (`mergeSchemaHints`) lives in ./schema-hints so the pure
+// logic can be unit-tested without loading this module's `cloudflare:workers`
+// import. See schema-hints.test.ts.
 
 /** Strip LIMIT/OFFSET clause from a SQL query for COUNT(*) wrapping. */
 function stripLimit(sql: string): string {
@@ -739,20 +676,7 @@ export class RestStagingDO extends DurableObject {
 		} catch { /* best-effort: — fall back to PRAGMA-only output */ }
 
 		// Build column metadata lookup from inferred schema
-		const columnMeta = new Map<string, { jsonShape?: string; pipeDelimited?: boolean }>();
-		if (inferredSchema) {
-			for (const table of inferredSchema.tables) {
-				for (const col of table.columns) {
-					const key = `${table.name}.${col.name}`;
-					if (col.jsonShape || col.pipeDelimited) {
-						columnMeta.set(key, {
-							jsonShape: col.jsonShape,
-							pipeDelimited: col.pipeDelimited,
-						});
-					}
-				}
-			}
-		}
+		const columnMeta = buildColumnMeta(inferredSchema);
 
 		// Load persisted column profiles
 		let columnProfiles: TableProfile[] | undefined;
@@ -771,12 +695,7 @@ export class RestStagingDO extends DurableObject {
 		} catch { /* best-effort: non-critical fallback */ }
 
 		// Build profile lookup: tableName → { colName → ColumnProfile }
-		const profileByTable = new Map<string, Record<string, unknown>>();
-		if (columnProfiles) {
-			for (const tp of columnProfiles) {
-				profileByTable.set(tp.table, tp.columns as unknown as Record<string, unknown>);
-			}
-		}
+		const profileByTable = buildProfileByTable(columnProfiles);
 
 		const tableResults = this.sql
 			.exec(
@@ -797,40 +716,17 @@ export class RestStagingDO extends DurableObject {
 
 			tables[tableName] = {
 				row_count: rowCount,
-				columns: columnResults.map((col: Record<string, unknown>) => {
-					const colName = col.name as string;
-					const meta = columnMeta.get(`${tableName}.${colName}`);
-					const tableProfiles = profileByTable.get(tableName) as Record<string, Record<string, unknown>> | undefined;
-					const colProfile = tableProfiles?.[colName];
-					return {
-						name: colName,
-						type: col.type as string,
-						not_null: col.notnull === 1,
-						primary_key: col.pk === 1,
-						...(meta?.jsonShape ? { json_shape: meta.jsonShape } : {}),
-						...(meta?.pipeDelimited ? { searchable_array: true } : {}),
-						...(colProfile ? { profile: colProfile } : {}),
-					};
-				}),
+				columns: columnResults.map((col: Record<string, unknown>) =>
+					buildColumnDescriptor(col, tableName, columnMeta, profileByTable),
+				),
 			};
 		}
 
-		// Extract relationships from inferred schema
+		// Extract relationships from inferred schema and attach sample JOIN SQL
 		const relationships: TableRelationship[] = inferredSchema
 			? this.extractRelationships(inferredSchema)
 			: [];
-
-		// Generate sample JOIN SQL for each relationship
-		const relationshipsWithJoins = relationships.map((rel) => {
-			// Determine parent PK column: if parent has a data "id" column, PK is _rowid
-			const parentTable = inferredSchema?.tables.find((t) => t.name === rel.parent_table);
-			const parentHasDataId = parentTable?.columns.some((c) => c.name === "id") ?? false;
-			const parentKeyCol = parentHasDataId ? "_rowid" : "id";
-			return {
-				...rel,
-				join_sql: `SELECT p.*, c.* FROM "${rel.parent_table}" p JOIN "${rel.child_table}" c ON c.parent_id = p.${parentKeyCol}`,
-			};
-		});
+		const relationshipsWithJoins = buildRelationshipJoins(relationships, inferredSchema);
 
 		// Include provenance metadata if available
 		let provenance: ProvenanceRow | undefined;
@@ -842,18 +738,7 @@ export class RestStagingDO extends DurableObject {
 				const metaRow = this.sql
 					.exec(`SELECT tool_name, server_name, api_url, staged_at, input_rows, stored_rows, failed_rows FROM _staging_metadata ORDER BY id DESC LIMIT 1`)
 					.toArray();
-				const first = metaRow[0];
-				if (first !== undefined) {
-					provenance = {
-						tool_name: typeof first.tool_name === "string" ? first.tool_name : null,
-						server_name: typeof first.server_name === "string" ? first.server_name : null,
-						api_url: typeof first.api_url === "string" ? first.api_url : null,
-						staged_at: typeof first.staged_at === "string" ? first.staged_at : null,
-						input_rows: typeof first.input_rows === "number" ? first.input_rows : null,
-						stored_rows: typeof first.stored_rows === "number" ? first.stored_rows : null,
-						failed_rows: typeof first.failed_rows === "number" ? first.failed_rows : null,
-					};
-				}
+				provenance = normalizeProvenance(metaRow[0]);
 			}
 		} catch { /* best-effort: Ignore — provenance is optional */ }
 

@@ -8,28 +8,13 @@
  */
 
 import { z } from "zod";
-import type { ToolEntry } from "../registry/types";
+import type { ToolContext, ToolEntry } from "../registry/types";
 import type { ApiCatalog, ApiFetchFn } from "../codemode/catalog";
 import type { ResolvedSpec } from "../codemode/openapi-resolver";
 import type { SchemaHints } from "../staging/schema-inference";
-import { shouldStage, stageToDoAndRespond, queryDataFromDo, type StageResult } from "../staging/utils";
-
-// ---------------------------------------------------------------------------
-// Interfaces for untyped/loosely-typed structures used in this module
-// ---------------------------------------------------------------------------
-
-/** OpenAPI parameter object (subset of fields we inspect). */
-interface SpecParameter {
-	in?: string;
-	name?: string;
-}
-
-/** OpenAPI operation object (subset of fields we inspect). */
-interface SpecOperation {
-	summary?: string;
-	operationId?: string;
-	parameters?: SpecParameter[];
-}
+import { shouldStage, stageToDoAndRespond, queryDataFromDo, type StageResult, type StageOptions } from "../staging/utils";
+import { inferUpstreamTotal } from "../completeness";
+import { buildDriftHint, buildKnownEndpointIndex } from "./api-proxy-drift";
 
 // ---------------------------------------------------------------------------
 
@@ -41,7 +26,7 @@ const DANGEROUS_PATTERNS = [
 	/\/\//,        // Double slash
 ];
 
-function validatePath(path: string): void {
+export function validatePath(path: string): void {
 	if (!path.startsWith("/")) {
 		throw new Error(`Path must start with /: ${path}`);
 	}
@@ -56,7 +41,7 @@ function validatePath(path: string): void {
  * Interpolate path parameters: /lookup/id/{id} with {id: "ENSG..."} => /lookup/id/ENSG...
  * Returns the interpolated path and remaining (non-path) params.
  */
-function interpolatePath(
+export function interpolatePath(
 	path: string,
 	params: Record<string, unknown>,
 ): { path: string; queryParams: Record<string, unknown> } {
@@ -70,6 +55,31 @@ function interpolatePath(
 		return encodeURIComponent(String(value));
 	});
 	return { path: interpolated, queryParams };
+}
+
+/** Type guard: checks that a value is an object with string keys (not null, not array). */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Build the {@link StageOptions} for a proxy staging call. When the request is
+ * workspace-scoped (`ctx.workspace` set AND the server wired a
+ * `workspaceNamespace`), route staging into the shared WorkspaceDO under the
+ * server's `stagingPrefix` as the dataset name (ADR-006 Phase 0). Otherwise
+ * return the plain per-server options — byte-for-byte unchanged.
+ */
+export function buildStageOptions(
+	ctx: ToolContext | undefined,
+	workspaceNamespace: unknown,
+	stagingPrefix: string,
+	upstreamTotal?: number,
+): StageOptions {
+	const workspace = ctx?.workspace;
+	if (workspace && workspaceNamespace) {
+		return { upstreamTotal, workspace: { namespace: workspaceNamespace, id: workspace, dataset: stagingPrefix } };
+	}
+	return { upstreamTotal };
 }
 
 /** Max size (bytes) for a single property to be preserved in the staging envelope. */
@@ -125,298 +135,6 @@ function buildStagedTableSummary(staged: StageResult): string {
 	return `${tables.length} tables: ${details}`;
 }
 
-type DriftHintKind =
-	| "unknown_endpoint"
-	| "contract_changed"
-	| "parameter_mismatch";
-
-interface DriftHint {
-	kind: DriftHintKind;
-	message: string;
-	suggestions?: Array<{ method: string; path: string; summary?: string }>;
-	expected_params?: string[];
-	known_methods?: string[];
-}
-
-interface KnownEndpoint {
-	method: string;
-	path: string;
-	summary?: string;
-	pathParamNames: string[];
-	queryParamNames: string[];
-}
-
-const HTTP_METHODS = new Set([
-	"get",
-	"post",
-	"put",
-	"delete",
-	"patch",
-	"options",
-	"head",
-	"trace",
-]);
-
-function uniqueStrings(values: Array<string | undefined>): string[] {
-	return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
-}
-
-function extractCatalogEndpoints(catalog?: ApiCatalog): KnownEndpoint[] {
-	if (!catalog) return [];
-
-	return catalog.endpoints.map((endpoint) => ({
-		method: endpoint.method.toUpperCase(),
-		path: endpoint.path,
-		summary: endpoint.summary,
-		pathParamNames: (endpoint.pathParams || []).map((param) => param.name),
-		queryParamNames: (endpoint.queryParams || []).map((param) => param.name),
-	}));
-}
-
-function extractSpecParamNames(
-	params: SpecParameter[],
-	location: "path" | "query",
-): string[] {
-	return uniqueStrings(
-		params.flatMap((param) => {
-			if (param.in !== location || typeof param.name !== "string") return [];
-			return [param.name];
-		}),
-	);
-}
-
-/** Type guard: checks that a value is an object with string keys (not null, not array). */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
-	if (!spec) return [];
-
-	const endpoints: KnownEndpoint[] = [];
-	for (const [path, pathItem] of Object.entries(spec.paths)) {
-		if (!isRecord(pathItem)) continue;
-		const pathParams: SpecParameter[] = Array.isArray(pathItem.parameters)
-			? pathItem.parameters.filter(isRecord) as SpecParameter[]
-			: [];
-
-		for (const [method, operation] of Object.entries(pathItem)) {
-			if (!HTTP_METHODS.has(method) || !isRecord(operation)) {
-				continue;
-			}
-
-			const operationParams: SpecParameter[] = Array.isArray(operation.parameters)
-				? operation.parameters.filter(isRecord) as SpecParameter[]
-				: [];
-			const mergedParams = [...pathParams, ...operationParams];
-
-			endpoints.push({
-				method: method.toUpperCase(),
-				path,
-				summary:
-					typeof operation.summary === "string"
-						? operation.summary
-						: typeof operation.operationId === "string"
-							? operation.operationId
-							: undefined,
-				pathParamNames: extractSpecParamNames(mergedParams, "path"),
-				queryParamNames: extractSpecParamNames(mergedParams, "query"),
-			});
-		}
-	}
-
-	return endpoints;
-}
-
-function buildKnownEndpointIndex(
-	catalog?: ApiCatalog,
-	openApiSpec?: ResolvedSpec,
-): KnownEndpoint[] {
-	const merged = new Map<string, KnownEndpoint>();
-
-	for (const endpoint of [...extractCatalogEndpoints(catalog), ...extractSpecEndpoints(openApiSpec)]) {
-		const key = `${endpoint.method} ${endpoint.path}`;
-		const existing = merged.get(key);
-		if (!existing) {
-			merged.set(key, {
-				...endpoint,
-				pathParamNames: uniqueStrings(endpoint.pathParamNames),
-				queryParamNames: uniqueStrings(endpoint.queryParamNames),
-			});
-			continue;
-		}
-
-		existing.summary ||= endpoint.summary;
-		existing.pathParamNames = uniqueStrings([
-			...existing.pathParamNames,
-			...endpoint.pathParamNames,
-		]);
-		existing.queryParamNames = uniqueStrings([
-			...existing.queryParamNames,
-			...endpoint.queryParamNames,
-		]);
-	}
-
-	return Array.from(merged.values());
-}
-
-function pathTemplateToRegExp(pathTemplate: string): RegExp {
-	const escaped = pathTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`^${escaped.replace(/\\\{[^}]+\\\}/g, "[^/]+")}$`);
-}
-
-function pathMatches(requestPath: string, endpointPath: string): boolean {
-	return requestPath === endpointPath || pathTemplateToRegExp(endpointPath).test(requestPath);
-}
-
-function pathSegments(path: string): string[] {
-	return path
-		.split("/")
-		.filter(Boolean)
-		.map((segment) => segment.toLowerCase())
-		.map((segment) => (segment.startsWith("{") && segment.endsWith("}") ? "{}" : segment));
-}
-
-function scoreSuggestion(
-	requestPath: string,
-	method: string,
-	endpoint: KnownEndpoint,
-): number {
-	const requestSegments = pathSegments(requestPath);
-	const endpointSegments = pathSegments(endpoint.path);
-	let score = endpoint.method === method ? 10 : 0;
-
-	const sharedPrefix = Math.min(requestSegments.length, endpointSegments.length);
-	for (let i = 0; i < sharedPrefix; i++) {
-		if (requestSegments[i] === endpointSegments[i]) {
-			score += 4;
-		} else if (requestSegments[i] === "{}" || endpointSegments[i] === "{}") {
-			score += 2;
-		} else {
-			break;
-		}
-	}
-
-	const overlap = requestSegments.filter((segment) => endpointSegments.includes(segment)).length;
-	score += overlap;
-	score -= Math.abs(requestSegments.length - endpointSegments.length);
-
-	if (endpoint.path.includes("{") && pathMatches(requestPath, endpoint.path)) {
-		score += 8;
-	}
-
-	return score;
-}
-
-function buildSuggestions(
-	requestPath: string,
-	method: string,
-	knownEndpoints: KnownEndpoint[],
-): Array<{ method: string; path: string; summary?: string }> {
-	return knownEndpoints
-		.map((endpoint) => ({
-			endpoint,
-			score: scoreSuggestion(requestPath, method, endpoint),
-		}))
-		.sort((left, right) => right.score - left.score)
-		.slice(0, 3)
-		.map(({ endpoint }) => ({
-			method: endpoint.method,
-			path: endpoint.path,
-			...(endpoint.summary ? { summary: endpoint.summary } : {}),
-		}));
-}
-
-function buildDriftHint(
-	method: string,
-	requestPath: string,
-	status: number,
-	knownEndpoints: KnownEndpoint[],
-): DriftHint | undefined {
-	if (knownEndpoints.length === 0) return undefined;
-
-	const normalizedMethod = method.toUpperCase();
-	const exactMatches = knownEndpoints.filter(
-		(endpoint) =>
-			endpoint.method === normalizedMethod && pathMatches(requestPath, endpoint.path),
-	);
-	const pathMatchesAnyMethod = knownEndpoints.filter((endpoint) =>
-		pathMatches(requestPath, endpoint.path),
-	);
-
-	if (exactMatches.length === 0) {
-		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
-		const suggestions = buildSuggestions(requestPath, normalizedMethod, knownEndpoints);
-		const suggestionText = suggestions.length > 0
-			? ` Try instead: ${suggestions
-				.map((suggestion) => `${suggestion.method} ${suggestion.path}`)
-				.join(", ")}.`
-			: "";
-		const methodText = knownMethods.length > 0
-			? ` This path exists for methods: ${knownMethods.join(", ")}.`
-			: "";
-
-		return {
-			kind: "unknown_endpoint",
-			message:
-				`Unknown endpoint: ${normalizedMethod} ${requestPath} does not exist.` +
-				methodText +
-				suggestionText,
-			...(suggestions.length > 0 ? { suggestions } : {}),
-			...(knownMethods.length > 0 ? { known_methods: knownMethods } : {}),
-		};
-	}
-
-	const matchedEndpoint = exactMatches[0];
-	const expectedParams = uniqueStrings([
-		...matchedEndpoint.pathParamNames,
-		...matchedEndpoint.queryParamNames,
-	]);
-
-	if ([400, 422].includes(status) && expectedParams.length > 0) {
-		return {
-			kind: "parameter_mismatch",
-			message:
-				`${normalizedMethod} ${matchedEndpoint.path} matches current metadata, but the API returned ${status}. ` +
-				`Expected path/query params include: ${expectedParams.join(", ")}. ` +
-				`Re-run getEndpoint(${JSON.stringify(matchedEndpoint.path)}, ${JSON.stringify(normalizedMethod)}) ` +
-				`or describeEndpoint(...) to verify names and required fields.`,
-			expected_params: expectedParams,
-		};
-	}
-
-	if ([404, 405, 410, 501].includes(status)) {
-		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
-		const hasPathParams = matchedEndpoint.pathParamNames.length > 0;
-
-		// 404 on a parameterized path (e.g. /studies/{id}) almost always means
-		// the specific resource doesn't exist, not that the endpoint is broken.
-		if (status === 404 && hasPathParams) {
-			return {
-				kind: "contract_changed",
-				message:
-					`Resource not found: the upstream API returned 404 for ${normalizedMethod} ${requestPath}. ` +
-					`The endpoint ${matchedEndpoint.path} exists but the requested resource was not found in the database. ` +
-					`Verify the identifier is correct and exists in this data source.`,
-			};
-		}
-
-		// 405/410/501 or 404 on a fixed path — likely an API contract change
-		return {
-			kind: "contract_changed",
-			message:
-				`${normalizedMethod} ${matchedEndpoint.path} returned ${status}. ` +
-				(status === 405
-					? `Method ${normalizedMethod} may not be allowed.`
-					: `The endpoint may have been removed or renamed.`) +
-				(knownMethods.length > 0 ? ` Known methods for this path: ${knownMethods.join(", ")}.` : ""),
-			...(knownMethods.length > 0 ? { known_methods: knownMethods } : {}),
-		};
-	}
-
-	return undefined;
-}
-
 export interface ApiProxyToolOptions {
 	apiFetch: ApiFetchFn;
 	/** Optional legacy catalog metadata for drift hints */
@@ -429,6 +147,8 @@ export interface ApiProxyToolOptions {
 	stagingPrefix?: string;
 	/** Byte threshold for auto-staging (default 100KB) */
 	stagingThreshold?: number;
+	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, auto-staging routes there (ADR-006 Phase 0). */
+	workspaceNamespace?: unknown;
 }
 
 /**
@@ -442,6 +162,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 		doNamespace,
 		stagingPrefix,
 		stagingThreshold,
+		workspaceNamespace,
 	} = options;
 	const knownEndpoints = buildKnownEndpointIndex(catalog, openApiSpec);
 
@@ -483,6 +204,10 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 					stagingPrefix &&
 					shouldStage(responseBytes, stagingThreshold)
 				) {
+					// The proxy is the only layer that sees the raw upstream envelope,
+					// so it's where we detect "upstream reports N matching, but this
+					// page only carried M" — the silent under-count failure mode.
+					const upstreamTotal = inferUpstreamTotal(result.data);
 					const staged = await stageToDoAndRespond(
 						result.data,
 						doNamespace as Parameters<typeof stageToDoAndRespond>[1],
@@ -491,8 +216,14 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						undefined,
 						stagingPrefix,
 						ctx?.sessionId,
+						buildStageOptions(ctx, workspaceNamespace, stagingPrefix, upstreamTotal),
 					);
 					const tableDetail = buildStagedTableSummary(staged);
+					const completeness = staged._staging?.completeness;
+					const incompleteNote =
+						completeness && completeness.complete === false
+							? ` INCOMPLETE: ${completeness.truncation?.detail ?? ""} ${completeness.truncation?.remedy ?? ""}`.trimEnd()
+							: "";
 					const response: Record<string, unknown> = {
 						__staged: true,
 						data_access_id: staged.dataAccessId,
@@ -500,7 +231,8 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						tables_created: staged.tablesCreated,
 						total_rows: staged.totalRows,
 						_staging: staged._staging,
-						message: `Response auto-staged (${(responseBytes / 1024).toFixed(1)}KB → ${tableDetail}). Use api.query("${staged.dataAccessId}", sql) in-band, or return this object for the caller to use the query_data tool.`,
+						...(staged.stagingWarnings ? { staging_warnings: staged.stagingWarnings } : {}),
+						message: `Response auto-staged (${(responseBytes / 1024).toFixed(1)}KB → ${tableDetail}). Use api.query("${staged.dataAccessId}", sql) in-band, or return this object for the caller to use the query_data tool.${incompleteNote}`,
 					};
 
 					preserveEnvelopeScalars(result.data, response);
@@ -539,6 +271,8 @@ export interface StageProxyToolOptions {
 	doNamespace: unknown;
 	/** Prefix for data access IDs (e.g., "gtex") */
 	stagingPrefix: string;
+	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, staging routes there (ADR-006 Phase 0). */
+	workspaceNamespace?: unknown;
 }
 
 /**
@@ -550,7 +284,7 @@ export interface StageProxyToolOptions {
  * DO's /process handler and merged with any server-side hints.
  */
 export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry {
-	const { doNamespace, stagingPrefix } = options;
+	const { doNamespace, stagingPrefix, workspaceNamespace } = options;
 
 	return {
 		name: "__stage_proxy",
@@ -593,6 +327,7 @@ export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry 
 					undefined,
 					stagingPrefix,
 					ctx?.sessionId,
+					buildStageOptions(ctx, workspaceNamespace, stagingPrefix),
 				);
 
 				return {
@@ -601,6 +336,7 @@ export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry 
 					total_rows: staged.totalRows,
 					schema: staged.schema,
 					_staging: staged._staging,
+					...(staged.stagingWarnings ? { staging_warnings: staged.stagingWarnings } : {}),
 				};
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -617,15 +353,66 @@ export function createStageProxyTool(options: StageProxyToolOptions): ToolEntry 
 export interface QueryProxyToolOptions {
 	/** DO namespace for querying staged data */
 	doNamespace: unknown;
+	/** Workspace DO namespace — when ctx.workspace is set, api.query routes here
+	 * (the staged data lives in the shared per-workspace SQLite, ADR-006). */
+	workspaceNamespace?: unknown;
+}
+
+/**
+ * Route an in-isolate query to the WorkspaceDO (`/ws/query`) when a workspace is
+ * active — the staged data lives in the shared per-workspace SQLite, addressed by
+ * the prefixed table names in the SQL, not a per-server data_access_id — else to
+ * the per-server DO via queryDataFromDo. (Inlines the /ws/query POST rather than
+ * importing queryWorkspaceFromDo to keep this module's import graph flat.)
+ */
+async function runProxyQuery(
+	doNamespace: unknown,
+	workspaceNamespace: unknown,
+	ctx: ToolContext | undefined,
+	dataAccessId: string,
+	sql: string,
+): Promise<{ rows: unknown[]; row_count: number; sql: string; data_access_id: string; truncated?: boolean; total_matching?: number }> {
+	const workspace = (ctx as ToolContext | undefined)?.workspace;
+	if (!workspace || !workspaceNamespace) {
+		return queryDataFromDo(doNamespace as DurableObjectNamespace, dataAccessId, sql, 1000);
+	}
+	const ns = workspaceNamespace as DurableObjectNamespace;
+	const stub = ns.get(ns.idFromName(`ws:${workspace}`));
+	const resp = await stub.fetch(
+		new Request("http://do.internal/ws/query", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ sql, limit: 1000 }),
+		}),
+	);
+	const r = (await resp.json()) as {
+		success?: boolean;
+		error?: string;
+		rows?: unknown[];
+		row_count?: number;
+		sql?: string;
+		truncated?: boolean;
+	};
+	if (!r.success) {
+		throw new Error(`Workspace query failed: ${r.error || "Unknown error"}`);
+	}
+	return {
+		rows: r.rows ?? [],
+		row_count: r.row_count ?? 0,
+		truncated: r.truncated,
+		sql: r.sql ?? sql,
+		data_access_id: `ws:${workspace}`,
+	};
 }
 
 /**
  * Create the hidden __query_proxy tool entry.
- * Routes SQL queries from isolate api.query()/db.queryStaged() to the
- * Durable Object's /query endpoint via queryDataFromDo().
+ * Routes SQL queries from isolate api.query()/db.queryStaged() to the staged-data
+ * DO — per-server via queryDataFromDo, or the shared WorkspaceDO when the call's
+ * ToolContext carries an active `workspace` (see runProxyQuery).
  */
 export function createQueryProxyTool(options: QueryProxyToolOptions): ToolEntry {
-	const { doNamespace } = options;
+	const { doNamespace, workspaceNamespace } = options;
 
 	return {
 		name: "__query_proxy",
@@ -635,7 +422,7 @@ export function createQueryProxyTool(options: QueryProxyToolOptions): ToolEntry 
 			data_access_id: z.string(),
 			sql: z.string(),
 		},
-		handler: async (input) => {
+		handler: async (input, ctx) => {
 			const dataAccessId = String(input.data_access_id || "");
 			const sql = String(input.sql || "");
 
@@ -647,12 +434,7 @@ export function createQueryProxyTool(options: QueryProxyToolOptions): ToolEntry 
 			}
 
 			try {
-				const result = await queryDataFromDo(
-					doNamespace as DurableObjectNamespace,
-					dataAccessId,
-					sql,
-					1000,
-				);
+				const result = await runProxyQuery(doNamespace, workspaceNamespace, ctx as ToolContext | undefined, dataAccessId, sql);
 				const queryResult = result as Record<string, unknown>;
 				return {
 					rows: result.rows,

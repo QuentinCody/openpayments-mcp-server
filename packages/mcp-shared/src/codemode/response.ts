@@ -6,6 +6,9 @@
  * `structuredContent` field in addition to `content` (text).
  */
 
+import type { Completeness } from "../completeness";
+import type { Citation } from "../provenance/provenance";
+
 export interface CodeModeResponse<T = unknown> {
 	[key: string]: unknown;
 	/** Standard MCP text content for non-Code Mode clients */
@@ -33,6 +36,15 @@ export interface ResponseMeta {
 	row_count?: number;
 	/** Per-section provenance: which upstream API provided each piece of data */
 	provenance?: SectionSource[];
+	/** Verifiable single-result citation: source identity + query/result hashes +
+	 *  retrieval time. Present when the server declared a `source` (opt-in). */
+	citation?: Citation;
+	/**
+	 * Whether the returned/staged result is the COMPLETE answer to the query.
+	 * Surfaced so models can detect silent under-counting (incomplete pagination)
+	 * or capped result sets instead of treating a partial set as the whole.
+	 */
+	completeness?: Completeness;
 	[key: string]: unknown;
 }
 

@@ -266,6 +266,54 @@ function walkAndDiscover(
 // processEntityProperties — scan an entity's fields for nested relationships
 // ---------------------------------------------------------------------------
 
+/**
+ * Unwrap a property value into its item array: non-empty direct arrays, or the
+ * {nodes}/{edges:[{node}]}/{rows} wrapper shapes. Empty wrapper arrays return []
+ * (not null) so the caller still explores the wrapper object itself.
+ */
+function unwrapItemsContainer(value: unknown): unknown[] | null {
+	if (Array.isArray(value)) {
+		return value.length > 0 ? value : null;
+	}
+	if (!value || typeof value !== "object") return null;
+	const wrapper = value as Record<string, unknown>;
+	if (wrapper.nodes && Array.isArray(wrapper.nodes)) {
+		return wrapper.nodes;
+	}
+	if (wrapper.edges && Array.isArray(wrapper.edges)) {
+		return (wrapper.edges as Array<Record<string, unknown>>)
+			.map((e) => e.node)
+			.filter(Boolean);
+	}
+	if (wrapper.rows && Array.isArray(wrapper.rows)) {
+		return wrapper.rows;
+	}
+	return null;
+}
+
+/** Record a discovered to-many relationship and recurse into each related entity. */
+function processRelatedItems(
+	items: unknown[],
+	key: string,
+	entityType: string,
+	entities: Map<string, unknown[]>,
+	relationships: Map<string, Set<string>>,
+	config?: DomainConfig,
+): void {
+	const firstEntity = items.find((item) => isEntity(item, config));
+	if (!firstEntity) return;
+
+	const relatedType = inferEntityType(firstEntity, [key], config);
+	recordRelationship(relationships, entityType, relatedType);
+
+	for (const item of items) {
+		if (isEntity(item, config)) {
+			addEntity(entities, relatedType, item);
+			processEntityProperties(item, relatedType, entities, relationships, config);
+		}
+	}
+}
+
 function processEntityProperties(
 	entity: unknown,
 	entityType: string,
@@ -276,53 +324,21 @@ function processEntityProperties(
 	const record = entity as Record<string, unknown>;
 
 	for (const [key, value] of Object.entries(record)) {
-		// Unwrap wrapper objects: {nodes: [...]}, {edges: [{node:}]}, {rows: [...]}
-		let items: unknown[] | null = null;
-
-		if (Array.isArray(value) && value.length > 0) {
-			items = value;
-		} else if (value && typeof value === "object" && !Array.isArray(value)) {
-			const wrapper = value as Record<string, unknown>;
-			if (wrapper.nodes && Array.isArray(wrapper.nodes)) {
-				items = wrapper.nodes;
-			} else if (wrapper.edges && Array.isArray(wrapper.edges)) {
-				items = (wrapper.edges as Array<Record<string, unknown>>)
-					.map((e) => e.node)
-					.filter(Boolean);
-			} else if (wrapper.rows && Array.isArray(wrapper.rows)) {
-				items = wrapper.rows;
-			}
+		const items = unwrapItemsContainer(value);
+		if (items && items.length > 0) {
+			processRelatedItems(items, key, entityType, entities, relationships, config);
+			continue;
 		}
 
-		if (items && items.length > 0) {
-			const firstEntity = items.find((item) => isEntity(item, config));
-			if (firstEntity) {
-				const relatedType = inferEntityType(firstEntity, [key], config);
-				recordRelationship(relationships, entityType, relatedType);
+		const isNonArrayObject = value && typeof value === "object" && !Array.isArray(value);
+		if (!isNonArrayObject) continue;
 
-				for (const item of items) {
-					if (isEntity(item, config)) {
-						addEntity(entities, relatedType, item);
-						processEntityProperties(item, relatedType, entities, relationships, config);
-					}
-				}
-			}
-		} else if (
-			value &&
-			typeof value === "object" &&
-			!Array.isArray(value) &&
-			isEntity(value, config)
-		) {
+		if (isEntity(value, config)) {
 			// 1:1 relationships → direct FK column, no junction table.
 			const relatedType = inferEntityType(value, [key], config);
 			addEntity(entities, relatedType, value);
 			processEntityProperties(value, relatedType, entities, relationships, config);
-		} else if (
-			value &&
-			typeof value === "object" &&
-			!Array.isArray(value) &&
-			!isEntity(value, config)
-		) {
+		} else {
 			// Non-entity wrapper — explore for nested entities
 			processEntityProperties(value, entityType, entities, relationships, config);
 		}

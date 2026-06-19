@@ -80,6 +80,40 @@ export interface GraphQlToCatalogOptions {
 const MAX_SHAPE_DEPTH = 4;
 const MAX_SHAPE_PROPERTIES = 12;
 
+/** Merge allOf sub-schemas into a single object schema (properties + required). */
+function mergeAllOfSchemas(subSchemas: Record<string, unknown>[]): Record<string, unknown> {
+	const merged: Record<string, unknown> = { type: "object", properties: {}, required: [] };
+	for (const sub of subSchemas) {
+		if (sub.properties && typeof sub.properties === "object") {
+			Object.assign(merged.properties as object, sub.properties);
+		}
+		if (Array.isArray(sub.required)) {
+			(merged.required as string[]).push(...(sub.required as string[]));
+		}
+	}
+	return merged;
+}
+
+/** Render the object/default branch: named properties, Record<> maps, or any/object fallbacks. */
+function objectShapeFromSchema(s: Record<string, unknown>, depth: number): string {
+	if (s.type && s.type !== "object" && !s.properties) return "any";
+	const props = s.properties;
+	if (!props || typeof props !== "object") {
+		if (s.additionalProperties && typeof s.additionalProperties === "object") {
+			return `Record<string, ${schemaToResponseShape(s.additionalProperties, depth + 1)}>`;
+		}
+		return s.properties === undefined && !s.type ? "any" : "object";
+	}
+	const entries = Object.entries(props as Record<string, unknown>);
+	const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+	const parts = entries.slice(0, MAX_SHAPE_PROPERTIES).map(([key, val]) => {
+		const opt = required.has(key) ? "" : "?";
+		return `${key}${opt}: ${schemaToResponseShape(val, depth + 1)}`;
+	});
+	const ellipsis = entries.length > MAX_SHAPE_PROPERTIES ? ", ..." : "";
+	return `{ ${parts.join(", ")}${ellipsis} }`;
+}
+
 /**
  * Convert an OpenAPI/JSON-Schema object to a TypeScript-like shape string.
  * E.g. `{ id: string, items: Array<{ name: string, count: number }> }`
@@ -99,16 +133,7 @@ export function schemaToResponseShape(schema: unknown, depth = 0): string {
 
 	// Intersection/composition
 	if (Array.isArray(s.allOf)) {
-		const merged: Record<string, unknown> = { type: "object", properties: {}, required: [] };
-		for (const sub of s.allOf as Record<string, unknown>[]) {
-			if (sub.properties && typeof sub.properties === "object") {
-				Object.assign(merged.properties as object, sub.properties);
-			}
-			if (Array.isArray(sub.required)) {
-				(merged.required as string[]).push(...(sub.required as string[]));
-			}
-		}
-		return schemaToResponseShape(merged, depth);
+		return schemaToResponseShape(mergeAllOfSchemas(s.allOf as Record<string, unknown>[]), depth);
 	}
 
 	// Enums
@@ -130,25 +155,9 @@ export function schemaToResponseShape(schema: unknown, depth = 0): string {
 			const items = s.items ? schemaToResponseShape(s.items, depth + 1) : "any";
 			return `Array<${items}>`;
 		}
-		case "object":
-		default: {
-			if (s.type && s.type !== "object" && !s.properties) return "any";
-			const props = s.properties;
-			if (!props || typeof props !== "object") {
-				if (s.additionalProperties && typeof s.additionalProperties === "object") {
-					return `Record<string, ${schemaToResponseShape(s.additionalProperties, depth + 1)}>`;
-				}
-				return s.properties === undefined && !s.type ? "any" : "object";
-			}
-			const entries = Object.entries(props as Record<string, unknown>);
-			const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
-			const parts = entries.slice(0, MAX_SHAPE_PROPERTIES).map(([key, val]) => {
-				const opt = required.has(key) ? "" : "?";
-				return `${key}${opt}: ${schemaToResponseShape(val, depth + 1)}`;
-			});
-			const ellipsis = entries.length > MAX_SHAPE_PROPERTIES ? ", ..." : "";
-			return `{ ${parts.join(", ")}${ellipsis} }`;
-		}
+		default:
+			// "object", absent, or anything else falls through to the object renderer
+			return objectShapeFromSchema(s, depth);
 	}
 }
 
@@ -257,57 +266,12 @@ export function openApiToCatalog(
 
 		for (const [method, value] of Object.entries(pathRecord)) {
 			if (!value || typeof value !== "object") continue;
+			const op = value as Record<string, unknown>;
 
-			// Handle PATCH → PUT mapping
 			if (method === "patch") {
-				const op = value as Record<string, unknown>;
-				const mappedRecord = {
-					...pathRecord,
-					put: {
-						...op,
-						description: op.description
-							? `[Originally PATCH] ${op.description}`
-							: "[Originally PATCH]",
-					},
-				};
-				// Process as PUT (recursive single-endpoint extraction)
-				const pathParams = Array.isArray(pathRecord.parameters) ? pathRecord.parameters : [];
-				const opParams = Array.isArray(op.parameters) ? op.parameters : [];
-				const allParams = [...pathLevelParams, ...(opParams as Record<string, unknown>[])];
-
-				const endpoint = buildEndpointFromOperation(
-					"PUT",
-					pathStr,
-					{
-						...op,
-						description: op.description
-							? `[Originally PATCH] ${op.description}`
-							: "[Originally PATCH]",
-					} as Record<string, unknown>,
-					allParams,
-					strategy,
-					includeExamples,
-				);
-
-				if (endpoint) {
-					if (op.deprecated && !includeDeprecated) {
-						diagnostics.push({
-							level: "info",
-							message: "Skipped deprecated PATCH endpoint (mapped to PUT)",
-							path: pathStr,
-							method: "PATCH",
-						});
-					} else {
-						if (op.deprecated) endpoint.deprecated = true;
-						endpoints.push(endpoint);
-						diagnostics.push({
-							level: "info",
-							message: "Mapped PATCH to PUT",
-							path: pathStr,
-							method: "PATCH",
-						});
-					}
-				}
+				const mapped = buildPatchAsPut(pathStr, op, pathLevelParams, strategy, includeExamples, includeDeprecated);
+				diagnostics.push(...mapped.diagnostics);
+				if (mapped.endpoint) endpoints.push(mapped.endpoint);
 				continue;
 			}
 
@@ -323,7 +287,6 @@ export function openApiToCatalog(
 
 			if (!SUPPORTED_METHODS.has(method)) continue;
 
-			const op = value as Record<string, unknown>;
 			if (op.deprecated && !includeDeprecated) {
 				diagnostics.push({
 					level: "info",
@@ -337,13 +300,11 @@ export function openApiToCatalog(
 			const opParams = Array.isArray(op.parameters)
 				? (op.parameters as Record<string, unknown>[])
 				: [];
-			const allParams = mergeParams(pathLevelParams, opParams);
-
 			const endpoint = buildEndpointFromOperation(
 				method.toUpperCase() as ApiEndpoint["method"],
 				pathStr,
 				op,
-				allParams,
+				mergeParams(pathLevelParams, opParams),
 				strategy,
 				includeExamples,
 			);
@@ -355,12 +316,75 @@ export function openApiToCatalog(
 		}
 	}
 
+	return assembleOpenApiCatalog(spec, opts, endpoints, diagnostics);
+}
+
+/**
+ * Map a PATCH operation onto a PUT endpoint, tagging its description.
+ * Note: unlike the regular path, PATCH params are concatenated (not deduped
+ * via mergeParams) — long-standing behavior preserved.
+ */
+function buildPatchAsPut(
+	pathStr: string,
+	op: Record<string, unknown>,
+	pathLevelParams: Record<string, unknown>[],
+	strategy: CategoryStrategy,
+	includeExamples: boolean,
+	includeDeprecated: boolean,
+): { endpoint: ApiEndpoint | null; diagnostics: CatalogDiagnostic[] } {
+	const diagnostics: CatalogDiagnostic[] = [];
+	const opParams = Array.isArray(op.parameters)
+		? (op.parameters as Record<string, unknown>[])
+		: [];
+
+	const endpoint = buildEndpointFromOperation(
+		"PUT",
+		pathStr,
+		{
+			...op,
+			description: op.description
+				? `[Originally PATCH] ${op.description}`
+				: "[Originally PATCH]",
+		} as Record<string, unknown>,
+		[...pathLevelParams, ...opParams],
+		strategy,
+		includeExamples,
+	);
+
+	if (!endpoint) return { endpoint: null, diagnostics };
+
+	if (op.deprecated && !includeDeprecated) {
+		diagnostics.push({
+			level: "info",
+			message: "Skipped deprecated PATCH endpoint (mapped to PUT)",
+			path: pathStr,
+			method: "PATCH",
+		});
+		return { endpoint: null, diagnostics };
+	}
+
+	if (op.deprecated) endpoint.deprecated = true;
+	diagnostics.push({
+		level: "info",
+		message: "Mapped PATCH to PUT",
+		path: pathStr,
+		method: "PATCH",
+	});
+	return { endpoint, diagnostics };
+}
+
+/** Sort endpoints, derive the base URL, and assemble the catalog envelope. */
+function assembleOpenApiCatalog(
+	spec: ResolvedSpec,
+	opts: OpenApiToCatalogOptions,
+	endpoints: ApiEndpoint[],
+	diagnostics: CatalogDiagnostic[],
+): CatalogGeneratorResult {
 	// Sort by category then path
 	endpoints.sort(
 		(a, b) => a.category.localeCompare(b.category) || a.path.localeCompare(b.path),
 	);
 
-	// Derive base URL
 	const specBaseUrl = spec.servers?.[0]?.url || "";
 
 	const catalog: ApiCatalog = {
@@ -386,6 +410,52 @@ function mergeParams(
 	return Array.from(map.values());
 }
 
+/** Extract the request-body descriptor (first content type wins). */
+function extractRequestBody(op: Record<string, unknown>): ApiEndpoint["body"] | undefined {
+	const requestBody = op.requestBody as Record<string, unknown> | undefined;
+	if (!requestBody?.content || typeof requestBody.content !== "object") return undefined;
+	const contentTypes = Object.keys(requestBody.content as object);
+	return {
+		contentType: contentTypes[0] || "application/json",
+		...(requestBody.description ? { description: String(requestBody.description) } : {}),
+	};
+}
+
+interface ResponseInfo {
+	responseShape?: string;
+	responseDesc?: string;
+	responseExample?: unknown;
+}
+
+/** Pull the success response's shape/description/example from an operation. */
+function extractResponseInfo(op: Record<string, unknown>, includeExamples: boolean): ResponseInfo {
+	const info: ResponseInfo = {};
+	const responses = op.responses as Record<string, unknown> | undefined;
+	if (!responses) return info;
+
+	const successKey =
+		["200", "201"].find((k) => responses[k]) ||
+		Object.keys(responses).find((k) => k.startsWith("2"));
+	if (!successKey) return info;
+
+	const resp = responses[successKey] as Record<string, unknown>;
+	info.responseDesc = resp.description as string | undefined;
+	const content = resp.content as Record<string, unknown> | undefined;
+	if (!content) return info;
+
+	const mediaType = (content["application/json"] ||
+		Object.values(content)[0]) as Record<string, unknown> | undefined;
+	if (mediaType?.schema) {
+		const shape = schemaToResponseShape(mediaType.schema);
+		// "any"/"object" are not informative enough to surface
+		if (shape !== "any" && shape !== "object") info.responseShape = shape;
+	}
+	if (includeExamples && mediaType?.example) {
+		info.responseExample = mediaType.example;
+	}
+	return info;
+}
+
 function buildEndpointFromOperation(
 	method: ApiEndpoint["method"],
 	pathStr: string,
@@ -405,46 +475,8 @@ function buildEndpointFromOperation(
 		.map((p) => extractParam(p, "query"))
 		.filter((p): p is ParamDef => p !== null);
 
-	// Extract body
-	let body: ApiEndpoint["body"] | undefined;
-	const requestBody = op.requestBody as Record<string, unknown> | undefined;
-	if (requestBody?.content && typeof requestBody.content === "object") {
-		const contentTypes = Object.keys(requestBody.content as object);
-		const contentType = contentTypes[0] || "application/json";
-		body = {
-			contentType,
-			...(requestBody.description ? { description: String(requestBody.description) } : {}),
-		};
-	}
-
-	// Extract response shape
-	let responseShape: string | undefined;
-	let responseDesc: string | undefined;
-	let responseExample: unknown | undefined;
-	const responses = op.responses as Record<string, unknown> | undefined;
-	if (responses) {
-		const successKey =
-			["200", "201"].find((k) => responses[k]) ||
-			Object.keys(responses).find((k) => k.startsWith("2"));
-		if (successKey) {
-			const resp = responses[successKey] as Record<string, unknown>;
-			responseDesc = resp.description as string | undefined;
-			const content = resp.content as Record<string, unknown> | undefined;
-			if (content) {
-				const mediaType = (content["application/json"] ||
-					Object.values(content)[0]) as Record<string, unknown> | undefined;
-				if (mediaType?.schema) {
-					responseShape = schemaToResponseShape(mediaType.schema);
-					if (responseShape === "any" || responseShape === "object") {
-						responseShape = undefined; // Not informative enough
-					}
-				}
-				if (includeExamples && mediaType?.example) {
-					responseExample = mediaType.example;
-				}
-			}
-		}
-	}
+	const body = extractRequestBody(op);
+	const { responseShape, responseDesc, responseExample } = extractResponseInfo(op, includeExamples);
 
 	const description = op.description as string | undefined;
 	const category = deriveCategory(op, pathStr, strategy);
@@ -472,201 +504,9 @@ function buildEndpointFromOperation(
 	return endpoint;
 }
 
-// ── GraphQL Introspection → ApiCatalog (Tier 3) ─────────────────────────
-
-interface GqlTypeRef {
-	kind: string;
-	name?: string | null;
-	ofType?: GqlTypeRef | null;
-}
-
-interface GqlArg {
-	name: string;
-	description?: string | null;
-	type: GqlTypeRef;
-	defaultValue?: string | null;
-}
-
-interface GqlField {
-	name: string;
-	description?: string | null;
-	args: GqlArg[];
-	type: GqlTypeRef;
-	isDeprecated?: boolean;
-}
-
-function unwrapGqlType(type: GqlTypeRef): { typeName: string; required: boolean; isList: boolean } {
-	let required = false;
-	let isList = false;
-	let current = type;
-
-	if (current.kind === "NON_NULL") {
-		required = true;
-		current = current.ofType || current;
-	}
-	if (current.kind === "LIST") {
-		isList = true;
-		current = current.ofType || current;
-		if (current.kind === "NON_NULL") {
-			current = current.ofType || current;
-		}
-	}
-
-	return { typeName: current.name || "any", required, isList };
-}
-
-function gqlTypeToParamType(type: GqlTypeRef): ParamDef["type"] {
-	const { typeName, isList } = unwrapGqlType(type);
-	if (isList) return "array";
-	switch (typeName) {
-		case "Int":
-		case "Float":
-			return "number";
-		case "Boolean":
-			return "boolean";
-		default:
-			return "string";
-	}
-}
-
-function gqlTypeToShapeString(type: GqlTypeRef): string {
-	const { typeName, isList } = unwrapGqlType(type);
-	const scalar =
-		typeName === "Int" || typeName === "Float"
-			? "number"
-			: typeName === "Boolean"
-				? "boolean"
-				: typeName === "String" || typeName === "ID"
-					? "string"
-					: typeName;
-	return isList ? `Array<${scalar}>` : scalar;
-}
-
-/**
- * Convert a GraphQL introspection result to an ApiCatalog.
- * Each query becomes a virtual GET endpoint, each mutation a POST endpoint.
- * Arguments are mapped to queryParams for discoverability.
- */
-export function graphQlToCatalog(
-	introspection: unknown,
-	options: GraphQlToCatalogOptions,
-): CatalogGeneratorResult {
-	const diagnostics: CatalogDiagnostic[] = [];
-	const endpoints: ApiEndpoint[] = [];
-
-	// Navigate to __schema
-	const root = introspection as Record<string, unknown>;
-	const schema =
-		(root.__schema as Record<string, unknown>) ||
-		((root.data as Record<string, unknown>)?.__schema as Record<string, unknown>);
-
-	if (!schema) {
-		return {
-			catalog: {
-				name: options.name,
-				baseUrl: options.baseUrl,
-				endpointCount: 0,
-				endpoints: [],
-			},
-			diagnostics: [{ level: "error", message: "No __schema found in introspection result" }],
-		};
-	}
-
-	const types = schema.types as Array<Record<string, unknown>> | undefined;
-	if (!types) {
-		return {
-			catalog: { name: options.name, baseUrl: options.baseUrl, endpointCount: 0, endpoints: [] },
-			diagnostics: [{ level: "error", message: "No types found in schema" }],
-		};
-	}
-
-	const queryTypeName = (schema.queryType as Record<string, unknown> | undefined)?.name as
-		| string
-		| undefined;
-	const mutationTypeName = (schema.mutationType as Record<string, unknown> | undefined)?.name as
-		| string
-		| undefined;
-
-	// Process queries
-	if (queryTypeName) {
-		const queryType = types.find((t) => t.name === queryTypeName);
-		const fields = queryType?.fields as GqlField[] | undefined;
-		if (fields) {
-			for (const field of fields) {
-				if (field.name.startsWith("__")) continue; // Skip introspection fields
-				const queryParams =
-					field.args.length > 0
-						? field.args.map(
-								(arg): ParamDef => ({
-									name: arg.name,
-									type: gqlTypeToParamType(arg.type),
-									required: unwrapGqlType(arg.type).required,
-									description: arg.description || arg.name,
-									...(arg.defaultValue != null ? { default: arg.defaultValue } : {}),
-								}),
-							)
-						: undefined;
-
-				const requiredArgs = field.args
-					.filter((a) => unwrapGqlType(a.type).required)
-					.map((a) => `${a.name}: $${a.name}`)
-					.join(", ");
-
-				endpoints.push({
-					method: "POST",
-					path: "/graphql",
-					summary: `Query: ${field.name}${field.description ? ` — ${field.description}` : ""}`,
-					...(field.description ? { description: field.description } : {}),
-					category: "queries",
-					...(queryParams ? { queryParams } : {}),
-					body: { contentType: "application/json", description: "GraphQL query" },
-					responseShape: gqlTypeToShapeString(field.type),
-					usageHint: `api.post('/graphql', { query: '{ ${field.name}${requiredArgs ? `(${requiredArgs})` : ""} { ... } }' })`,
-					...(field.isDeprecated ? { deprecated: true } : {}),
-				});
-			}
-		}
-	}
-
-	// Process mutations
-	if (mutationTypeName) {
-		const mutationType = types.find((t) => t.name === mutationTypeName);
-		const fields = mutationType?.fields as GqlField[] | undefined;
-		if (fields) {
-			for (const field of fields) {
-				if (field.name.startsWith("__")) continue;
-				endpoints.push({
-					method: "POST",
-					path: "/graphql",
-					summary: `Mutation: ${field.name}${field.description ? ` — ${field.description}` : ""}`,
-					...(field.description ? { description: field.description } : {}),
-					category: "mutations",
-					body: { contentType: "application/json", description: "GraphQL mutation" },
-					responseShape: gqlTypeToShapeString(field.type),
-					...(field.isDeprecated ? { deprecated: true } : {}),
-				});
-			}
-		}
-	}
-
-	if (endpoints.length === 0) {
-		diagnostics.push({ level: "warn", message: "No queries or mutations found in schema" });
-	}
-
-	const catalog: ApiCatalog = {
-		name: options.name,
-		baseUrl: options.baseUrl,
-		endpointCount: endpoints.length,
-		...(options.auth ? { auth: options.auth } : {}),
-		notes:
-			options.notes ||
-			"GraphQL API. All operations use POST /graphql with { query: '...' } body. " +
-				"Use api.post('/graphql', { query: '...' }) in Code Mode.",
-		endpoints,
-	};
-
-	return { catalog, diagnostics };
-}
+// GraphQL introspection → ApiCatalog (Tier 3) lives in ./graphql-catalog
+// (extracted for the file-size cap); re-exported so import sites keep working.
+export { graphQlToCatalog } from "./graphql-catalog";
 
 // ── Manual Definition → ApiCatalog (Tier 4) ──────────────────────────────
 

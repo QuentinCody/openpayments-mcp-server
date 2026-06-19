@@ -14,7 +14,11 @@
  */
 
 import { z } from "zod";
-import { RpcTarget } from "cloudflare:workers";
+import {
+  DynamicWorkerExecutor,
+  type ExecutorFns,
+  type WorkerLoaderBinding,
+} from "./dynamic-worker-executor";
 import type { ApiCatalog, ApiFetchFn } from "./catalog";
 import { buildCatalogSearchSource } from "./catalog-search";
 import type { ResolvedSpec } from "./openapi-resolver";
@@ -22,136 +26,106 @@ import { buildOpenApiSearchSource } from "./openapi-search";
 import { buildApiProxySource } from "./api-proxy";
 import { buildFsProxySource } from "./fs-proxy";
 import { createApiProxyTool, createQueryProxyTool, createStageProxyTool, type ApiProxyToolOptions } from "../tools/api-proxy";
+import { createPaginateProxyTool } from "../tools/paginate-proxy";
 import { createFsProxyHandlers } from "../tools/fs-proxy";
+import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
 import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
+import { type Citation, type SourceDescriptor, buildCitation } from "../provenance/provenance";
+
+export { DynamicWorkerExecutor, ToolDispatcher } from "./dynamic-worker-executor";
+export type { ExecutorFns, ExecutorResult, WorkerLoaderBinding } from "./dynamic-worker-executor";
 
 // ---------------------------------------------------------------------------
-// Inlined from @cloudflare/codemode v0.1.1 — avoids bundling zod-to-ts →
-// typescript (CJS, uses __filename, crashes Workers).
-// Only DynamicWorkerExecutor + ToolDispatcher are needed.
+// Provenance / result handling (mirrors graphql-execute-tool.ts)
 // ---------------------------------------------------------------------------
 
-export type ExecutorFns = Record<string, (...args: unknown[]) => Promise<unknown>>;
-
-export interface ExecutorResult {
-  result?: unknown;
-  error?: string;
-  logs?: string[];
-  __stagedResults?: Array<Record<string, unknown>>;
+/** Provenance context threaded from the factory options into result handling. */
+interface CitationCtx {
+  source?: SourceDescriptor;
+  server: string;
+  tool: string;
+  query: unknown;
 }
 
-/** RPC target that dispatches tool calls from the isolate back to the host. */
-export class ToolDispatcher extends RpcTarget {
-  #fns: ExecutorFns;
-  constructor(fns: ExecutorFns) {
-    super();
-    this.#fns = fns;
-  }
-  async call(name: string, argsJson: string): Promise<string> {
-    const fn = this.#fns[name];
-    if (!fn) return JSON.stringify({ error: `Tool "${name}" not found` });
-    try {
-      const result = await fn(argsJson ? JSON.parse(argsJson) : {});
-      return JSON.stringify({ result });
-    } catch (err) {
-      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+/** Records returned, for the citation: staged total_rows, else array length. */
+function countRecords(data: unknown, totalRows: unknown): number | undefined {
+  if (typeof totalRows === "number") return totalRows;
+  if (Array.isArray(data)) return data.length;
+  return undefined;
+}
+
+/** Build the optional `citation` meta when the server declared a source. */
+async function buildCitationMeta(
+  prov: CitationCtx | undefined,
+  data: unknown,
+  recordCount: number | undefined,
+  dataAccessId: string | undefined,
+  retrievedAt: string,
+): Promise<{ citation?: Citation }> {
+  if (!prov?.source) return {};
+  const citation = await buildCitation({
+    source: prov.source, server: prov.server, tool: prov.tool, query: prov.query,
+    result: data, retrievedAt, recordCount, dataAccessId,
+  });
+  return { citation };
+}
+
+/**
+ * Turn a raw executor result into a Code Mode response: hoist staging metadata
+ * and (when a `source` was declared) a verifiable `_meta.citation`.
+ */
+async function handleExecutorResult(
+  result: { result?: unknown; error?: string; logs?: string[]; __stagedResults?: Array<Record<string, unknown>> },
+  prov?: CitationCtx,
+) {
+  const retrievedAt = new Date().toISOString();
+  if (result.error) {
+    // Recover staging metadata if the error came from accessing staged arrays.
+    if (result.__stagedResults?.length) {
+      const staged = result.__stagedResults[result.__stagedResults.length - 1];
+      const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
+      const { schema: _s, _staging: _st, ...slim } = staged;
+      const completeness = (_st as { completeness?: unknown } | undefined)?.completeness;
+      const cite = await buildCitationMeta(prov, slim, staged.total_rows as number | undefined, staged.data_access_id as string | undefined, retrievedAt);
+      return createCodeModeResponse(slim, {
+        meta: {
+          staged: true, data_access_id: staged.data_access_id as string,
+          tables_created: staged.tables_created, total_rows: staged.total_rows,
+          ...(completeness ? { completeness } : {}), ...cite,
+          ...(logOutput ? { console_output: logOutput } : {}), executed_at: retrievedAt,
+        },
+      });
     }
-  }
-}
-
-/** Minimal interface for the Cloudflare Worker Loader binding. */
-export interface WorkerLoaderBinding {
-  get(name: string, factory: () => unknown): { getEntrypoint(): { evaluate(dispatcher: ToolDispatcher): Promise<ExecutorResult> } };
-}
-
-/** Executes code in an isolated V8 Worker via the Worker Loader binding. */
-export class DynamicWorkerExecutor {
-  #loader: WorkerLoaderBinding;
-  #timeout: number;
-
-  constructor(options: { loader: WorkerLoaderBinding; timeout?: number }) {
-    this.#loader = options.loader;
-    this.#timeout = options.timeout ?? 30_000;
+    const logOutput = result.logs?.length ? `\n\nConsole output:\n${result.logs.join("\n")}` : "";
+    return createCodeModeError(ErrorCodes.API_ERROR, `${result.error}${logOutput}`);
   }
 
-  async execute(code: string, fns: ExecutorFns): Promise<ExecutorResult> {
-    const timeoutMs = this.#timeout;
-    const modulePrefix = [
-      'import { WorkerEntrypoint } from "cloudflare:workers";',
-      "",
-      "export default class CodeExecutor extends WorkerEntrypoint {",
-      "  async evaluate(dispatcher) {",
-      "    const __logs = [];",
-      "    var __stagedResults = [];",
-      '    const __fmt = (v) => typeof v === "string" ? v : (() => { try { return JSON.stringify(v); } catch { return String(v); } })();',
-      '    const __join = (...a) => a.map(__fmt).join(" ");',
-      '    console.log = (...a) => { __logs.push(__join(...a)); };',
-      '    console.warn = (...a) => { __logs.push("[warn] " + __join(...a)); };',
-      '    console.error = (...a) => { __logs.push("[error] " + __join(...a)); };',
-      '    console.info = (...a) => { __logs.push(__join(...a)); };',
-      '    console.debug = (...a) => { __logs.push("[debug] " + __join(...a)); };',
-      '    console.trace = (...a) => { __logs.push("[trace] " + __join(...a)); };',
-      '    console.dir = (v) => { __logs.push(__fmt(v)); };',
-      '    console.table = (v) => { __logs.push(__fmt(v)); };',
-      '    console.assert = (cond, ...a) => { if (!cond) __logs.push("[assert] " + __join(...a)); };',
-      '    const __c = {}; console.count = (l = "default") => { __c[l] = (__c[l] || 0) + 1; __logs.push(l + ": " + __c[l]); };',
-      '    console.countReset = (l = "default") => { __c[l] = 0; };',
-      '    const __t = {};',
-      '    console.time = (l = "default") => { __t[l] = Date.now(); };',
-      '    console.timeEnd = (l = "default") => { const d = __t[l] ? Date.now() - __t[l] : 0; __logs.push(l + ": " + d + "ms"); delete __t[l]; };',
-      '    console.timeLog = (l = "default", ...a) => { const d = __t[l] ? Date.now() - __t[l] : 0; __logs.push(l + ": " + d + "ms" + (a.length ? " " + __join(...a) : "")); };',
-      '    console.group = (...a) => { if (a.length) __logs.push(__join(...a)); };',
-      '    console.groupEnd = () => {};',
-      '    console.groupCollapsed = (...a) => { if (a.length) __logs.push(__join(...a)); };',
-      '    console.clear = () => {};',
-      "    const codemode = new Proxy({}, {",
-      "      get: (_, toolName) => async (args) => {",
-      "        const resJson = await dispatcher.call(String(toolName), JSON.stringify(args ?? {}));",
-      "        var data; try { data = JSON" + ".parse(resJson); } catch (e) { throw new Error('Failed to parse tool response: ' + e.message); }",
-      "        if (data.error) throw new Error(data.error);",
-      "        return data.result;",
-      "      }",
-      "    });",
-      "",
-      "    try {",
-      "      const result = await Promise.race([",
-      "        (",
-    ].join("\n");
-
-    const moduleSuffix = [
-      ")(),",
-      `        new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out")), ${timeoutMs}))`,
-      "      ]);",
-      "      var __safeResult = (result && typeof result === 'object') ? JSON.parse(JSON.stringify(result)) : result;",
-      "      return { result: __safeResult, logs: __logs, __stagedResults: typeof __stagedResults !== 'undefined' && __stagedResults.length > 0 ? __stagedResults : undefined };",
-      "    } catch (err) {",
-      "      return { result: undefined, error: err.message, logs: __logs, __stagedResults: typeof __stagedResults !== 'undefined' && __stagedResults.length > 0 ? __stagedResults : undefined };",
-      "    }",
-      "  }",
-      "}",
-    ].join("\n");
-
-    const executorModule = modulePrefix + code + moduleSuffix;
-    const dispatcher = new ToolDispatcher(fns);
-
-    const response = await this.#loader
-      .get(`codemode-${crypto.randomUUID()}`, () => ({
-        compatibilityDate: "2025-06-01",
-        compatibilityFlags: ["nodejs_compat"],
-        mainModule: "executor.js",
-        modules: { "executor.js": executorModule },
-        globalOutbound: null,
-      }))
-      .getEntrypoint()
-      .evaluate(dispatcher);
-
-    if (response.error) {
-      return { result: undefined, error: response.error, logs: response.logs, __stagedResults: response.__stagedResults };
-    }
-    return { result: response.result, logs: response.logs, __stagedResults: response.__stagedResults };
+  const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
+  // Hoist staging metadata to _meta; strip large redundant fields (schema,
+  // _staging) to stay under the 100KB structuredContent transport limit.
+  const raw = result.result;
+  const isStaged = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    && "__staged" in raw && (raw as { __staged: unknown }).__staged === true;
+  let responseData: unknown = raw;
+  const stagingMeta: Record<string, unknown> = {};
+  if (isStaged) {
+    const resultObj: Record<string, unknown> = { ...(raw as object) };
+    stagingMeta.staged = true;
+    stagingMeta.data_access_id = resultObj.data_access_id;
+    stagingMeta.tables_created = resultObj.tables_created;
+    stagingMeta.total_rows = resultObj.total_rows;
+    const completeness = (resultObj._staging as { completeness?: unknown } | undefined)?.completeness;
+    if (completeness) stagingMeta.completeness = completeness;
+    const { schema: _s, _staging: _st, ...slim } = resultObj;
+    responseData = slim;
   }
+
+  const cite = await buildCitationMeta(prov, responseData, countRecords(responseData, stagingMeta.total_rows), stagingMeta.data_access_id as string | undefined, retrievedAt);
+  return createCodeModeResponse(responseData, {
+    meta: { ...stagingMeta, ...cite, ...(logOutput ? { console_output: logOutput } : {}), executed_at: retrievedAt },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +155,15 @@ export interface ExecuteToolOptions {
   /** DO namespace for virtual filesystem. When provided, fs.* is available in isolates.
    *  Uses idFromName("__fs__") for a shared filesystem DO instance. */
   fsDoNamespace?: unknown;
+  /** WorkspaceDO namespace (ADR-006 Phase 0). When provided AND the `_execute`
+   *  call passes a `workspace` id, auto-staging routes into the shared
+   *  WorkspaceDO (`idFromName("ws:" + workspace)`) so datasets from different
+   *  servers land in one SQLite and can be JOINed. Omit for per-server staging. */
+  workspaceNamespace?: unknown;
+  /** Canonical upstream source identity. When declared, every result carries a
+   *  verifiable `_meta.citation` (source + query/result hashes + timestamp) so a
+   *  connected agent can attribute and re-verify each claim. Opt-in per server. */
+  source?: SourceDescriptor;
 }
 
 /**
@@ -205,7 +188,7 @@ export interface ExecuteToolResult {
   name: string;
   apiProxyTool: ToolEntry;
   description: string;
-  schema: { code: z.ZodString };
+  schema: { code: z.ZodString; workspace: z.ZodOptional<z.ZodString> };
   register: (server: { tool: (...args: unknown[]) => void }) => void;
 }
 
@@ -224,6 +207,7 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
     timeout = 30_000,
     preamble,
     fsDoNamespace,
+    workspaceNamespace,
   } = options;
 
   if (!catalog && !openApiSpec) {
@@ -275,17 +259,27 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
     doNamespace,
     stagingPrefix: prefix,
     stagingThreshold,
+    workspaceNamespace,
   };
   const apiProxyTool = createApiProxyTool(apiProxyToolOpts);
 
+  // Build the __paginate_proxy handler — backs api.getAll() (exhaustive fetch)
+  const paginateProxyTool = createPaginateProxyTool({
+    apiFetch,
+    doNamespace,
+    stagingPrefix: prefix,
+    stagingThreshold,
+    workspaceNamespace,
+  });
+
   // Build the __query_proxy handler (only available if DO namespace exists)
   const queryProxyTool = doNamespace
-    ? createQueryProxyTool({ doNamespace })
+    ? createQueryProxyTool({ doNamespace, workspaceNamespace })
     : undefined;
 
   // Build the __stage_proxy handler (only available if DO namespace exists)
   const stageProxyTool = doNamespace
-    ? createStageProxyTool({ doNamespace, stagingPrefix: prefix })
+    ? createStageProxyTool({ doNamespace, stagingPrefix: prefix, workspaceNamespace })
     : undefined;
 
   /** Coerce executor args to the Record<string, unknown> that handlers expect. */
@@ -308,12 +302,15 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
   /**
    * Build the function map for the executor with a per-request ToolContext.
    * sessionId flows in from the MCP `extra` argument so auto-staging can
-   * register datasets with the session-scoped __registry__ DO.
+   * register datasets with the session-scoped __registry__ DO. `workspace`
+   * flows in from the `_execute` `workspace` arg so auto-staging can route into
+   * the shared WorkspaceDO (ADR-006 Phase 0) instead of the per-server DO.
    */
-  function buildExecutorFns(sessionId: string | undefined): ExecutorFns {
-    const ctx: ToolContext = { sql: () => [], sessionId };
+  function buildExecutorFns(sessionId: string | undefined, workspace?: string): ExecutorFns {
+    const ctx: ToolContext = { sql: () => [], sessionId, workspace };
     return {
       __api_proxy: async (args: unknown) => apiProxyTool.handler(toInput(args), ctx),
+      __paginate_proxy: async (args: unknown) => paginateProxyTool.handler(toInput(args), ctx),
       __query_proxy: async (args: unknown) => {
         if (!queryProxyTool) {
           return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
@@ -338,6 +335,9 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
       `Code runs in a sandboxed V8 isolate with:\n` +
       `- api.get(path, params) — make GET requests (path params auto-interpolated from params object)\n` +
       `- api.post(path, body, params) — make POST requests\n` +
+      `- api.getAll(path, params, opts) — fetch EVERY page of a paged endpoint (avoids silent under-counting). ` +
+      `opts: {strategy:'offset'|'page'|'cursor', pageSize, offsetParam, limitParam, max, maxPages, itemsField}. ` +
+      `Returns {items, count, pages, total_available, completeness} (or auto-stages if large).\n` +
       searchDescription +
       `- console logging (log, warn, error, info) — captured output\n` +
       (fsDoNamespace
@@ -382,13 +382,16 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
           "The last expression or explicit return value becomes the result. " +
           "Example: return await api.get('/dataset/tissueSiteDetail')",
       ),
+      workspace: z.string().optional().describe(
+        "Shared workspace id — stage into a cross-server workspace DO so other servers' datasets can be JOINed in one query. Omit for per-server staging.",
+      ),
     },
 
     register(server: { tool: (...args: unknown[]) => void }) {
       const description = this.description;
       const schema = this.schema;
 
-      server.tool(toolName, description, schema, async (input: { code: string }, extra: unknown) => {
+      server.tool(toolName, description, schema, async (input: { code: string; workspace?: string }, extra: unknown) => {
         const code = input.code?.trim();
         if (!code) {
           return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
@@ -397,69 +400,16 @@ export function createExecuteTool(options: ExecuteToolOptions): ExecuteToolResul
         try {
           const wrappedCode = wrapUserCode(searchSource, code, preamble, !!fsDoNamespace);
 
-          const sessionId = (extra as { sessionId?: string } | undefined)?.sessionId;
-          const executorFns = buildExecutorFns(sessionId);
+          const scope = getRequestScope(extra as MaybeExtra | undefined);
+          const executorFns = buildExecutorFns(scope, input.workspace);
           const executor = new DynamicWorkerExecutor({ loader, timeout });
           const result = await executor.execute(wrappedCode, executorFns);
 
-          if (result.error) {
-            // If the error was caused by accessing staged data arrays, recover
-            // the staging metadata and return it as a success response instead.
-            if (result.__stagedResults?.length) {
-              const staged = result.__stagedResults[result.__stagedResults.length - 1];
-              const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-              const { schema: _s, _staging: _st, ...slim } = staged;
-              return createCodeModeResponse(slim, {
-                meta: {
-                  staged: true,
-                  data_access_id: staged.data_access_id as string,
-                  tables_created: staged.tables_created,
-                  total_rows: staged.total_rows,
-                  ...(logOutput ? { console_output: logOutput } : {}),
-                  executed_at: new Date().toISOString(),
-                },
-              });
-            }
-
-            const logOutput = result.logs?.length
-              ? `\n\nConsole output:\n${result.logs.join("\n")}`
-              : "";
-            return createCodeModeError(ErrorCodes.API_ERROR, `${result.error}${logOutput}`);
-          }
-
-          const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-
-          // Detect staging metadata in the result and hoist to _meta so
-          // downstream clients can find data_access_id without digging into data.
-          // Also strip large redundant fields (schema, _staging) to stay under
-          // the 100KB structuredContent transport limit.
-          const raw = result.result;
-          const isStaged = raw !== null && typeof raw === "object" && !Array.isArray(raw)
-            && "__staged" in raw && (raw as { __staged: unknown }).__staged === true;
-          let responseData: unknown = raw;
-          const stagingMeta: Record<string, unknown> = {};
-
-          if (isStaged) {
-            const resultObj: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(raw as object)) {
-              resultObj[k] = v;
-            }
-            stagingMeta.staged = true;
-            stagingMeta.data_access_id = resultObj.data_access_id;
-            stagingMeta.tables_created = resultObj.tables_created;
-            stagingMeta.total_rows = resultObj.total_rows;
-
-            // Strip large fields that are available via get_schema tool
-            const { schema: _s, _staging: _st, ...slim } = resultObj;
-            responseData = slim;
-          }
-
-          return createCodeModeResponse(responseData, {
-            meta: {
-              ...stagingMeta,
-              ...(logOutput ? { console_output: logOutput } : {}),
-              executed_at: new Date().toISOString(),
-            },
+          return await handleExecutorResult(result, {
+            source: options.source,
+            server: prefix,
+            tool: toolName,
+            query: code,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
