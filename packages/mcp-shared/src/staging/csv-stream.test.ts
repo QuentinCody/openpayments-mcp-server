@@ -15,20 +15,20 @@ const { csvStream } = csvStreamModule;
 const enc = new TextEncoder();
 
 function streamFromString(text: string): ReadableStream<Uint8Array> {
-    return new ReadableStream<Uint8Array>({
-        start(controller) {
-            controller.enqueue(enc.encode(text));
-            controller.close();
-        },
-    });
+	return new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(enc.encode(text));
+			controller.close();
+		},
+	});
 }
 
 describe("csvStream (smoke)", () => {
-    it("yields one row per data line, casting numerics by default", async () => {
-        const out: Record<string, unknown>[] = [];
-        for await (const r of csvStream(streamFromString("a,b\n1,foo\n"))) {
-            out.push(r);
-        }
-        expect(out).toEqual([{ a: 1, b: "foo" }]);
-    });
+	it("yields one row per data line, casting numerics by default", async () => {
+		const out: Record<string, unknown>[] = [];
+		for await (const r of csvStream(streamFromString("a,b\n1,foo\n"))) {
+			out.push(r);
+		}
+		expect(out).toEqual([{ a: 1, b: "foo" }]);
+	});
 });

@@ -21,7 +21,11 @@ export async function gnomadGraphql<T = unknown>(
 	variables: Record<string, unknown> = {},
 	opts: GnomadFetchOpts = {},
 ): Promise<GnomadResponse<T>> {
-	const { fetchImpl = fetch, timeoutMs = 20_000, userAgent = "bio-mcp-gnomad/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 20_000,
+		userAgent = "bio-mcp-gnomad/1.0",
+	} = opts;
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	try {

@@ -48,8 +48,14 @@ function followRef(root: unknown, refPath: string): unknown {
 	for (const segment of segments) {
 		// JSON Pointer decoding: ~1 → /, ~0 → ~
 		const decoded = segment.replace(/~1/g, "/").replace(/~0/g, "~");
-		if (current === null || current === undefined || typeof current !== "object") {
-			throw new Error(`Cannot resolve $ref "${refPath}": path segment "${decoded}" not found`);
+		if (
+			current === null ||
+			current === undefined ||
+			typeof current !== "object"
+		) {
+			throw new Error(
+				`Cannot resolve $ref "${refPath}": path segment "${decoded}" not found`,
+			);
 		}
 		current = (current as Record<string, unknown>)[decoded];
 	}
@@ -127,7 +133,9 @@ function resolveRefs(
  * Only handles the top-level structural conversion (host/basePath/schemes → servers).
  * Parameter format differences are minimal enough to leave as-is for search purposes.
  */
-function convertSwagger20(spec: Record<string, unknown>): Record<string, unknown> {
+function convertSwagger20(
+	spec: Record<string, unknown>,
+): Record<string, unknown> {
 	const result: Record<string, unknown> = { ...spec };
 
 	// Set OpenAPI version
@@ -166,7 +174,10 @@ function convertSwagger20(spec: Record<string, unknown>): Record<string, unknown
  *
  * @throws Error if a $ref cannot be resolved
  */
-export function resolveOpenApiSpec(raw: unknown, options?: ResolveOptions): ResolvedSpec {
+export function resolveOpenApiSpec(
+	raw: unknown,
+	options?: ResolveOptions,
+): ResolvedSpec {
 	const opts: ResolveOptions = options || {};
 
 	if (raw === null || raw === undefined || typeof raw !== "object") {
@@ -176,7 +187,11 @@ export function resolveOpenApiSpec(raw: unknown, options?: ResolveOptions): Reso
 	let spec = raw as Record<string, unknown>;
 
 	// Detect Swagger 2.0 and convert
-	if (spec.swagger && typeof spec.swagger === "string" && spec.swagger.startsWith("2.")) {
+	if (
+		spec.swagger &&
+		typeof spec.swagger === "string" &&
+		spec.swagger.startsWith("2.")
+	) {
 		spec = convertSwagger20(spec);
 	}
 
@@ -187,10 +202,16 @@ export function resolveOpenApiSpec(raw: unknown, options?: ResolveOptions): Reso
 
 	// Resolve all $ref references (use original raw as the lookup root
 	// since $refs point into the original document structure)
-	const resolved = resolveRefs(spec, raw, opts, new Set()) as Record<string, unknown>;
+	const resolved = resolveRefs(spec, raw, opts, new Set()) as Record<
+		string,
+		unknown
+	>;
 
 	// Build the ResolvedSpec
-	const info = (resolved.info || { title: "Unknown", version: "0.0" }) as ResolvedSpec["info"];
+	const info = (resolved.info || {
+		title: "Unknown",
+		version: "0.0",
+	}) as ResolvedSpec["info"];
 	const servers = resolved.servers as ResolvedSpec["servers"];
 	const paths = (resolved.paths || {}) as ResolvedSpec["paths"];
 	const openapi = (resolved.openapi || "3.0.0") as string;
@@ -209,11 +230,16 @@ function mergeParameterLists(
 ): Array<Record<string, unknown>> {
 	const merged = Array.isArray(existing)
 		? existing
-			.filter((param): param is Record<string, unknown> => Boolean(param) && typeof param === "object")
-			.map((param) => ({ ...param }))
+				.filter(
+					(param): param is Record<string, unknown> =>
+						Boolean(param) && typeof param === "object",
+				)
+				.map((param) => ({ ...param }))
 		: [];
 	const seen = new Set(
-		merged.map((param) => `${String(param.name || "")}:${String(param.in || "")}`),
+		merged.map(
+			(param) => `${String(param.name || "")}:${String(param.in || "")}`,
+		),
 	);
 
 	for (const param of added) {
@@ -249,13 +275,17 @@ function toOpenApiParameter(
 	};
 }
 
-function createRequestBody(endpoint: ApiEndpoint): Record<string, unknown> | undefined {
+function createRequestBody(
+	endpoint: ApiEndpoint,
+): Record<string, unknown> | undefined {
 	if (!endpoint.body) return undefined;
 
 	let schema: Record<string, unknown> = { type: "object" };
 	if (endpoint.body.contentType.includes("text/plain")) {
 		schema = { type: "string" };
-	} else if (endpoint.body.contentType.includes("application/x-www-form-urlencoded")) {
+	} else if (
+		endpoint.body.contentType.includes("application/x-www-form-urlencoded")
+	) {
 		schema = { type: "object", additionalProperties: { type: "string" } };
 	}
 
@@ -269,10 +299,16 @@ function createRequestBody(endpoint: ApiEndpoint): Record<string, unknown> | und
 	};
 }
 
-function buildOperationFromCatalog(endpoint: ApiEndpoint): Record<string, unknown> {
+function buildOperationFromCatalog(
+	endpoint: ApiEndpoint,
+): Record<string, unknown> {
 	const parameters = [
-		...(endpoint.pathParams || []).map((param) => toOpenApiParameter(param, "path")),
-		...(endpoint.queryParams || []).map((param) => toOpenApiParameter(param, "query")),
+		...(endpoint.pathParams || []).map((param) =>
+			toOpenApiParameter(param, "path"),
+		),
+		...(endpoint.queryParams || []).map((param) =>
+			toOpenApiParameter(param, "query"),
+		),
 	];
 
 	return {
@@ -280,7 +316,9 @@ function buildOperationFromCatalog(endpoint: ApiEndpoint): Record<string, unknow
 		...(endpoint.description ? { description: endpoint.description } : {}),
 		tags: endpoint.category ? [endpoint.category] : [],
 		...(parameters.length > 0 ? { parameters } : {}),
-		...(createRequestBody(endpoint) ? { requestBody: createRequestBody(endpoint) } : {}),
+		...(createRequestBody(endpoint)
+			? { requestBody: createRequestBody(endpoint) }
+			: {}),
 		responses: {
 			"200": {
 				description: endpoint.response?.description || "Successful response",
@@ -296,7 +334,8 @@ function mergeEndpointIntoOperation(
 	const merged = { ...existing };
 
 	if (!merged.summary && endpoint.summary) merged.summary = endpoint.summary;
-	if (!merged.description && endpoint.description) merged.description = endpoint.description;
+	if (!merged.description && endpoint.description)
+		merged.description = endpoint.description;
 
 	const tags = new Set(
 		Array.isArray(merged.tags)
@@ -307,8 +346,12 @@ function mergeEndpointIntoOperation(
 	if (tags.size > 0) merged.tags = Array.from(tags);
 
 	const addedParameters = [
-		...(endpoint.pathParams || []).map((param) => toOpenApiParameter(param, "path")),
-		...(endpoint.queryParams || []).map((param) => toOpenApiParameter(param, "query")),
+		...(endpoint.pathParams || []).map((param) =>
+			toOpenApiParameter(param, "path"),
+		),
+		...(endpoint.queryParams || []).map((param) =>
+			toOpenApiParameter(param, "query"),
+		),
 	];
 	if (addedParameters.length > 0) {
 		merged.parameters = mergeParameterLists(merged.parameters, addedParameters);
@@ -337,7 +380,10 @@ export function mergeCatalogIntoResolvedSpec(
 	catalog: ApiCatalog,
 ): ResolvedSpec {
 	const nextPaths: ResolvedSpec["paths"] = Object.fromEntries(
-		Object.entries(spec.paths).map(([path, pathItem]) => [path, { ...pathItem }]),
+		Object.entries(spec.paths).map(([path, pathItem]) => [
+			path,
+			{ ...pathItem },
+		]),
 	);
 
 	for (const endpoint of catalog.endpoints) {
@@ -349,7 +395,10 @@ export function mergeCatalogIntoResolvedSpec(
 
 		pathItem[method] =
 			existing && typeof existing === "object"
-				? mergeEndpointIntoOperation(existing as Record<string, unknown>, endpoint)
+				? mergeEndpointIntoOperation(
+						existing as Record<string, unknown>,
+						endpoint,
+					)
 				: buildOperationFromCatalog(endpoint);
 
 		nextPaths[endpoint.path] = pathItem;

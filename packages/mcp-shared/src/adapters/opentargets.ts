@@ -42,7 +42,9 @@ export async function opentargetsGraphql<T = unknown>(
 			signal: ctrl.signal,
 		});
 		if (!resp.ok) {
-			throw new Error(`OpenTargets HTTP ${resp.status}: ${await resp.text().catch(() => "")}`);
+			throw new Error(
+				`OpenTargets HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
+			);
 		}
 		return (await resp.json()) as OpentargetsResponse<T>;
 	} finally {

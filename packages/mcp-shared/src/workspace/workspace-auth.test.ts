@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isWorkspaceRequestAuthorized, timingSafeEqual } from "./workspace-auth";
+import {
+	isWorkspaceRequestAuthorized,
+	timingSafeEqual,
+} from "./workspace-auth";
 
 /** A header reader backed by a plain (lowercased) map, like Request.headers. */
-const headers = (h: Record<string, string>) => ({ get: (name: string) => h[name.toLowerCase()] ?? null });
+const headers = (h: Record<string, string>) => ({
+	get: (name: string) => h[name.toLowerCase()] ?? null,
+});
 
 describe("timingSafeEqual", () => {
 	it("returns true for equal strings", () => {
@@ -21,22 +26,49 @@ describe("timingSafeEqual", () => {
 
 describe("isWorkspaceRequestAuthorized", () => {
 	it("fails closed when the expected token is unset or empty", () => {
-		expect(isWorkspaceRequestAuthorized(headers({ authorization: "Bearer x" }), undefined)).toBe(false);
-		expect(isWorkspaceRequestAuthorized(headers({ authorization: "Bearer x" }), "")).toBe(false);
+		expect(
+			isWorkspaceRequestAuthorized(
+				headers({ authorization: "Bearer x" }),
+				undefined,
+			),
+		).toBe(false);
+		expect(
+			isWorkspaceRequestAuthorized(headers({ authorization: "Bearer x" }), ""),
+		).toBe(false);
 	});
 	it("accepts a correct Authorization: Bearer token", () => {
-		expect(isWorkspaceRequestAuthorized(headers({ authorization: "Bearer s3cret" }), "s3cret")).toBe(true);
+		expect(
+			isWorkspaceRequestAuthorized(
+				headers({ authorization: "Bearer s3cret" }),
+				"s3cret",
+			),
+		).toBe(true);
 	});
 	it("accepts a correct x-workspace-token header", () => {
-		expect(isWorkspaceRequestAuthorized(headers({ "x-workspace-token": "s3cret" }), "s3cret")).toBe(true);
+		expect(
+			isWorkspaceRequestAuthorized(
+				headers({ "x-workspace-token": "s3cret" }),
+				"s3cret",
+			),
+		).toBe(true);
 	});
 	it("rejects a wrong token", () => {
-		expect(isWorkspaceRequestAuthorized(headers({ authorization: "Bearer nope" }), "s3cret")).toBe(false);
+		expect(
+			isWorkspaceRequestAuthorized(
+				headers({ authorization: "Bearer nope" }),
+				"s3cret",
+			),
+		).toBe(false);
 	});
 	it("rejects when no credential header is present", () => {
 		expect(isWorkspaceRequestAuthorized(headers({}), "s3cret")).toBe(false);
 	});
 	it("rejects a non-Bearer Authorization scheme with no fallback header", () => {
-		expect(isWorkspaceRequestAuthorized(headers({ authorization: "Basic abc" }), "s3cret")).toBe(false);
+		expect(
+			isWorkspaceRequestAuthorized(
+				headers({ authorization: "Basic abc" }),
+				"s3cret",
+			),
+		).toBe(false);
 	});
 });

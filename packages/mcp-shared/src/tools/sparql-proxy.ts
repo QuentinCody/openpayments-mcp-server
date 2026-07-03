@@ -6,9 +6,13 @@
  */
 
 import { z } from "zod";
-import type { ToolEntry } from "../registry/types";
 import type { SparqlFetchFn } from "../codemode/sparql-introspection";
-import { shouldStage, stageToDoAndRespond, type StageResult } from "../staging/utils";
+import type { ToolEntry } from "../registry/types";
+import {
+	type StageResult,
+	shouldStage,
+	stageToDoAndRespond,
+} from "../staging/utils";
 
 const ENVELOPE_SCALAR_LIMIT = 1024;
 
@@ -16,15 +20,21 @@ export function preserveEnvelopeScalars(
 	original: unknown,
 	staging: Record<string, unknown>,
 ): void {
-	if (!original || typeof original !== "object" || Array.isArray(original)) return;
+	if (!original || typeof original !== "object" || Array.isArray(original))
+		return;
 	for (const [key, value] of Object.entries(original)) {
 		if (key in staging) continue;
 		try {
 			const serialized = JSON.stringify(value);
-			if (serialized !== undefined && serialized.length <= ENVELOPE_SCALAR_LIMIT) {
+			if (
+				serialized !== undefined &&
+				serialized.length <= ENVELOPE_SCALAR_LIMIT
+			) {
 				staging[key] = value;
 			}
-		} catch { /* best-effort: non-serializable */ }
+		} catch {
+			/* best-effort: non-serializable */
+		}
 	}
 }
 
@@ -142,12 +152,18 @@ async function executeAndMaybeStage(
 	staging: StagingConfig,
 	sessionId: string | undefined,
 ): Promise<unknown> {
-	const raw = (await sparqlFetch(query, { method, format, timeoutMs })) as ParsedSparqlEnvelope;
+	const raw = (await sparqlFetch(query, {
+		method,
+		format,
+		timeoutMs,
+	})) as ParsedSparqlEnvelope;
 	const wrapper = await tryAutoStage(raw, staging, sessionId);
 	return wrapper ?? raw;
 }
 
-export function createSparqlProxyTool(options: SparqlProxyToolOptions): ToolEntry {
+export function createSparqlProxyTool(
+	options: SparqlProxyToolOptions,
+): ToolEntry {
 	const staging: StagingConfig = {
 		doNamespace: options.doNamespace,
 		prefix: options.stagingPrefix,
@@ -156,7 +172,8 @@ export function createSparqlProxyTool(options: SparqlProxyToolOptions): ToolEntr
 
 	return {
 		name: "__sparql_proxy",
-		description: "Route SPARQL queries from V8 isolate through server fetch layer. Internal only.",
+		description:
+			"Route SPARQL queries from V8 isolate through server fetch layer. Internal only.",
 		hidden: true,
 		schema: {
 			query: z.string(),
@@ -167,11 +184,16 @@ export function createSparqlProxyTool(options: SparqlProxyToolOptions): ToolEntr
 		handler: async (input, ctx) => {
 			const query = String(input.query || "");
 			if (!query) {
-				return { __sparql_error: true, code: "invalid_input", message: "query is required" };
+				return {
+					__sparql_error: true,
+					code: "invalid_input",
+					message: "query is required",
+				};
 			}
 			const method = (input.method as "GET" | "POST" | undefined) ?? "POST";
 			const format = (input.format as string | undefined) ?? "json";
-			const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 60_000;
+			const timeoutMs =
+				typeof input.timeoutMs === "number" ? input.timeoutMs : 60_000;
 			try {
 				return await executeAndMaybeStage(
 					options.sparqlFetch,

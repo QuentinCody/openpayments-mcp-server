@@ -13,13 +13,13 @@ import { describe, expect, it } from "vitest";
 import { createMyGeneResolver } from "./gene-resolver";
 
 describe("createMyGeneResolver (smoke)", () => {
-    it("returns a function with the GeneResolver shape", () => {
-        const fakeFetch: typeof fetch = async () =>
-            new Response(JSON.stringify([]), {
-                status: 200,
-                headers: { "content-type": "application/json" },
-            });
-        const resolver = createMyGeneResolver({ fetch: fakeFetch });
-        expect(typeof resolver).toBe("function");
-    });
+	it("returns a function with the GeneResolver shape", () => {
+		const fakeFetch: typeof fetch = async () =>
+			new Response(JSON.stringify([]), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		const resolver = createMyGeneResolver({ fetch: fakeFetch });
+		expect(typeof resolver).toBe("function");
+	});
 });

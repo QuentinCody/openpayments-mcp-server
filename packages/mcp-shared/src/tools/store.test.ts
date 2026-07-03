@@ -5,9 +5,12 @@ import { storeTools } from "./store";
 // ctx.sql is a tagged template: reconstruct the query by re-joining on "?"
 // (executeSql splits on "?" and passes params as template args).
 type SqlCall = { query: string; params: unknown[] };
-const makeCtx = (pragmaRows: Array<{ name: string; type: string }> = [], failOn?: RegExp) => {
+const makeCtx = (
+	pragmaRows: Array<{ name: string; type: string }> = [],
+	failOn?: RegExp,
+) => {
 	const calls: SqlCall[] = [];
-	const sql = <T,>(strings: TemplateStringsArray, ...params: unknown[]): T[] => {
+	const sql = <T>(strings: TemplateStringsArray, ...params: unknown[]): T[] => {
 		const query = strings.join("?");
 		if (failOn?.test(query)) throw new Error("disk I/O error");
 		calls.push({ query, params });
@@ -30,12 +33,18 @@ const errorCode = async (table: unknown, data: unknown) => {
 describe("__store table-name validation", () => {
 	it("rejects empty, overlong, malformed, and reserved-prefix names", async () => {
 		expect(await errorCode("", [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
-		expect(await errorCode("x".repeat(65), [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
+		expect(await errorCode("x".repeat(65), [{ a: 1 }])).toBe(
+			"INVALID_TABLE_NAME",
+		);
 		expect(await errorCode("my table", [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
-		expect(await errorCode("sqlite_evil", [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
+		expect(await errorCode("sqlite_evil", [{ a: 1 }])).toBe(
+			"INVALID_TABLE_NAME",
+		);
 		expect(await errorCode("_cf_kv", [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
 		// case-insensitive prefix match
-		expect(await errorCode("SQLITE_master", [{ a: 1 }])).toBe("INVALID_TABLE_NAME");
+		expect(await errorCode("SQLITE_master", [{ a: 1 }])).toBe(
+			"INVALID_TABLE_NAME",
+		);
 	});
 });
 
@@ -63,12 +72,16 @@ describe("__store data validation", () => {
 describe("__store column/value validation (validateColumnsAndValues)", () => {
 	it("rejects all-empty rows and too many columns", async () => {
 		expect(await errorCode("t", [{}, {}])).toBe("NO_COLUMNS");
-		const wide = [Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`c${i}`, 1]))];
+		const wide = [
+			Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`c${i}`, 1])),
+		];
 		expect(await errorCode("t", wide)).toBe("TOO_MANY_COLUMNS");
 	});
 
 	it("rejects invalid column names", async () => {
-		expect(await errorCode("t", [{ "bad-key": 1 }])).toBe("INVALID_COLUMN_NAME");
+		expect(await errorCode("t", [{ "bad-key": 1 }])).toBe(
+			"INVALID_COLUMN_NAME",
+		);
 	});
 
 	it("rejects nested values with per-key details and remediation hints", async () => {
@@ -114,8 +127,21 @@ describe("__store happy paths", () => {
 		expect(create?.query).toContain('"empty" TEXT'); // all-null defaults to TEXT
 
 		const insert = calls.find((c) => c.query.startsWith("INSERT INTO"));
-		expect(insert?.query).toContain('INSERT INTO "t1" ("a", "b", "empty", "flag", "score")');
-		expect(insert?.params).toEqual(["x", 2, null, 1, 1.5, "y", "two", null, 0, 2.5]);
+		expect(insert?.query).toContain(
+			'INSERT INTO "t1" ("a", "b", "empty", "flag", "score")',
+		);
+		expect(insert?.params).toEqual([
+			"x",
+			2,
+			null,
+			1,
+			1.5,
+			"y",
+			"two",
+			null,
+			0,
+			2.5,
+		]);
 	});
 
 	it("evolves an existing table by adding only the new columns", async () => {
@@ -127,7 +153,9 @@ describe("__store happy paths", () => {
 			columns: ["a", "b"],
 			columns_added: ["b"],
 		});
-		expect(calls.some((c) => c.query === 'ALTER TABLE "t1" ADD COLUMN "b" INTEGER')).toBe(true);
+		expect(
+			calls.some((c) => c.query === 'ALTER TABLE "t1" ADD COLUMN "b" INTEGER'),
+		).toBe(true);
 		expect(calls.some((c) => c.query.startsWith("CREATE TABLE"))).toBe(false);
 	});
 
@@ -136,10 +164,17 @@ describe("__store happy paths", () => {
 			{ name: "a", type: "TEXT" },
 			{ name: "b", type: "INTEGER" },
 		]);
-		const result = (await run("t1", [{ a: "x", b: 1 }], ctx)) as Record<string, unknown>;
+		const result = (await run("t1", [{ a: "x", b: 1 }], ctx)) as Record<
+			string,
+			unknown
+		>;
 		expect(result.columns_added).toBeUndefined();
 		expect(result.created).toBeUndefined();
-		expect(calls.some((c) => c.query.startsWith("ALTER") || c.query.startsWith("CREATE"))).toBe(false);
+		expect(
+			calls.some(
+				(c) => c.query.startsWith("ALTER") || c.query.startsWith("CREATE"),
+			),
+		).toBe(false);
 	});
 
 	it("splits inserts into batches of 500", async () => {
@@ -147,7 +182,9 @@ describe("__store happy paths", () => {
 		const data = Array.from({ length: 501 }, (_, i) => ({ a: i }));
 		const result = (await run("t1", data, ctx)) as { rows_inserted: number };
 		expect(result.rows_inserted).toBe(501);
-		expect(calls.filter((c) => c.query.startsWith("INSERT INTO")).length).toBe(2);
+		expect(calls.filter((c) => c.query.startsWith("INSERT INTO")).length).toBe(
+			2,
+		);
 	});
 
 	it("wraps storage failures as STORE_ERROR", async () => {

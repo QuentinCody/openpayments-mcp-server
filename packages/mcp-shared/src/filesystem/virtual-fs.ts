@@ -34,8 +34,8 @@ export interface FsGlobResult {
 const MAX_FILE_SIZE = 1_048_576; // 1MB — DO SQLite cell limit is ~2MB
 
 const DANGEROUS_PATTERNS = [
-	/\.\.\//,  // directory traversal
-	/\/\.\./,  // reverse traversal
+	/\.\.\//, // directory traversal
+	/\/\.\./, // reverse traversal
 	/%2e%2e/i, // URL-encoded traversal
 ];
 
@@ -55,7 +55,10 @@ function matchSingleStarGlob(pattern: string, path: string): boolean {
 	let starSi = -1; // string index at last * match
 
 	while (si < path.length) {
-		if (pi < pattern.length && (pattern[pi] === path[si] || pattern[pi] === "?")) {
+		if (
+			pi < pattern.length &&
+			(pattern[pi] === path[si] || pattern[pi] === "?")
+		) {
 			pi++;
 			si++;
 		} else if (pi < pattern.length && pattern[pi] === "*") {
@@ -128,7 +131,9 @@ export class VirtualFS {
 		// Reject dangerous patterns
 		for (const pattern of DANGEROUS_PATTERNS) {
 			if (pattern.test(normalized)) {
-				throw new Error(`Invalid path: contains traversal pattern: ${normalized}`);
+				throw new Error(
+					`Invalid path: contains traversal pattern: ${normalized}`,
+				);
 			}
 		}
 		// Collapse duplicate slashes, remove trailing slash
@@ -177,10 +182,9 @@ export class VirtualFS {
 		this.ensureParentDirs(normalized);
 
 		// Check if path exists as directory
-		const existing = this.#sql.exec(
-			`SELECT kind FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const existing = this.#sql
+			.exec(`SELECT kind FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 		if (existing.length > 0 && existing[0].kind === "directory") {
 			throw new Error(`Cannot write file: path is a directory: ${normalized}`);
 		}
@@ -200,26 +204,34 @@ export class VirtualFS {
 		return { path: normalized, size };
 	}
 
-	appendFile(filePath: string, content: string): { path: string; size: number } {
+	appendFile(
+		filePath: string,
+		content: string,
+	): { path: string; size: number } {
 		this.ensureSchema();
 		const normalized = this.normalizePath(filePath);
 		if (normalized === "/") throw new Error("Cannot append to root directory");
 
-		const existing = this.#sql.exec(
-			`SELECT kind, content, size FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const existing = this.#sql
+			.exec(
+				`SELECT kind, content, size FROM _fs_entries WHERE path = ?`,
+				normalized,
+			)
+			.toArray();
 
 		if (existing.length > 0 && existing[0].kind === "directory") {
 			throw new Error(`Cannot append to directory: ${normalized}`);
 		}
 
-		const existingContent = existing.length > 0 ? String(existing[0].content ?? "") : "";
+		const existingContent =
+			existing.length > 0 ? String(existing[0].content ?? "") : "";
 		const newContent = existingContent + content;
 		const size = newContent.length;
 
 		if (size > MAX_FILE_SIZE) {
-			throw new Error(`File too large after append: ${size} bytes (max ${MAX_FILE_SIZE})`);
+			throw new Error(
+				`File too large after append: ${size} bytes (max ${MAX_FILE_SIZE})`,
+			);
 		}
 
 		if (existing.length === 0) {
@@ -246,10 +258,9 @@ export class VirtualFS {
 		this.ensureSchema();
 		const normalized = this.normalizePath(filePath);
 
-		const rows = this.#sql.exec(
-			`SELECT kind, content FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const rows = this.#sql
+			.exec(`SELECT kind, content FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 
 		if (rows.length === 0) {
 			throw new Error(`File not found: ${normalized}`);
@@ -276,19 +287,17 @@ export class VirtualFS {
 			this.ensureParentDirs(normalized);
 		} else {
 			const parent = this.parentPath(normalized);
-			const parentRows = this.#sql.exec(
-				`SELECT kind FROM _fs_entries WHERE path = ?`,
-				parent,
-			).toArray();
+			const parentRows = this.#sql
+				.exec(`SELECT kind FROM _fs_entries WHERE path = ?`, parent)
+				.toArray();
 			if (parentRows.length === 0) {
 				throw new Error(`Parent directory does not exist: ${parent}`);
 			}
 		}
 
-		const existing = this.#sql.exec(
-			`SELECT kind FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const existing = this.#sql
+			.exec(`SELECT kind FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 		if (existing.length > 0 && existing[0].kind === "file") {
 			throw new Error(`Cannot create directory: path is a file: ${normalized}`);
 		}
@@ -303,10 +312,9 @@ export class VirtualFS {
 		this.ensureSchema();
 		const normalized = this.normalizePath(dirPath);
 
-		const dirRows = this.#sql.exec(
-			`SELECT kind FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const dirRows = this.#sql
+			.exec(`SELECT kind FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 		if (dirRows.length === 0) {
 			throw new Error(`Directory not found: ${normalized}`);
 		}
@@ -315,12 +323,14 @@ export class VirtualFS {
 		}
 
 		const prefix = normalized === "/" ? "/" : `${normalized}/`;
-		const rows = this.#sql.exec(
-			`SELECT path FROM _fs_entries WHERE path != ? AND path LIKE ? AND path NOT LIKE ?`,
-			normalized,
-			`${prefix}%`,
-			`${prefix}%/%`,
-		).toArray();
+		const rows = this.#sql
+			.exec(
+				`SELECT path FROM _fs_entries WHERE path != ? AND path LIKE ? AND path NOT LIKE ?`,
+				normalized,
+				`${prefix}%`,
+				`${prefix}%/%`,
+			)
+			.toArray();
 
 		return rows.map((r) => this.baseName(String(r.path)));
 	}
@@ -333,10 +343,12 @@ export class VirtualFS {
 		this.ensureSchema();
 		const normalized = this.normalizePath(filePath);
 
-		const rows = this.#sql.exec(
-			`SELECT path, kind, size, created_at, modified_at FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const rows = this.#sql
+			.exec(
+				`SELECT path, kind, size, created_at, modified_at FROM _fs_entries WHERE path = ?`,
+				normalized,
+			)
+			.toArray();
 
 		if (rows.length === 0) {
 			throw new Error(`Path not found: ${normalized}`);
@@ -356,10 +368,9 @@ export class VirtualFS {
 		this.ensureSchema();
 		const normalized = this.normalizePath(filePath);
 
-		const rows = this.#sql.exec(
-			`SELECT 1 FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const rows = this.#sql
+			.exec(`SELECT 1 FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 
 		return rows.length > 0;
 	}
@@ -373,10 +384,9 @@ export class VirtualFS {
 		const normalized = this.normalizePath(filePath);
 		if (normalized === "/") throw new Error("Cannot remove root directory");
 
-		const rows = this.#sql.exec(
-			`SELECT kind FROM _fs_entries WHERE path = ?`,
-			normalized,
-		).toArray();
+		const rows = this.#sql
+			.exec(`SELECT kind FROM _fs_entries WHERE path = ?`, normalized)
+			.toArray();
 
 		if (rows.length === 0) {
 			throw new Error(`Path not found: ${normalized}`);
@@ -386,10 +396,12 @@ export class VirtualFS {
 
 		if (rows[0].kind === "directory") {
 			const prefix = `${normalized}/`;
-			const children = this.#sql.exec(
-				`SELECT COUNT(*) as c FROM _fs_entries WHERE path LIKE ?`,
-				`${prefix}%`,
-			).toArray();
+			const children = this.#sql
+				.exec(
+					`SELECT COUNT(*) as c FROM _fs_entries WHERE path LIKE ?`,
+					`${prefix}%`,
+				)
+				.toArray();
 			const childCount = Number(children[0]?.c ?? 0);
 
 			if (childCount > 0 && !recursive) {
@@ -436,10 +448,12 @@ export class VirtualFS {
 			sqlPattern = `/%${sqlPattern}`;
 		}
 
-		const rows = this.#sql.exec(
-			`SELECT path FROM _fs_entries WHERE kind = 'file' AND path LIKE ? ESCAPE '\\'`,
-			sqlPattern,
-		).toArray();
+		const rows = this.#sql
+			.exec(
+				`SELECT path FROM _fs_entries WHERE kind = 'file' AND path LIKE ? ESCAPE '\\'`,
+				sqlPattern,
+			)
+			.toArray();
 
 		let matches = rows.map((r) => String(r.path));
 

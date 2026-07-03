@@ -67,7 +67,7 @@ function endpointScore(ep: ApiEndpoint): number {
 	let score = 0;
 	// Endpoints with more params tend to be more important/specific
 	score += (ep.pathParams?.length || 0) * 2;
-	score += (ep.queryParams?.length || 0);
+	score += ep.queryParams?.length || 0;
 	// GET is the most common operation
 	if (ep.method === "GET") score += 1;
 	// Covered-by-tool means it's important enough to have a dedicated tool
@@ -171,7 +171,9 @@ export function catalogToTypeScript(
 
 	const lines: string[] = [];
 
-	lines.push(`API REFERENCE (${catalog.name}, ${selected.length} of ${catalog.endpointCount} endpoints):`);
+	lines.push(
+		`API REFERENCE (${catalog.name}, ${selected.length} of ${catalog.endpointCount} endpoints):`,
+	);
 
 	for (const [category, eps] of groups) {
 		lines.push(`  ${category}:`);
@@ -183,7 +185,9 @@ export function catalogToTypeScript(
 
 	const omitted = catalog.endpointCount - selected.length;
 	if (omitted > 0) {
-		lines.push(`  ... ${omitted} more endpoints — use searchSpec(query) in your code to discover them`);
+		lines.push(
+			`  ... ${omitted} more endpoints — use searchSpec(query) in your code to discover them`,
+		);
 	}
 
 	return lines.join("\n");
@@ -248,19 +252,24 @@ function collectSpecOperations(spec: ResolvedSpec): OpEntry[] {
 	const ops: OpEntry[] = [];
 	for (const [path, pathItem] of Object.entries(spec.paths)) {
 		if (!pathItem || typeof pathItem !== "object") continue;
-		const pathParams: SpecParam[] = Array.isArray((pathItem as Record<string, unknown>).parameters)
-			? (pathItem as Record<string, unknown>).parameters as SpecParam[]
+		const pathParams: SpecParam[] = Array.isArray(
+			(pathItem as Record<string, unknown>).parameters,
+		)
+			? ((pathItem as Record<string, unknown>).parameters as SpecParam[])
 			: [];
 
 		for (const method of SPEC_HTTP_METHODS) {
-			const op = (pathItem as Record<string, unknown>)[method] as SpecOperation | undefined;
+			const op = (pathItem as Record<string, unknown>)[method] as
+				| SpecOperation
+				| undefined;
 			if (!op || typeof op !== "object") continue;
 
 			const allParams = [...pathParams, ...(op.parameters || [])];
 			ops.push({
 				method: method.toUpperCase(),
 				path,
-				summary: op.summary || op.operationId || op.description?.slice(0, 60) || "",
+				summary:
+					op.summary || op.operationId || op.description?.slice(0, 60) || "",
 				tag: op.tags?.[0] || "general",
 				params: formatSpecOpParams(allParams, Boolean(op.requestBody)),
 				score: allParams.length + (method === "get" ? 1 : 0),
@@ -307,7 +316,11 @@ function selectSpecOperations(ops: OpEntry[], maxEndpoints: number): OpEntry[] {
 }
 
 /** Render the tag-grouped summary block, noting how many operations were omitted. */
-function renderSpecSummary(title: string, ops: OpEntry[], selected: OpEntry[]): string {
+function renderSpecSummary(
+	title: string,
+	ops: OpEntry[],
+	selected: OpEntry[],
+): string {
 	const groups = new Map<string, OpEntry[]>();
 	for (const op of selected) {
 		const list = groups.get(op.tag) || [];
@@ -316,7 +329,9 @@ function renderSpecSummary(title: string, ops: OpEntry[], selected: OpEntry[]): 
 	}
 
 	const lines: string[] = [];
-	lines.push(`API REFERENCE (${title}, ${selected.length} of ${ops.length} operations):`);
+	lines.push(
+		`API REFERENCE (${title}, ${selected.length} of ${ops.length} operations):`,
+	);
 	for (const [tag, tagOps] of groups) {
 		lines.push(`  ${tag}:`);
 		for (const op of tagOps) {
@@ -326,7 +341,9 @@ function renderSpecSummary(title: string, ops: OpEntry[], selected: OpEntry[]): 
 
 	const omitted = ops.length - selected.length;
 	if (omitted > 0) {
-		lines.push(`  ... ${omitted} more operations — use searchSpec(query) or searchPaths(query) in your code to discover them`);
+		lines.push(
+			`  ... ${omitted} more operations — use searchSpec(query) or searchPaths(query) in your code to discover them`,
+		);
 	}
 	return lines.join("\n");
 }

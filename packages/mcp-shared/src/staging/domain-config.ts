@@ -162,7 +162,14 @@ export const RCSB_PDB_CONFIG: DomainConfig = {
 		{ pattern: "smiles", type: "TEXT" },
 		{ pattern: "url", type: "TEXT" },
 	],
-	singularizationExceptions: ["genus", "species", "series", "analysis", "basis", "axis"],
+	singularizationExceptions: [
+		"genus",
+		"species",
+		"series",
+		"analysis",
+		"basis",
+		"axis",
+	],
 	wrapperKeys: ["nodes", "edges"],
 	entityDetection: "aggressive",
 };

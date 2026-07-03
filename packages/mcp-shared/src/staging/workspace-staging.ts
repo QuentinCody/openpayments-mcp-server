@@ -120,7 +120,9 @@ export async function stageIntoWorkspace(
 		error: "Empty workspace response",
 	});
 	if (!wsResult.success) {
-		throw new Error(`Failed to stage into workspace: ${wsResult.error || "unknown error"}`);
+		throw new Error(
+			`Failed to stage into workspace: ${wsResult.error || "unknown error"}`,
+		);
 	}
 	const wsTables = wsResult.tables ?? [];
 	const wsDataAccessId = wsResult.data_access_id ?? fallbackDataAccessId;
@@ -164,7 +166,9 @@ export async function queryWorkspaceFromDo(
 	data_access_id: string;
 	executed_at: string;
 }> {
-	const wsInstance = workspaceNamespace.get(workspaceNamespace.idFromName(`ws:${workspaceId}`));
+	const wsInstance = workspaceNamespace.get(
+		workspaceNamespace.idFromName(`ws:${workspaceId}`),
+	);
 	const response = await wsInstance.fetch(
 		new Request(`${DO_FETCH_ORIGIN}/ws/query`, {
 			method: "POST",
@@ -177,11 +181,13 @@ export async function queryWorkspaceFromDo(
 		error: "Empty response from workspace DO",
 	});
 	if (!result.success) {
-		throw new Error(`Workspace query failed: ${result.error || "Unknown error"}`);
+		throw new Error(
+			`Workspace query failed: ${result.error || "Unknown error"}`,
+		);
 	}
 	return {
 		rows: result.rows ?? [],
-		row_count: result.row_count ?? (result.rows?.length ?? 0),
+		row_count: result.row_count ?? result.rows?.length ?? 0,
 		...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
 		sql: result.sql ?? sql,
 		data_access_id: `ws:${workspaceId}`,
@@ -202,15 +208,21 @@ export async function getWorkspaceSchemaFromDo(
 	schema: { dataset_count?: number; datasets?: unknown[] };
 	retrieved_at: string;
 }> {
-	const wsInstance = workspaceNamespace.get(workspaceNamespace.idFromName(`ws:${workspaceId}`));
+	const wsInstance = workspaceNamespace.get(
+		workspaceNamespace.idFromName(`ws:${workspaceId}`),
+	);
 	const query = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
-	const response = await wsInstance.fetch(new Request(`${DO_FETCH_ORIGIN}/ws/schema${query}`));
+	const response = await wsInstance.fetch(
+		new Request(`${DO_FETCH_ORIGIN}/ws/schema${query}`),
+	);
 	const result = await parseJsonResponse<WorkspaceSchemaResponse>(response, {
 		success: false,
 		error: "Empty response from workspace DO",
 	});
 	if (result.success === false) {
-		throw new Error(`Workspace schema retrieval failed: ${result.error || "Unknown error"}`);
+		throw new Error(
+			`Workspace schema retrieval failed: ${result.error || "Unknown error"}`,
+		);
 	}
 	return {
 		workspace_id: workspaceId,

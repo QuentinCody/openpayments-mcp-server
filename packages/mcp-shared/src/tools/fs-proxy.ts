@@ -51,7 +51,7 @@ async function fsFetch(
 			body: JSON.stringify(body),
 		}),
 	);
-	const result: FsResponse = await resp.json() as FsResponse;
+	const result: FsResponse = (await resp.json()) as FsResponse;
 	if (!result.success) {
 		return { __fs_error: true, message: result.error ?? `fs.${action} failed` };
 	}
@@ -105,8 +105,7 @@ export function createFsProxyHandlers(
 		__fs_exists: async (args: unknown) =>
 			fsFetch(doNamespace, "exists", toBody(args)),
 
-		__fs_rm: async (args: unknown) =>
-			fsFetch(doNamespace, "rm", toBody(args)),
+		__fs_rm: async (args: unknown) => fsFetch(doNamespace, "rm", toBody(args)),
 
 		__fs_glob: async (args: unknown) =>
 			fsFetch(doNamespace, "glob", toBody(args)),

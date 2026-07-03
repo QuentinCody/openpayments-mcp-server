@@ -3,7 +3,14 @@ import { createEvaluator } from "./evaluator";
 
 describe("createEvaluator", () => {
 	it("assembles the isolate module source and runs it via the worker loader", async () => {
-		let capturedConfig: { mainModule: string; modules: Record<string, string>; env: Record<string, unknown>; compatibilityFlags: string[] } | undefined;
+		let capturedConfig:
+			| {
+					mainModule: string;
+					modules: Record<string, string>;
+					env: Record<string, unknown>;
+					compatibilityFlags: string[];
+			  }
+			| undefined;
 		const entrypoint = { evaluate: vi.fn(async () => ({ ok: 1 })) };
 		const loader = {
 			get: vi.fn((_name: string, factory: () => typeof capturedConfig) => {
@@ -13,7 +20,11 @@ describe("createEvaluator", () => {
 		};
 		const proxy = { fetch: vi.fn() };
 
-		const run = createEvaluator("return 42;", { loader: loader as never, proxy: proxy as never, doId: "do-xyz" });
+		const run = createEvaluator("return 42;", {
+			loader: loader as never,
+			proxy: proxy as never,
+			doId: "do-xyz",
+		});
 		expect(typeof run).toBe("function");
 
 		const result = await run();

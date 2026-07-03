@@ -2,7 +2,7 @@
  * Tests for fs-proxy — validates the generated JS source string.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildFsProxySource } from "./fs-proxy";
 
 describe("buildFsProxySource", () => {

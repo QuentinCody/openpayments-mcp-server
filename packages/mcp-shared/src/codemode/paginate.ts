@@ -12,7 +12,7 @@
  * `api.getAll(...)` and the `__paginate_proxy` host tool are thin wrappers.
  */
 
-import { inferUpstreamTotal, type Completeness } from "../completeness";
+import { type Completeness, inferUpstreamTotal } from "../completeness";
 import { normalizeNextCursor } from "./next-cursor";
 
 export interface PaginateOptions {
@@ -114,11 +114,13 @@ export function extractItems(
 	if (resp && typeof resp === "object") {
 		const root = resp as Record<string, unknown>;
 		for (const k of ITEM_KEYS) {
-			if (Array.isArray(root[k])) return { items: root[k] as unknown[], field: k };
+			if (Array.isArray(root[k]))
+				return { items: root[k] as unknown[], field: k };
 		}
 		// NCBI E-utilities: { esearchresult: { idlist: [...] } }
 		const idlist = getPath(root, "esearchresult.idlist");
-		if (Array.isArray(idlist)) return { items: idlist, field: "esearchresult.idlist" };
+		if (Array.isArray(idlist))
+			return { items: idlist, field: "esearchresult.idlist" };
 	}
 	return { items: [] };
 }
@@ -131,7 +133,8 @@ export function extractNextCursor(
 ): string | undefined {
 	const read = (key: string): string | undefined => {
 		const v = getPath(resp, key);
-		if (typeof v === "string" && v.length > 0) return normalizeNextCursor(v, cursorParam);
+		if (typeof v === "string" && v.length > 0)
+			return normalizeNextCursor(v, cursorParam);
 		if (typeof v === "number" && Number.isFinite(v)) return String(v);
 		return undefined;
 	};

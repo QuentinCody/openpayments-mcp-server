@@ -12,21 +12,18 @@ import { describe, expect, it } from "vitest";
 import { pivotLongForm } from "./csv-pivot";
 
 describe("pivotLongForm (smoke)", () => {
-    it("melts a single-row, single-column matrix to one long-form row", async () => {
-        const out = await pivotLongForm(
-            [{ gene: "TP53", "ACH-001": "1.5" }],
-            {
-                geneColumn: "gene",
-                cellLineColumns: ["ACH-001"],
-            },
-        );
-        expect(out).toEqual([
-            {
-                entrez_id: null,
-                gene_symbol: "TP53",
-                cell_line_id: "ACH-001",
-                value: 1.5,
-            },
-        ]);
-    });
+	it("melts a single-row, single-column matrix to one long-form row", async () => {
+		const out = await pivotLongForm([{ gene: "TP53", "ACH-001": "1.5" }], {
+			geneColumn: "gene",
+			cellLineColumns: ["ACH-001"],
+		});
+		expect(out).toEqual([
+			{
+				entrez_id: null,
+				gene_symbol: "TP53",
+				cell_line_id: "ACH-001",
+				value: 1.5,
+			},
+		]);
+	});
 });

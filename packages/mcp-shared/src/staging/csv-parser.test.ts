@@ -18,19 +18,17 @@ import { describe, expect, it } from "vitest";
 import { parseCsv, parseCsvAsStrings } from "./csv-parser";
 
 describe("csv-parser (smoke)", () => {
-    it("parseCsv parses a header + one row, auto-casting numerics", () => {
-        expect(parseCsv("a,b\n1,foo")).toEqual([{ a: 1, b: "foo" }]);
-    });
+	it("parseCsv parses a header + one row, auto-casting numerics", () => {
+		expect(parseCsv("a,b\n1,foo")).toEqual([{ a: 1, b: "foo" }]);
+	});
 
-    it("parseCsvAsStrings keeps every cell as a string", () => {
-        expect(parseCsvAsStrings("a,b\n1,foo")).toEqual([
-            { a: "1", b: "foo" },
-        ]);
-    });
+	it("parseCsvAsStrings keeps every cell as a string", () => {
+		expect(parseCsvAsStrings("a,b\n1,foo")).toEqual([{ a: "1", b: "foo" }]);
+	});
 
-    it("parseCsv handles quoted fields with embedded commas and newlines", () => {
-        expect(parseCsv('a,b\n"x, y","line1\nline2"')).toEqual([
-            { a: "x, y", b: "line1\nline2" },
-        ]);
-    });
+	it("parseCsv handles quoted fields with embedded commas and newlines", () => {
+		expect(parseCsv('a,b\n"x, y","line1\nline2"')).toEqual([
+			{ a: "x, y", b: "line1\nline2" },
+		]);
+	});
 });

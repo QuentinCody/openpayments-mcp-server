@@ -9,9 +9,16 @@ import {
 } from "./schema-response";
 import type { TableRelationship } from "./staging-metadata";
 
-const schemaOf = (tables: unknown): InferredSchema => ({ tables }) as unknown as InferredSchema;
+const schemaOf = (tables: unknown): InferredSchema =>
+	({ tables }) as unknown as InferredSchema;
 const rel = (over: Partial<TableRelationship>): TableRelationship =>
-	({ parent_table: "parent", child_table: "child", fk_column: "parent_id", source_column: "kids", ...over }) as TableRelationship;
+	({
+		parent_table: "parent",
+		child_table: "child",
+		fk_column: "parent_id",
+		source_column: "kids",
+		...over,
+	}) as TableRelationship;
 
 describe("buildColumnMeta", () => {
 	it("returns an empty map for undefined schema", () => {
@@ -30,8 +37,14 @@ describe("buildColumnMeta", () => {
 				},
 			]),
 		);
-		expect(meta.get("t.a")).toEqual({ jsonShape: "{x:number}", pipeDelimited: undefined });
-		expect(meta.get("t.b")).toEqual({ jsonShape: undefined, pipeDelimited: true });
+		expect(meta.get("t.a")).toEqual({
+			jsonShape: "{x:number}",
+			pipeDelimited: undefined,
+		});
+		expect(meta.get("t.b")).toEqual({
+			jsonShape: undefined,
+			pipeDelimited: true,
+		});
 		expect(meta.has("t.c")).toBe(false);
 	});
 });
@@ -41,32 +54,80 @@ describe("buildProfileByTable", () => {
 		expect(buildProfileByTable(undefined).size).toBe(0);
 	});
 	it("keys profiles by table name", () => {
-		const profiles = [{ table: "t", columns: { a: { distinct: 3 } } }] as unknown as TableProfile[];
-		expect(buildProfileByTable(profiles).get("t")).toEqual({ a: { distinct: 3 } });
+		const profiles = [
+			{ table: "t", columns: { a: { distinct: 3 } } },
+		] as unknown as TableProfile[];
+		expect(buildProfileByTable(profiles).get("t")).toEqual({
+			a: { distinct: 3 },
+		});
 	});
 });
 
 describe("buildColumnDescriptor", () => {
 	const meta = buildColumnMeta(
-		schemaOf([{ name: "t", columns: [{ name: "j", jsonShape: "{}" }, { name: "p", pipeDelimited: true }] }]),
+		schemaOf([
+			{
+				name: "t",
+				columns: [
+					{ name: "j", jsonShape: "{}" },
+					{ name: "p", pipeDelimited: true },
+				],
+			},
+		]),
 	);
-	const profiles = buildProfileByTable([{ table: "t", columns: { x: { n: 1 } } }] as unknown as TableProfile[]);
+	const profiles = buildProfileByTable([
+		{ table: "t", columns: { x: { n: 1 } } },
+	] as unknown as TableProfile[]);
 
 	it("maps PRAGMA flags and omits optional keys when absent", () => {
-		const d = buildColumnDescriptor({ name: "plain", type: "TEXT", notnull: 0, pk: 0 }, "t", meta, profiles);
-		expect(d).toEqual({ name: "plain", type: "TEXT", not_null: false, primary_key: false });
+		const d = buildColumnDescriptor(
+			{ name: "plain", type: "TEXT", notnull: 0, pk: 0 },
+			"t",
+			meta,
+			profiles,
+		);
+		expect(d).toEqual({
+			name: "plain",
+			type: "TEXT",
+			not_null: false,
+			primary_key: false,
+		});
 	});
 	it("sets not_null / primary_key from the 1 sentinel", () => {
-		const d = buildColumnDescriptor({ name: "id", type: "INTEGER", notnull: 1, pk: 1 }, "t", meta, profiles);
+		const d = buildColumnDescriptor(
+			{ name: "id", type: "INTEGER", notnull: 1, pk: 1 },
+			"t",
+			meta,
+			profiles,
+		);
 		expect(d.not_null).toBe(true);
 		expect(d.primary_key).toBe(true);
 	});
 	it("attaches json_shape, searchable_array, and profile when present", () => {
-		expect(buildColumnDescriptor({ name: "j", type: "TEXT", notnull: 0, pk: 0 }, "t", meta, profiles).json_shape).toBe("{}");
 		expect(
-			buildColumnDescriptor({ name: "p", type: "TEXT", notnull: 0, pk: 0 }, "t", meta, profiles).searchable_array,
+			buildColumnDescriptor(
+				{ name: "j", type: "TEXT", notnull: 0, pk: 0 },
+				"t",
+				meta,
+				profiles,
+			).json_shape,
+		).toBe("{}");
+		expect(
+			buildColumnDescriptor(
+				{ name: "p", type: "TEXT", notnull: 0, pk: 0 },
+				"t",
+				meta,
+				profiles,
+			).searchable_array,
 		).toBe(true);
-		expect(buildColumnDescriptor({ name: "x", type: "TEXT", notnull: 0, pk: 0 }, "t", meta, profiles).profile).toEqual({
+		expect(
+			buildColumnDescriptor(
+				{ name: "x", type: "TEXT", notnull: 0, pk: 0 },
+				"t",
+				meta,
+				profiles,
+			).profile,
+		).toEqual({
 			n: 1,
 		});
 	});
@@ -74,7 +135,9 @@ describe("buildColumnDescriptor", () => {
 
 describe("buildRelationshipJoins", () => {
 	it("uses p._rowid when the parent has its own data id column", () => {
-		const schema = schemaOf([{ name: "parent", columns: [{ name: "id" }, { name: "label" }] }]);
+		const schema = schemaOf([
+			{ name: "parent", columns: [{ name: "id" }, { name: "label" }] },
+		]);
 		const [out] = buildRelationshipJoins([rel({})], schema);
 		expect(out.join_sql).toBe(
 			'SELECT p.*, c.* FROM "parent" p JOIN "child" c ON c.parent_id = p._rowid',
@@ -83,10 +146,14 @@ describe("buildRelationshipJoins", () => {
 	});
 	it("uses p.id when the parent has no data id column", () => {
 		const schema = schemaOf([{ name: "parent", columns: [{ name: "label" }] }]);
-		expect(buildRelationshipJoins([rel({})], schema)[0].join_sql).toContain("= p.id");
+		expect(buildRelationshipJoins([rel({})], schema)[0].join_sql).toContain(
+			"= p.id",
+		);
 	});
 	it("defaults to p.id when the parent table is absent from the schema", () => {
-		expect(buildRelationshipJoins([rel({})], undefined)[0].join_sql).toContain("= p.id");
+		expect(buildRelationshipJoins([rel({})], undefined)[0].join_sql).toContain(
+			"= p.id",
+		);
 		expect(buildRelationshipJoins([], undefined)).toEqual([]);
 	});
 });

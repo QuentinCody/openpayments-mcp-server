@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
-	flattenTypeRef,
-	trimIntrospectionResult,
 	fetchIntrospection,
+	flattenTypeRef,
 	type GraphqlFetchFn,
 	type TrimmedIntrospection,
+	trimIntrospectionResult,
 } from "./graphql-introspection";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,10 @@ const MOCK_RAW_INTROSPECTION = {
 						args: [
 							{
 								name: "symbol",
-								type: { kind: "NON_NULL", ofType: { kind: "SCALAR", name: "String" } },
+								type: {
+									kind: "NON_NULL",
+									ofType: { kind: "SCALAR", name: "String" },
+								},
 								defaultValue: null,
 								description: "Gene symbol",
 							},
@@ -132,7 +135,13 @@ const MOCK_RAW_INTROSPECTION = {
 				name: "__Schema",
 				kind: "OBJECT",
 				description: "Introspection schema type",
-				fields: [{ name: "types", type: { kind: "LIST", ofType: { kind: "OBJECT", name: "__Type" } }, args: [] }],
+				fields: [
+					{
+						name: "types",
+						type: { kind: "LIST", ofType: { kind: "OBJECT", name: "__Type" } },
+						args: [],
+					},
+				],
 				inputFields: null,
 				enumValues: null,
 				possibleTypes: null,
@@ -268,7 +277,9 @@ describe("fetchIntrospection", () => {
 			errors: [{ message: "Not authorized" }],
 		});
 
-		await expect(fetchIntrospection(mockFetch)).rejects.toThrow("Introspection query failed");
+		await expect(fetchIntrospection(mockFetch)).rejects.toThrow(
+			"Introspection query failed",
+		);
 	});
 
 	it("throws on missing __schema", async () => {
@@ -276,6 +287,8 @@ describe("fetchIntrospection", () => {
 			data: { something: "else" },
 		});
 
-		await expect(fetchIntrospection(mockFetch)).rejects.toThrow("missing __schema");
+		await expect(fetchIntrospection(mockFetch)).rejects.toThrow(
+			"missing __schema",
+		);
 	});
 });

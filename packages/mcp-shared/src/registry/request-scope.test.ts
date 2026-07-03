@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { getRequestScope, type MaybeExtra } from "./request-scope";
 
 describe("getRequestScope", () => {
@@ -53,7 +53,9 @@ describe("getRequestScope", () => {
 
 	it("handles array-valued headers by taking the first element", () => {
 		const extra: MaybeExtra = {
-			requestInfo: { headers: { "mcp-chat-id": ["chat-first", "chat-second"] } },
+			requestInfo: {
+				headers: { "mcp-chat-id": ["chat-first", "chat-second"] },
+			},
 		};
 		expect(getRequestScope(extra)).toBe("chat-first");
 	});

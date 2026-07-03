@@ -408,7 +408,12 @@ export function findTopLevelChar(expr: string, target: string): number {
 		if (ch === "]") bracketDepth--;
 		if (ch === "{") braceDepth++;
 		if (ch === "}") braceDepth--;
-		if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && ch === target) {
+		if (
+			parenDepth === 0 &&
+			bracketDepth === 0 &&
+			braceDepth === 0 &&
+			ch === target
+		) {
 			return pos;
 		}
 	}

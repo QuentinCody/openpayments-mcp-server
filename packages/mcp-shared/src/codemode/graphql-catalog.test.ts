@@ -24,7 +24,11 @@ const introspection = {
 						name: "gene",
 						description: "Look up a gene",
 						args: [
-							{ name: "symbol", description: "HGNC symbol", type: nonNull(STRING) },
+							{
+								name: "symbol",
+								description: "HGNC symbol",
+								type: nonNull(STRING),
+							},
 							{ name: "limit", type: INT, defaultValue: "10" },
 							{ name: "ids", type: list(nonNull(STRING)) },
 						],
@@ -35,7 +39,14 @@ const introspection = {
 			},
 			{
 				name: "Mutation",
-				fields: [{ name: "saveGene", description: "persist", args: [], type: obj("Gene") }],
+				fields: [
+					{
+						name: "saveGene",
+						description: "persist",
+						args: [],
+						type: obj("Gene"),
+					},
+				],
 			},
 		],
 	},
@@ -48,10 +59,25 @@ describe("graphQlToCatalog", () => {
 
 	it("maps queries to POST /graphql endpoints with arg-derived queryParams", () => {
 		const gene = byName("Query: gene");
-		expect(gene).toMatchObject({ method: "POST", path: "/graphql", category: "queries" });
+		expect(gene).toMatchObject({
+			method: "POST",
+			path: "/graphql",
+			category: "queries",
+		});
 		expect(gene?.queryParams).toEqual([
-			{ name: "symbol", type: "string", required: true, description: "HGNC symbol" },
-			{ name: "limit", type: "number", required: false, description: "limit", default: "10" },
+			{
+				name: "symbol",
+				type: "string",
+				required: true,
+				description: "HGNC symbol",
+			},
+			{
+				name: "limit",
+				type: "number",
+				required: false,
+				description: "limit",
+				default: "10",
+			},
 			{ name: "ids", type: "array", required: false, description: "ids" },
 		]);
 	});
@@ -62,12 +88,16 @@ describe("graphQlToCatalog", () => {
 	});
 
 	it("builds a usage hint that inlines required args only", () => {
-		expect(byName("Query: gene")?.usageHint).toContain("{ gene(symbol: $symbol) { ... } }");
+		expect(byName("Query: gene")?.usageHint).toContain(
+			"{ gene(symbol: $symbol) { ... } }",
+		);
 		expect(byName("Query: ping")?.usageHint).toContain("{ ping { ... } }");
 	});
 
 	it("skips __ introspection fields, flags deprecation, and maps mutations", () => {
-		expect(catalog.endpoints.some((e) => e.summary.includes("__typename"))).toBe(false);
+		expect(
+			catalog.endpoints.some((e) => e.summary.includes("__typename")),
+		).toBe(false);
 		expect(byName("Query: ping")?.deprecated).toBe(true);
 		expect(byName("Mutation: saveGene")?.category).toBe("mutations");
 		expect(catalog.endpointCount).toBe(3);
@@ -76,7 +106,10 @@ describe("graphQlToCatalog", () => {
 
 	it("defaults the GraphQL usage notes and honors an override", () => {
 		expect(catalog.notes).toContain("GraphQL API.");
-		const custom = graphQlToCatalog(introspection, { ...OPTS, notes: "custom" });
+		const custom = graphQlToCatalog(introspection, {
+			...OPTS,
+			notes: "custom",
+		});
 		expect(custom.catalog.notes).toBe("custom");
 	});
 

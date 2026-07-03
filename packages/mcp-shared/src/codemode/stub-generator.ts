@@ -13,7 +13,12 @@ interface OpenApiParameter {
 	in?: string;
 	required?: boolean;
 	description?: string;
-	schema?: { type?: string; default?: unknown; example?: unknown; enum?: unknown[] };
+	schema?: {
+		type?: string;
+		default?: unknown;
+		example?: unknown;
+		enum?: unknown[];
+	};
 	type?: string;
 	example?: unknown;
 }
@@ -29,7 +34,10 @@ interface OpenApiOperation {
 	requestBody?: {
 		description?: string;
 		required?: boolean;
-		content?: Record<string, { schema?: { type?: string; properties?: Record<string, unknown> } }>;
+		content?: Record<
+			string,
+			{ schema?: { type?: string; properties?: Record<string, unknown> } }
+		>;
 	};
 }
 
@@ -44,15 +52,21 @@ function placeholderFromParam(p: ParamDef): string {
 		return JSON.stringify(p.enum[0]);
 	}
 	// Extract example values from description (e.g., "e.g. ENSG00000157764", "(e.g., Brain_Cortex)")
-	const egMatch = p.description.match(/(?:e\.g\.?,?\s*|for example,?\s*)["']?([^"'\s,)]+)/i);
+	const egMatch = p.description.match(
+		/(?:e\.g\.?,?\s*|for example,?\s*)["']?([^"'\s,)]+)/i,
+	);
 	if (egMatch) return JSON.stringify(egMatch[1]);
 
 	// Type-based fallback
 	switch (p.type) {
-		case "number": return "1";
-		case "boolean": return "true";
-		case "array": return '["value"]';
-		default: return `"${p.name}_value"`;
+		case "number":
+			return "1";
+		case "boolean":
+			return "true";
+		case "array":
+			return '["value"]';
+		default:
+			return `"${p.name}_value"`;
 	}
 }
 
@@ -63,19 +77,26 @@ function placeholderFromOpenApiParam(p: OpenApiParameter): string {
 	if (p.example !== undefined) return JSON.stringify(p.example);
 	if (p.schema?.example !== undefined) return JSON.stringify(p.schema?.example);
 	if (p.schema?.default !== undefined) return JSON.stringify(p.schema?.default);
-	if (p.schema?.enum && p.schema?.enum.length > 0) return JSON.stringify(p.schema?.enum[0]);
+	if (p.schema?.enum && p.schema?.enum.length > 0)
+		return JSON.stringify(p.schema?.enum[0]);
 
 	const desc = p.description || "";
-	const egMatch = desc.match(/(?:e\.g\.?,?\s*|for example,?\s*)["']?([^"'\s,)]+)/i);
+	const egMatch = desc.match(
+		/(?:e\.g\.?,?\s*|for example,?\s*)["']?([^"'\s,)]+)/i,
+	);
 	if (egMatch) return JSON.stringify(egMatch[1]);
 
 	const type = p.schema?.type || p.type || "string";
 	switch (type) {
 		case "integer":
-		case "number": return "1";
-		case "boolean": return "true";
-		case "array": return '["value"]';
-		default: return `"${p.name || "value"}"`;
+		case "number":
+			return "1";
+		case "boolean":
+			return "true";
+		case "array":
+			return '["value"]';
+		default:
+			return `"${p.name || "value"}"`;
 	}
 }
 
@@ -92,23 +113,32 @@ export function generateEndpointStub(ep: ApiEndpoint): string {
 	// Path params
 	for (const p of ep.pathParams || []) {
 		const comment = p.required ? "required" : "optional";
-		paramLines.push(`  ${p.name}: ${placeholderFromParam(p)},  // ${comment}, ${p.type}`);
+		paramLines.push(
+			`  ${p.name}: ${placeholderFromParam(p)},  // ${comment}, ${p.type}`,
+		);
 	}
 
 	// Query params (required first, then optional with defaults)
-	const requiredQuery = (ep.queryParams || []).filter(p => p.required);
-	const optionalQuery = (ep.queryParams || []).filter(p => !p.required);
+	const requiredQuery = (ep.queryParams || []).filter((p) => p.required);
+	const optionalQuery = (ep.queryParams || []).filter((p) => !p.required);
 
 	for (const p of requiredQuery) {
-		paramLines.push(`  ${p.name}: ${placeholderFromParam(p)},  // required, ${p.type}`);
+		paramLines.push(
+			`  ${p.name}: ${placeholderFromParam(p)},  // required, ${p.type}`,
+		);
 	}
 	// Show up to 2 optional params with defaults or enums
-	const shownOptional = optionalQuery.filter(p => p.default !== undefined || p.enum).slice(0, 2);
+	const shownOptional = optionalQuery
+		.filter((p) => p.default !== undefined || p.enum)
+		.slice(0, 2);
 	for (const p of shownOptional) {
-		paramLines.push(`  // ${p.name}: ${placeholderFromParam(p)},  // optional, ${p.type}`);
+		paramLines.push(
+			`  // ${p.name}: ${placeholderFromParam(p)},  // optional, ${p.type}`,
+		);
 	}
 
-	const paramsBlock = paramLines.length > 0 ? `{\n${paramLines.join("\n")}\n}` : "";
+	const paramsBlock =
+		paramLines.length > 0 ? `{\n${paramLines.join("\n")}\n}` : "";
 
 	let code: string;
 	if (ep.method === "POST" && ep.body) {
@@ -136,27 +166,39 @@ export function generateOperationStub(op: OpenApiOperation): string {
 	const method = op.method.toLowerCase() === "get" ? "api.get" : "api.post";
 	const params = op.parameters || [];
 
-	const pathParams = params.filter(p => p.in === "path");
-	const queryParams = params.filter(p => p.in === "query");
-	const requiredQuery = queryParams.filter(p => p.required);
-	const optionalQuery = queryParams.filter(p => !p.required);
+	const pathParams = params.filter((p) => p.in === "path");
+	const queryParams = params.filter((p) => p.in === "query");
+	const requiredQuery = queryParams.filter((p) => p.required);
+	const optionalQuery = queryParams.filter((p) => !p.required);
 
 	const paramLines: string[] = [];
 
 	for (const p of pathParams) {
-		paramLines.push(`  ${p.name}: ${placeholderFromOpenApiParam(p)},  // path, required`);
+		paramLines.push(
+			`  ${p.name}: ${placeholderFromOpenApiParam(p)},  // path, required`,
+		);
 	}
 	for (const p of requiredQuery) {
-		paramLines.push(`  ${p.name}: ${placeholderFromOpenApiParam(p)},  // required`);
+		paramLines.push(
+			`  ${p.name}: ${placeholderFromOpenApiParam(p)},  // required`,
+		);
 	}
-	const shownOptional = optionalQuery.filter(p =>
-		p.schema?.default !== undefined || p.schema?.enum || p.example !== undefined
-	).slice(0, 2);
+	const shownOptional = optionalQuery
+		.filter(
+			(p) =>
+				p.schema?.default !== undefined ||
+				p.schema?.enum ||
+				p.example !== undefined,
+		)
+		.slice(0, 2);
 	for (const p of shownOptional) {
-		paramLines.push(`  // ${p.name}: ${placeholderFromOpenApiParam(p)},  // optional`);
+		paramLines.push(
+			`  // ${p.name}: ${placeholderFromOpenApiParam(p)},  // optional`,
+		);
 	}
 
-	const paramsBlock = paramLines.length > 0 ? `{\n${paramLines.join("\n")}\n}` : "";
+	const paramsBlock =
+		paramLines.length > 0 ? `{\n${paramLines.join("\n")}\n}` : "";
 
 	if (op.method.toLowerCase() === "post" && op.requestBody) {
 		const bodyHint = "{ /* request body */ }";
@@ -192,26 +234,39 @@ export function generateQuickReference(options: {
 	return "";
 }
 
-function generateCatalogQuickRef(catalog: ApiCatalog, max: number, prefix: string): string {
+function generateCatalogQuickRef(
+	catalog: ApiCatalog,
+	max: number,
+	prefix: string,
+): string {
 	// Prioritize: non-deprecated, non-coveredByTool, required params first
 	const sorted = [...catalog.endpoints]
-		.filter(ep => !ep.deprecated)
+		.filter((ep) => !ep.deprecated)
 		.sort((a, b) => {
 			// Uncovered endpoints first (they're only accessible via Code Mode)
 			if (!a.coveredByTool && b.coveredByTool) return -1;
 			if (a.coveredByTool && !b.coveredByTool) return 1;
 			// More required params = more useful to show
-			const aReq = (a.pathParams?.length ?? 0) + (a.queryParams?.filter(p => p.required)?.length ?? 0);
-			const bReq = (b.pathParams?.length ?? 0) + (b.queryParams?.filter(p => p.required)?.length ?? 0);
+			const aReq =
+				(a.pathParams?.length ?? 0) +
+				(a.queryParams?.filter((p) => p.required)?.length ?? 0);
+			const bReq =
+				(b.pathParams?.length ?? 0) +
+				(b.queryParams?.filter((p) => p.required)?.length ?? 0);
 			return bReq - aReq;
 		})
 		.slice(0, max);
 
-	const lines = sorted.map(ep => {
+	const lines = sorted.map((ep) => {
 		const params = [
-			...(ep.pathParams || []).map(p => `${p.name}*`),
-			...(ep.queryParams || []).filter(p => p.required).map(p => `${p.name}*`),
-			...(ep.queryParams || []).filter(p => !p.required).slice(0, 2).map(p => `${p.name}?`),
+			...(ep.pathParams || []).map((p) => `${p.name}*`),
+			...(ep.queryParams || [])
+				.filter((p) => p.required)
+				.map((p) => `${p.name}*`),
+			...(ep.queryParams || [])
+				.filter((p) => !p.required)
+				.slice(0, 2)
+				.map((p) => `${p.name}?`),
 		];
 		const paramStr = params.length > 0 ? ` (${params.join(", ")})` : "";
 		return `  ${ep.method} ${ep.path} — ${ep.summary}${paramStr}`;
@@ -226,7 +281,12 @@ function generateOpenApiQuickRef(
 	prefix: string,
 ): string {
 	const methods = ["get", "post", "put", "delete", "patch"];
-	const ops: Array<{ method: string; path: string; summary: string; params: OpenApiParameter[] }> = [];
+	const ops: Array<{
+		method: string;
+		path: string;
+		summary: string;
+		params: OpenApiParameter[];
+	}> = [];
 
 	for (const [path, pathItem] of Object.entries(spec.paths)) {
 		if (!pathItem || typeof pathItem !== "object") continue;
@@ -244,9 +304,14 @@ function generateOpenApiQuickRef(
 	}
 
 	const selected = ops.slice(0, max);
-	const lines = selected.map(op => {
-		const required = op.params.filter(p => p.required).map(p => `${p.name}*`);
-		const optional = op.params.filter(p => !p.required).slice(0, 2).map(p => `${p.name}?`);
+	const lines = selected.map((op) => {
+		const required = op.params
+			.filter((p) => p.required)
+			.map((p) => `${p.name}*`);
+		const optional = op.params
+			.filter((p) => !p.required)
+			.slice(0, 2)
+			.map((p) => `${p.name}?`);
 		const params = [...required, ...optional];
 		const paramStr = params.length > 0 ? ` (${params.join(", ")})` : "";
 		return `  ${op.method} ${op.path} — ${op.summary}${paramStr}`;
@@ -262,7 +327,7 @@ function generateOpenApiQuickRef(
  */
 function formatParamType(p: ParamDef): string {
 	if (p.enum && p.enum.length > 0) {
-		const vals = p.enum.slice(0, 5).map(v => JSON.stringify(v));
+		const vals = p.enum.slice(0, 5).map((v) => JSON.stringify(v));
 		if (p.enum.length > 5) vals.push("...");
 		return vals.join(" | ");
 	}
@@ -274,7 +339,7 @@ function formatParamType(p: ParamDef): string {
  */
 function formatOpenApiParamType(p: OpenApiParameter): string {
 	if (p.schema?.enum && p.schema?.enum.length > 0) {
-		const vals = p.schema?.enum.slice(0, 5).map(v => JSON.stringify(v));
+		const vals = p.schema?.enum.slice(0, 5).map((v) => JSON.stringify(v));
 		if (p.schema?.enum.length > 5) vals.push("...");
 		return vals.join(" | ");
 	}
@@ -287,13 +352,21 @@ function formatOpenApiParamType(p: OpenApiParameter): string {
 function formatEndpointTypeHint(ep: ApiEndpoint): string {
 	const method = ep.method === "GET" ? "api.get" : "api.post";
 	const allParams = [
-		...(ep.pathParams || []).map(p => `${p.name}${p.required ? "" : "?"}: ${formatParamType(p)}`),
-		...(ep.queryParams || []).filter(p => p.required).map(p => `${p.name}: ${formatParamType(p)}`),
-		...(ep.queryParams || []).filter(p => !p.required).map(p => `${p.name}?: ${formatParamType(p)}`),
+		...(ep.pathParams || []).map(
+			(p) => `${p.name}${p.required ? "" : "?"}: ${formatParamType(p)}`,
+		),
+		...(ep.queryParams || [])
+			.filter((p) => p.required)
+			.map((p) => `${p.name}: ${formatParamType(p)}`),
+		...(ep.queryParams || [])
+			.filter((p) => !p.required)
+			.map((p) => `${p.name}?: ${formatParamType(p)}`),
 	];
 	const params = allParams.length > 0 ? `{ ${allParams.join("; ")} }` : "";
 	const ret = ep.responseShape || "object";
-	const sig = params ? `${method}("${ep.path}", ${params})` : `${method}("${ep.path}")`;
+	const sig = params
+		? `${method}("${ep.path}", ${params})`
+		: `${method}("${ep.path}")`;
 	return `// ${sig} → ${ret}`;
 }
 
@@ -304,11 +377,17 @@ function formatOperationTypeHint(op: OpenApiOperation): string {
 	const method = op.method.toLowerCase() === "get" ? "api.get" : "api.post";
 	const params = op.parameters || [];
 	const allParams = [
-		...params.filter(p => p.required).map(p => `${p.name}: ${formatOpenApiParamType(p)}`),
-		...params.filter(p => !p.required).map(p => `${p.name}?: ${formatOpenApiParamType(p)}`),
+		...params
+			.filter((p) => p.required)
+			.map((p) => `${p.name}: ${formatOpenApiParamType(p)}`),
+		...params
+			.filter((p) => !p.required)
+			.map((p) => `${p.name}?: ${formatOpenApiParamType(p)}`),
 	];
 	const paramStr = allParams.length > 0 ? `{ ${allParams.join("; ")} }` : "";
-	const sig = paramStr ? `${method}("${op.path}", ${paramStr})` : `${method}("${op.path}")`;
+	const sig = paramStr
+		? `${method}("${op.path}", ${paramStr})`
+		: `${method}("${op.path}")`;
 	return `// ${sig} → object`;
 }
 
@@ -335,7 +414,7 @@ export function generateTypeHints(options: {
 
 	if (options.catalog) {
 		const endpoints = [...options.catalog.endpoints]
-			.filter(ep => !ep.deprecated)
+			.filter((ep) => !ep.deprecated)
 			.slice(0, max);
 		for (const ep of endpoints) {
 			lines.push(formatEndpointTypeHint(ep));
@@ -351,12 +430,14 @@ export function generateTypeHints(options: {
 				const op = (pathItem as Record<string, unknown>)[m];
 				if (!op || typeof op !== "object") continue;
 				const opObj = op as OpenApiOperation;
-				lines.push(formatOperationTypeHint({
-					...opObj,
-					path,
-					method: m.toUpperCase(),
-					parameters: (opObj.parameters as OpenApiParameter[]) || [],
-				}));
+				lines.push(
+					formatOperationTypeHint({
+						...opObj,
+						path,
+						method: m.toUpperCase(),
+						parameters: (opObj.parameters as OpenApiParameter[]) || [],
+					}),
+				);
 				count++;
 			}
 		}

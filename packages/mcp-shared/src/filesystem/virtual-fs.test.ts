@@ -5,9 +5,9 @@
  * SQLite behavior without requiring a real database.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { VirtualFS } from "./virtual-fs";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { SqlExec } from "../staging/chunking";
+import { VirtualFS } from "./virtual-fs";
 
 // ---------------------------------------------------------------------------
 // Minimal SQLite mock — stores rows in a Map keyed by table name
@@ -42,12 +42,26 @@ function createMockSql(): SqlExec {
 				if (bindings.length === 0) {
 					// Root directory: all values inline in SQL
 					if (!rows.has("/")) {
-						rows.set("/", { path: "/", kind: "directory", content: null, size: 0, created_at: NOW, modified_at: NOW });
+						rows.set("/", {
+							path: "/",
+							kind: "directory",
+							content: null,
+							size: 0,
+							created_at: NOW,
+							modified_at: NOW,
+						});
 					}
 				} else {
 					const path = String(bindings[0]);
 					if (!rows.has(path)) {
-						rows.set(path, { path, kind: "directory", content: null, size: 0, created_at: NOW, modified_at: NOW });
+						rows.set(path, {
+							path,
+							kind: "directory",
+							content: null,
+							size: 0,
+							created_at: NOW,
+							modified_at: NOW,
+						});
 					}
 				}
 				return { toArray: () => [], one: () => undefined };
@@ -55,7 +69,10 @@ function createMockSql(): SqlExec {
 
 			// INSERT INTO ... ON CONFLICT (writeFile upsert)
 			// SQL: VALUES (?, 'file', ?, ?, ...) — bindings: [path, content, size]
-			if (sql.includes("INSERT INTO _fs_entries") && sql.includes("ON CONFLICT")) {
+			if (
+				sql.includes("INSERT INTO _fs_entries") &&
+				sql.includes("ON CONFLICT")
+			) {
 				const path = String(bindings[0]);
 				rows.set(path, {
 					path,
@@ -128,39 +145,73 @@ function createMockSql(): SqlExec {
 			if (sql.includes("SELECT 1 FROM _fs_entries")) {
 				const path = String(bindings[0]);
 				const found = rows.has(path);
-				return { toArray: () => (found ? [{ "1": 1 }] : []), one: () => (found ? { "1": 1 } : undefined) };
+				return {
+					toArray: () => (found ? [{ "1": 1 }] : []),
+					one: () => (found ? { "1": 1 } : undefined),
+				};
 			}
 
 			// SELECT kind FROM
 			if (sql.includes("SELECT kind FROM _fs_entries")) {
 				const path = String(bindings[0]);
 				const row = rows.get(path);
-				return { toArray: () => (row ? [{ kind: row.kind }] : []), one: () => (row ? { kind: row.kind } : undefined) };
+				return {
+					toArray: () => (row ? [{ kind: row.kind }] : []),
+					one: () => (row ? { kind: row.kind } : undefined),
+				};
 			}
 
 			// SELECT kind, content FROM (readFile)
 			if (sql.includes("SELECT kind, content FROM _fs_entries")) {
 				const path = String(bindings[0]);
 				const row = rows.get(path);
-				return { toArray: () => (row ? [{ kind: row.kind, content: row.content }] : []), one: () => (row ? { kind: row.kind, content: row.content } : undefined) };
+				return {
+					toArray: () =>
+						row ? [{ kind: row.kind, content: row.content }] : [],
+					one: () =>
+						row ? { kind: row.kind, content: row.content } : undefined,
+				};
 			}
 
 			// SELECT kind, content, size FROM (appendFile check)
 			if (sql.includes("SELECT kind, content, size FROM _fs_entries")) {
 				const path = String(bindings[0]);
 				const row = rows.get(path);
-				return { toArray: () => (row ? [{ kind: row.kind, content: row.content, size: row.size }] : []), one: () => undefined };
+				return {
+					toArray: () =>
+						row
+							? [{ kind: row.kind, content: row.content, size: row.size }]
+							: [],
+					one: () => undefined,
+				};
 			}
 
 			// SELECT path, kind, size, created_at, modified_at (stat)
 			if (sql.includes("SELECT path, kind, size, created_at, modified_at")) {
 				const path = String(bindings[0]);
 				const row = rows.get(path);
-				return { toArray: () => (row ? [{ path: row.path, kind: row.kind, size: row.size, created_at: row.created_at, modified_at: row.modified_at }] : []), one: () => undefined };
+				return {
+					toArray: () =>
+						row
+							? [
+									{
+										path: row.path,
+										kind: row.kind,
+										size: row.size,
+										created_at: row.created_at,
+										modified_at: row.modified_at,
+									},
+								]
+							: [],
+					one: () => undefined,
+				};
 			}
 
 			// SELECT path FROM ... LIKE (readdir — 3 bindings: path, prefix%, prefix%/%)
-			if (sql.includes("SELECT path FROM _fs_entries WHERE path !=") && sql.includes("LIKE")) {
+			if (
+				sql.includes("SELECT path FROM _fs_entries WHERE path !=") &&
+				sql.includes("LIKE")
+			) {
 				const parentPath = String(bindings[0]);
 				const likePrefix = String(bindings[1]).replace(/%$/, "");
 				// bindings[2] is the NOT LIKE pattern — handled by remainder check below
@@ -215,7 +266,10 @@ function sqlLikeMatch(value: string, pattern: string): boolean {
 			starPi = pi + 1;
 			starVi = vi;
 			pi = starPi;
-		} else if (pi < pattern.length && (pattern[pi] === "_" || pattern[pi] === value[vi])) {
+		} else if (
+			pi < pattern.length &&
+			(pattern[pi] === "_" || pattern[pi] === value[vi])
+		) {
 			pi++;
 			vi++;
 		} else if (starPi !== -1) {
@@ -279,7 +333,9 @@ describe("VirtualFS", () => {
 
 		it("throws writing to a directory path", () => {
 			vfs.mkdir("/mydir");
-			expect(() => vfs.writeFile("/mydir", "data")).toThrow("path is a directory");
+			expect(() => vfs.writeFile("/mydir", "data")).toThrow(
+				"path is a directory",
+			);
 		});
 	});
 
@@ -290,7 +346,9 @@ describe("VirtualFS", () => {
 
 		it("throws on directory", () => {
 			vfs.mkdir("/mydir");
-			expect(() => vfs.readFile("/mydir")).toThrow("Cannot read directory as file");
+			expect(() => vfs.readFile("/mydir")).toThrow(
+				"Cannot read directory as file",
+			);
 		});
 	});
 
@@ -308,7 +366,9 @@ describe("VirtualFS", () => {
 
 		it("throws appending to directory", () => {
 			vfs.mkdir("/mydir");
-			expect(() => vfs.appendFile("/mydir", "data")).toThrow("Cannot append to directory");
+			expect(() => vfs.appendFile("/mydir", "data")).toThrow(
+				"Cannot append to directory",
+			);
 		});
 	});
 
@@ -429,7 +489,9 @@ describe("VirtualFS", () => {
 
 		it("throws removing non-empty dir with recursive=false", () => {
 			vfs.writeFile("/dir/a.txt", "a");
-			expect(() => vfs.rm("/dir", { recursive: false })).toThrow("Directory not empty");
+			expect(() => vfs.rm("/dir", { recursive: false })).toThrow(
+				"Directory not empty",
+			);
 		});
 
 		it("throws removing root", () => {
@@ -475,7 +537,11 @@ describe("VirtualFS", () => {
 
 		it("matches with ** across directories", () => {
 			const result = vfs.glob("/data/**/*.json");
-			expect(result.matches.sort()).toEqual(["/data/a.json", "/data/b.json", "/data/sub/d.json"]);
+			expect(result.matches.sort()).toEqual([
+				"/data/a.json",
+				"/data/b.json",
+				"/data/sub/d.json",
+			]);
 		});
 
 		it("matches all json files with **", () => {

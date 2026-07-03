@@ -30,11 +30,21 @@ function __wrapStaged(raw) {
   var hint = " Return this object and use the query_data tool with data_access_id=\\"" +
     raw.data_access_id + "\\" to query it with SQL.";
   var TRAP_KEYS = ["results", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges"];
+  // T6.3 — a staged result is an object, NOT an array. Array methods throw a
+  // guided error instead of the cryptic "<method> is not a function".
+  var ARRAY_METHODS = ["slice","map","filter","forEach","reduce","reduceRight","find","findIndex","some","every","flatMap","flat","sort","reverse","concat","join","indexOf","lastIndexOf","includes","at","pop","push","shift","unshift","splice","fill","keys","values","entries"];
   return new Proxy(raw, {
     get: function(target, prop) {
-      if (typeof prop === "string" && TRAP_KEYS.indexOf(prop) !== -1 && !(prop in target)) {
-        console.warn("[staging] Accessed \\"" + prop + "\\" on staged response — this array was replaced by SQLite tables. " + hint);
-        return undefined;
+      if (typeof prop === "string" && !(prop in target)) {
+        if (TRAP_KEYS.indexOf(prop) !== -1) {
+          console.warn("[staging] Accessed \\"" + prop + "\\" on staged response — this array was replaced by SQLite tables. " + hint);
+          return undefined;
+        }
+        if (ARRAY_METHODS.indexOf(prop) !== -1) {
+          return function() {
+            throw new Error("This is a STAGED result OBJECT, not an array — '." + prop + "()' is not available. The rows live in SQLite, not on this object." + hint);
+          };
+        }
       }
       return target[prop];
     }
@@ -110,6 +120,17 @@ var gql = {
 };
 
 var api = {
+  /**
+   * Guiding stubs (T4.3): this is a GraphQL server, so api.get/api.post don't
+   * exist — calling them used to throw a cryptic "api.get is not a function".
+   * Throw a directed message pointing at gql.query instead.
+   */
+  get: function() {
+    throw new Error("api.get is not available on this GraphQL server — fetch data with gql.query(\\"{ ... }\\"). On this server, api only carries .query(dataAccessId, sql) for querying staged data.");
+  },
+  post: function() {
+    throw new Error("api.post is not available on this GraphQL server — fetch data with gql.query(\\"{ ... }\\"). On this server, api only carries .query(dataAccessId, sql) for querying staged data.");
+  },
   /**
    * Query staged data with SQL. Use after gql.query returns __staged=true.
    */

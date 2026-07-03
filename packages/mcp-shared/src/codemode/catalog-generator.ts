@@ -33,7 +33,8 @@ export interface CatalogGeneratorResult {
 }
 
 /** Override for a single endpoint, keyed by "METHOD /path" */
-export interface EndpointOverride extends Partial<Omit<ApiEndpoint, "method" | "path">> {
+export interface EndpointOverride
+	extends Partial<Omit<ApiEndpoint, "method" | "path">> {
 	/** Remove this endpoint from the catalog */
 	exclude?: boolean;
 }
@@ -52,7 +53,9 @@ export interface CatalogOverrides {
 	/** Workflow recipes to add */
 	workflows?: WorkflowRecipe[];
 	/** Override catalog-level fields */
-	catalog?: Partial<Pick<ApiCatalog, "name" | "baseUrl" | "version" | "auth" | "notes">>;
+	catalog?: Partial<
+		Pick<ApiCatalog, "name" | "baseUrl" | "version" | "auth" | "notes">
+	>;
 }
 
 export type CategoryStrategy = "tag" | "path-prefix" | "operationId";
@@ -81,8 +84,14 @@ const MAX_SHAPE_DEPTH = 4;
 const MAX_SHAPE_PROPERTIES = 12;
 
 /** Merge allOf sub-schemas into a single object schema (properties + required). */
-function mergeAllOfSchemas(subSchemas: Record<string, unknown>[]): Record<string, unknown> {
-	const merged: Record<string, unknown> = { type: "object", properties: {}, required: [] };
+function mergeAllOfSchemas(
+	subSchemas: Record<string, unknown>[],
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = {
+		type: "object",
+		properties: {},
+		required: [],
+	};
 	for (const sub of subSchemas) {
 		if (sub.properties && typeof sub.properties === "object") {
 			Object.assign(merged.properties as object, sub.properties);
@@ -95,7 +104,10 @@ function mergeAllOfSchemas(subSchemas: Record<string, unknown>[]): Record<string
 }
 
 /** Render the object/default branch: named properties, Record<> maps, or any/object fallbacks. */
-function objectShapeFromSchema(s: Record<string, unknown>, depth: number): string {
+function objectShapeFromSchema(
+	s: Record<string, unknown>,
+	depth: number,
+): string {
 	if (s.type && s.type !== "object" && !s.properties) return "any";
 	const props = s.properties;
 	if (!props || typeof props !== "object") {
@@ -105,7 +117,9 @@ function objectShapeFromSchema(s: Record<string, unknown>, depth: number): strin
 		return s.properties === undefined && !s.type ? "any" : "object";
 	}
 	const entries = Object.entries(props as Record<string, unknown>);
-	const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+	const required = new Set(
+		Array.isArray(s.required) ? (s.required as string[]) : [],
+	);
 	const parts = entries.slice(0, MAX_SHAPE_PROPERTIES).map(([key, val]) => {
 		const opt = required.has(key) ? "" : "?";
 		return `${key}${opt}: ${schemaToResponseShape(val, depth + 1)}`;
@@ -119,7 +133,8 @@ function objectShapeFromSchema(s: Record<string, unknown>, depth: number): strin
  * E.g. `{ id: string, items: Array<{ name: string, count: number }> }`
  */
 export function schemaToResponseShape(schema: unknown, depth = 0): string {
-	if (!schema || typeof schema !== "object" || depth > MAX_SHAPE_DEPTH) return "any";
+	if (!schema || typeof schema !== "object" || depth > MAX_SHAPE_DEPTH)
+		return "any";
 	const s = schema as Record<string, unknown>;
 
 	// Union types
@@ -133,7 +148,10 @@ export function schemaToResponseShape(schema: unknown, depth = 0): string {
 
 	// Intersection/composition
 	if (Array.isArray(s.allOf)) {
-		return schemaToResponseShape(mergeAllOfSchemas(s.allOf as Record<string, unknown>[]), depth);
+		return schemaToResponseShape(
+			mergeAllOfSchemas(s.allOf as Record<string, unknown>[]),
+			depth,
+		);
 	}
 
 	// Enums
@@ -182,14 +200,19 @@ function mapSchemaType(schema: unknown): ParamDef["type"] {
 	}
 }
 
-function extractParam(raw: Record<string, unknown>, location: "path" | "query"): ParamDef | null {
+function extractParam(
+	raw: Record<string, unknown>,
+	location: "path" | "query",
+): ParamDef | null {
 	if (raw.in !== location) return null;
 	const schema = (raw.schema || {}) as Record<string, unknown>;
 	const param: ParamDef = {
 		name: String(raw.name || ""),
 		type: mapSchemaType(schema.type ? schema : raw),
 		required: location === "path" ? true : Boolean(raw.required),
-		description: String(raw.description || schema.description || raw.name || ""),
+		description: String(
+			raw.description || schema.description || raw.name || "",
+		),
 	};
 	const def = raw.default ?? schema.default;
 	if (def !== undefined) param.default = def;
@@ -269,7 +292,14 @@ export function openApiToCatalog(
 			const op = value as Record<string, unknown>;
 
 			if (method === "patch") {
-				const mapped = buildPatchAsPut(pathStr, op, pathLevelParams, strategy, includeExamples, includeDeprecated);
+				const mapped = buildPatchAsPut(
+					pathStr,
+					op,
+					pathLevelParams,
+					strategy,
+					includeExamples,
+					includeDeprecated,
+				);
 				diagnostics.push(...mapped.diagnostics);
 				if (mapped.endpoint) endpoints.push(mapped.endpoint);
 				continue;
@@ -382,7 +412,8 @@ function assembleOpenApiCatalog(
 ): CatalogGeneratorResult {
 	// Sort by category then path
 	endpoints.sort(
-		(a, b) => a.category.localeCompare(b.category) || a.path.localeCompare(b.path),
+		(a, b) =>
+			a.category.localeCompare(b.category) || a.path.localeCompare(b.path),
 	);
 
 	const specBaseUrl = spec.servers?.[0]?.url || "";
@@ -390,7 +421,9 @@ function assembleOpenApiCatalog(
 	const catalog: ApiCatalog = {
 		name: opts.name || spec.info.title || "API",
 		baseUrl: (opts.baseUrl || specBaseUrl).replace(/\/$/, ""),
-		...(spec.info.version ? { version: opts.name ? spec.info.version : spec.info.version } : {}),
+		...(spec.info.version
+			? { version: opts.name ? spec.info.version : spec.info.version }
+			: {}),
 		endpointCount: endpoints.length,
 		...(opts.auth ? { auth: opts.auth } : {}),
 		...(opts.notes ? { notes: opts.notes } : {}),
@@ -411,13 +444,18 @@ function mergeParams(
 }
 
 /** Extract the request-body descriptor (first content type wins). */
-function extractRequestBody(op: Record<string, unknown>): ApiEndpoint["body"] | undefined {
+function extractRequestBody(
+	op: Record<string, unknown>,
+): ApiEndpoint["body"] | undefined {
 	const requestBody = op.requestBody as Record<string, unknown> | undefined;
-	if (!requestBody?.content || typeof requestBody.content !== "object") return undefined;
+	if (!requestBody?.content || typeof requestBody.content !== "object")
+		return undefined;
 	const contentTypes = Object.keys(requestBody.content as object);
 	return {
 		contentType: contentTypes[0] || "application/json",
-		...(requestBody.description ? { description: String(requestBody.description) } : {}),
+		...(requestBody.description
+			? { description: String(requestBody.description) }
+			: {}),
 	};
 }
 
@@ -428,7 +466,10 @@ interface ResponseInfo {
 }
 
 /** Pull the success response's shape/description/example from an operation. */
-function extractResponseInfo(op: Record<string, unknown>, includeExamples: boolean): ResponseInfo {
+function extractResponseInfo(
+	op: Record<string, unknown>,
+	includeExamples: boolean,
+): ResponseInfo {
 	const info: ResponseInfo = {};
 	const responses = op.responses as Record<string, unknown> | undefined;
 	if (!responses) return info;
@@ -476,7 +517,10 @@ function buildEndpointFromOperation(
 		.filter((p): p is ParamDef => p !== null);
 
 	const body = extractRequestBody(op);
-	const { responseShape, responseDesc, responseExample } = extractResponseInfo(op, includeExamples);
+	const { responseShape, responseDesc, responseExample } = extractResponseInfo(
+		op,
+		includeExamples,
+	);
 
 	const description = op.description as string | undefined;
 	const category = deriveCategory(op, pathStr, strategy);
@@ -520,50 +564,61 @@ export function normalizeManualCatalog(raw: unknown): CatalogGeneratorResult {
 	if (!raw || typeof raw !== "object") {
 		return {
 			catalog: { name: "API", baseUrl: "", endpointCount: 0, endpoints: [] },
-			diagnostics: [{ level: "error", message: "Manual catalog must be an object" }],
+			diagnostics: [
+				{ level: "error", message: "Manual catalog must be an object" },
+			],
 		};
 	}
 
 	const def = raw as Record<string, unknown>;
 	const rawEndpoints = Array.isArray(def.endpoints) ? def.endpoints : [];
 
-	const endpoints: ApiEndpoint[] = rawEndpoints.map((ep: unknown, i: number) => {
-		if (!ep || typeof ep !== "object") {
-			diagnostics.push({ level: "warn", message: `Endpoint ${i} is not an object, skipped` });
-			return null as unknown as ApiEndpoint;
-		}
-		const e = ep as Record<string, unknown>;
-		const method = String(e.method || "GET").toUpperCase();
-		if (!["GET", "POST", "PUT", "DELETE"].includes(method)) {
-			diagnostics.push({
-				level: "warn",
-				message: `Endpoint ${i} has unsupported method "${method}", defaulting to GET`,
-			});
-		}
+	const endpoints: ApiEndpoint[] = rawEndpoints
+		.map((ep: unknown, i: number) => {
+			if (!ep || typeof ep !== "object") {
+				diagnostics.push({
+					level: "warn",
+					message: `Endpoint ${i} is not an object, skipped`,
+				});
+				return null as unknown as ApiEndpoint;
+			}
+			const e = ep as Record<string, unknown>;
+			const method = String(e.method || "GET").toUpperCase();
+			if (!["GET", "POST", "PUT", "DELETE"].includes(method)) {
+				diagnostics.push({
+					level: "warn",
+					message: `Endpoint ${i} has unsupported method "${method}", defaulting to GET`,
+				});
+			}
 
-		return {
-			method: (["GET", "POST", "PUT", "DELETE"].includes(method)
-				? method
-				: "GET") as ApiEndpoint["method"],
-			path: String(e.path || "/"),
-			summary: String(e.summary || ""),
-			...(e.description ? { description: String(e.description) } : {}),
-			category: String(e.category || "general"),
-			...(Array.isArray(e.pathParams) ? { pathParams: e.pathParams.map(normalizeParam) } : {}),
-			...(Array.isArray(e.queryParams)
-				? { queryParams: e.queryParams.map(normalizeParam) }
-				: {}),
-			...(e.body && typeof e.body === "object" ? { body: e.body as ApiEndpoint["body"] } : {}),
-			...(e.response && typeof e.response === "object"
-				? { response: e.response as ApiEndpoint["response"] }
-				: {}),
-			...(e.responseShape ? { responseShape: String(e.responseShape) } : {}),
-			...(e.coveredByTool ? { coveredByTool: String(e.coveredByTool) } : {}),
-			...(e.deprecated ? { deprecated: true } : {}),
-			...(e.example ? { example: String(e.example) } : {}),
-			...(e.usageHint ? { usageHint: String(e.usageHint) } : {}),
-		};
-	}).filter(Boolean);
+			return {
+				method: (["GET", "POST", "PUT", "DELETE"].includes(method)
+					? method
+					: "GET") as ApiEndpoint["method"],
+				path: String(e.path || "/"),
+				summary: String(e.summary || ""),
+				...(e.description ? { description: String(e.description) } : {}),
+				category: String(e.category || "general"),
+				...(Array.isArray(e.pathParams)
+					? { pathParams: e.pathParams.map(normalizeParam) }
+					: {}),
+				...(Array.isArray(e.queryParams)
+					? { queryParams: e.queryParams.map(normalizeParam) }
+					: {}),
+				...(e.body && typeof e.body === "object"
+					? { body: e.body as ApiEndpoint["body"] }
+					: {}),
+				...(e.response && typeof e.response === "object"
+					? { response: e.response as ApiEndpoint["response"] }
+					: {}),
+				...(e.responseShape ? { responseShape: String(e.responseShape) } : {}),
+				...(e.coveredByTool ? { coveredByTool: String(e.coveredByTool) } : {}),
+				...(e.deprecated ? { deprecated: true } : {}),
+				...(e.example ? { example: String(e.example) } : {}),
+				...(e.usageHint ? { usageHint: String(e.usageHint) } : {}),
+			};
+		})
+		.filter(Boolean);
 
 	const catalog: ApiCatalog = {
 		name: String(def.name || "API"),
@@ -573,7 +628,9 @@ export function normalizeManualCatalog(raw: unknown): CatalogGeneratorResult {
 		...(def.auth ? { auth: String(def.auth) } : {}),
 		...(def.notes ? { notes: String(def.notes) } : {}),
 		endpoints,
-		...(Array.isArray(def.workflows) ? { workflows: def.workflows as WorkflowRecipe[] } : {}),
+		...(Array.isArray(def.workflows)
+			? { workflows: def.workflows as WorkflowRecipe[] }
+			: {}),
 	};
 
 	return { catalog, diagnostics };
@@ -708,7 +765,12 @@ export function detectFormat(source: unknown): DetectedFormat {
 	if (obj.openapi || obj.swagger || obj.paths) return "openapi";
 
 	// GraphQL introspection
-	if (obj.__schema || (obj.data && typeof obj.data === "object" && (obj.data as Record<string, unknown>).__schema)) {
+	if (
+		obj.__schema ||
+		(obj.data &&
+			typeof obj.data === "object" &&
+			(obj.data as Record<string, unknown>).__schema)
+	) {
 		return "graphql";
 	}
 

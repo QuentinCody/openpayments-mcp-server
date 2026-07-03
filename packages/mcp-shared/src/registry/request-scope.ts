@@ -66,7 +66,8 @@ export function getRequestScope(
 	}
 
 	const fromSession = source.sessionId;
-	if (typeof fromSession === "string" && fromSession.length > 0) return fromSession;
+	if (typeof fromSession === "string" && fromSession.length > 0)
+		return fromSession;
 
 	return undefined;
 }

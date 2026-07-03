@@ -20,14 +20,32 @@ const fakeSql = (rules: Rule[]) => ({
 	},
 });
 
-const schemaOf = (columns: Array<{ name: string; type: string }>): InferredSchema =>
+const schemaOf = (
+	columns: Array<{ name: string; type: string }>,
+): InferredSchema =>
 	({ tables: [{ name: "t", columns }] }) as unknown as InferredSchema;
 
 // Ordered most-specific-first; the bare COUNT(*) rule must come last.
-const baseRules = (over: Partial<Record<"nulls" | "distinct" | "peek" | "minmax" | "samples" | "top" | "rows", Rule[1]>> = {}): Rule[] => [
+const baseRules = (
+	over: Partial<
+		Record<
+			"nulls" | "distinct" | "peek" | "minmax" | "samples" | "top" | "rows",
+			Rule[1]
+		>
+	> = {},
+): Rule[] => [
 	[/IS NULL/, over.nulls ?? [{ c: 1 }]],
-	[/SELECT COUNT\(\*\) as c FROM \(SELECT DISTINCT/, over.distinct ?? [{ c: 3 }]],
-	[/GROUP BY/, over.top ?? [{ v: "a", c: 5 }, { v: "b", c: 2 }]],
+	[
+		/SELECT COUNT\(\*\) as c FROM \(SELECT DISTINCT/,
+		over.distinct ?? [{ c: 3 }],
+	],
+	[
+		/GROUP BY/,
+		over.top ?? [
+			{ v: "a", c: 5 },
+			{ v: "b", c: 2 },
+		],
+	],
 	[/MIN\(/, over.minmax ?? [{ min_val: "a", max_val: "z" }]],
 	[/LIMIT 1$/, over.peek ?? [{ v: "a" }]],
 	[/SELECT DISTINCT .* as v/, over.samples ?? [{ v: "a" }, { v: "b" }]],
@@ -36,7 +54,10 @@ const baseRules = (over: Partial<Record<"nulls" | "distinct" | "peek" | "minmax"
 
 describe("computeColumnProfiles / profileColumn", () => {
 	it("profiles a low-cardinality TEXT column fully (min/max, samples, top values)", () => {
-		const [profile] = computeColumnProfiles(schemaOf([{ name: "status", type: "TEXT" }]), fakeSql(baseRules()));
+		const [profile] = computeColumnProfiles(
+			schemaOf([{ name: "status", type: "TEXT" }]),
+			fakeSql(baseRules()),
+		);
 		expect(profile.table).toBe("t");
 		expect(profile.row_count).toBe(10);
 		expect(profile.columns.status).toEqual({
@@ -85,10 +106,18 @@ describe("computeColumnProfiles / profileColumn", () => {
 	it("reports only null/distinct counts for URL-identifier columns", () => {
 		const [profile] = computeColumnProfiles(
 			schemaOf([{ name: "self_url", type: "TEXT" }]),
-			fakeSql(baseRules({ distinct: [{ c: 10 }], peek: [{ v: "https://api.example.org/x/1" }] })),
+			fakeSql(
+				baseRules({
+					distinct: [{ c: 10 }],
+					peek: [{ v: "https://api.example.org/x/1" }],
+				}),
+			),
 		);
 		// distinct (10) >= 90% of rowCount (10) and the peeked value is a URL
-		expect(profile.columns.self_url).toEqual({ null_count: 1, distinct_count: 10 });
+		expect(profile.columns.self_url).toEqual({
+			null_count: 1,
+			distinct_count: 10,
+		});
 	});
 
 	it("treats _links_* columns as low-value regardless of cardinality", () => {
@@ -96,7 +125,10 @@ describe("computeColumnProfiles / profileColumn", () => {
 			schemaOf([{ name: "_links_self", type: "TEXT" }]),
 			fakeSql(baseRules()),
 		);
-		expect(profile.columns._links_self).toEqual({ null_count: 1, distinct_count: 3 });
+		expect(profile.columns._links_self).toEqual({
+			null_count: 1,
+			distinct_count: 3,
+		});
 	});
 
 	it("skips min/max and samples for JSON columns but keeps top_values", () => {
@@ -116,7 +148,10 @@ describe("computeColumnProfiles / profileColumn", () => {
 			schemaOf([{ name: "blob", type: "TEXT" }]),
 			fakeSql(baseRules({ samples: [{ v: long }, { v: 42 }] })),
 		);
-		expect(profile.columns.blob.sample_values).toEqual([`${"x".repeat(117)}...`, 42]);
+		expect(profile.columns.blob.sample_values).toEqual([
+			`${"x".repeat(117)}...`,
+			42,
+		]);
 	});
 
 	it("survives non-critical query failures (peek and min/max throwing)", () => {

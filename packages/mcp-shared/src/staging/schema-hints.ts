@@ -21,12 +21,18 @@ export function deduplicateCompositeIndexes(indexes: string[][]): string[][] {
 }
 
 /** Shallow-merge two optional record hints (client wins per key); undefined when both absent. */
-function mergeRecord<T extends Record<string, unknown>>(a: T | undefined, b: T | undefined): T | undefined {
+function mergeRecord<T extends Record<string, unknown>>(
+	a: T | undefined,
+	b: T | undefined,
+): T | undefined {
 	return a || b ? ({ ...a, ...b } as T) : undefined;
 }
 
 /** Deduplicated union of two optional string lists; undefined when both absent. */
-function mergeStringSet(a: string[] | undefined, b: string[] | undefined): string[] | undefined {
+function mergeStringSet(
+	a: string[] | undefined,
+	b: string[] | undefined,
+): string[] | undefined {
 	return a || b ? [...new Set([...(a ?? []), ...(b ?? [])])] : undefined;
 }
 
@@ -58,8 +64,12 @@ export function mergeSchemaHints(
 		indexes: mergeStringSet(serverHints.indexes, clientHints.indexes),
 		flatten: mergeRecord(serverHints.flatten, clientHints.flatten),
 		exclude: mergeStringSet(serverHints.exclude, clientHints.exclude),
-		skipChildTables: mergeStringSet(serverHints.skipChildTables, clientHints.skipChildTables),
-		maxRecursionDepth: clientHints.maxRecursionDepth ?? serverHints.maxRecursionDepth,
+		skipChildTables: mergeStringSet(
+			serverHints.skipChildTables,
+			clientHints.skipChildTables,
+		),
+		maxRecursionDepth:
+			clientHints.maxRecursionDepth ?? serverHints.maxRecursionDepth,
 		compositeIndexes,
 	};
 }

@@ -17,7 +17,11 @@ export async function gwasGet<T = unknown>(
 	params: Record<string, unknown> = {},
 	opts: GwasFetchOpts = {},
 ): Promise<T> {
-	const { fetchImpl = fetch, timeoutMs = 30_000, userAgent = "bio-mcp-gwas/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 30_000,
+		userAgent = "bio-mcp-gwas/1.0",
+	} = opts;
 	const url = new URL(path.startsWith("http") ? path : `${GWAS_BASE}${path}`);
 	for (const [k, v] of Object.entries(params)) {
 		if (v == null) continue;
@@ -39,10 +43,18 @@ export async function gwasGet<T = unknown>(
 
 /** Fetch v2 associations filtered by EFO trait or free-text term. */
 export async function gwasAssociations(
-	params: { efoTrait?: string; traitName?: string; size?: number; page?: number },
+	params: {
+		efoTrait?: string;
+		traitName?: string;
+		size?: number;
+		page?: number;
+	},
 	opts: GwasFetchOpts = {},
 ): Promise<unknown> {
-	const qp: Record<string, unknown> = { size: params.size ?? 200, page: params.page ?? 0 };
+	const qp: Record<string, unknown> = {
+		size: params.size ?? 200,
+		page: params.page ?? 0,
+	};
 	if (params.efoTrait) qp.efoTrait = params.efoTrait;
 	if (params.traitName) qp.traitName = params.traitName;
 	return gwasGet("/v2/associations", qp, opts);

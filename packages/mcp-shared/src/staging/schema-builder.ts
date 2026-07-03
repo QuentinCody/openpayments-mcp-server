@@ -8,15 +8,15 @@
  *   - Proper FK type matching (TEXT vs INTEGER based on referenced PK)
  */
 
-import type { DomainConfig, TableSchema } from "./types";
 import { isEntity } from "./entity-discovery";
 import {
-	sanitizeColumnName,
-	getSQLiteType,
-	resolveColumnTypes,
 	ensureIdColumn,
+	getSQLiteType,
 	hasScalarFields,
+	resolveColumnTypes,
+	sanitizeColumnName,
 } from "./normalizer";
+import type { DomainConfig, TableSchema } from "./types";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -42,11 +42,7 @@ export function buildSchemas(
 		const sampleData: unknown[] = [];
 
 		for (let i = 0; i < instances.length; i++) {
-			const rowData = extractEntityFields(
-				instances[i],
-				columnTypes,
-				config,
-			);
+			const rowData = extractEntityFields(instances[i], columnTypes, config);
 			if (i < 3) {
 				sampleData.push(rowData);
 			}
@@ -70,7 +66,9 @@ export function buildSchemas(
 /**
  * Build a fallback schema for simple / non-entity data.
  */
-export function buildFallbackSchema(data: unknown): Record<string, TableSchema> {
+export function buildFallbackSchema(
+	data: unknown,
+): Record<string, TableSchema> {
 	const schemas: Record<string, TableSchema> = {};
 
 	if (typeof data !== "object" || data === null || Array.isArray(data)) {
@@ -106,8 +104,6 @@ function extractEntityFields(
 
 		if (Array.isArray(value)) {
 			if (value.length > 0 && isEntity(value[0], config)) {
-				// Handled as relationship via junction table — skip
-				continue;
 			} else {
 				// Store as JSON
 				addColumnType(columnTypes, columnName + "_json", "TEXT");
@@ -127,25 +123,16 @@ function extractEntityFields(
 					for (const [subKey, subValue] of Object.entries(
 						value as Record<string, unknown>,
 					)) {
-						if (
-							!Array.isArray(subValue) &&
-							typeof subValue !== "object"
-						) {
+						if (!Array.isArray(subValue) && typeof subValue !== "object") {
 							const prefixedColumn =
-								columnName +
-								"_" +
-								sanitizeColumnName(subKey, config);
+								columnName + "_" + sanitizeColumnName(subKey, config);
 							addColumnType(
 								columnTypes,
 								prefixedColumn,
 								getSQLiteType(subValue),
 							);
 							rowData[prefixedColumn] =
-								typeof subValue === "boolean"
-									? subValue
-										? 1
-										: 0
-									: subValue;
+								typeof subValue === "boolean" ? (subValue ? 1 : 0) : subValue;
 						}
 					}
 				} else {

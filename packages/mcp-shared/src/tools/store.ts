@@ -14,9 +14,9 @@
  */
 
 import { z } from "zod";
-import type { ToolEntry, ToolContext } from "../registry/types";
-import { executeSql } from "./sql-helpers";
+import type { ToolContext, ToolEntry } from "../registry/types";
 import { DENIED_TABLES } from "./direct-query";
+import { executeSql } from "./sql-helpers";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -113,7 +113,13 @@ function validateData(data: unknown): ValidationError | null {
 				error: `Row ${i} is not a plain object`,
 				error_code: "INVALID_DATA",
 				hint: "Every element in the data array must be a plain object { key: value }.",
-				details: [{ row: i, value_type: row === null ? "null" : Array.isArray(row) ? "array" : typeof row }],
+				details: [
+					{
+						row: i,
+						value_type:
+							row === null ? "null" : Array.isArray(row) ? "array" : typeof row,
+					},
+				],
 			};
 		}
 	}
@@ -121,7 +127,9 @@ function validateData(data: unknown): ValidationError | null {
 	return null;
 }
 
-function validateColumnsAndValues(data: Record<string, unknown>[]): ValidationError | null {
+function validateColumnsAndValues(
+	data: Record<string, unknown>[],
+): ValidationError | null {
 	// Collect all keys across all rows
 	const allKeys = new Set<string>();
 	for (const row of data) {
@@ -198,11 +206,14 @@ type SqliteType = "TEXT" | "INTEGER" | "REAL";
 function inferSqliteType(value: unknown): SqliteType | null {
 	if (value === null || value === undefined) return null;
 	if (typeof value === "boolean") return "INTEGER"; // booleans → 0/1
-	if (typeof value === "number") return Number.isInteger(value) ? "INTEGER" : "REAL";
+	if (typeof value === "number")
+		return Number.isInteger(value) ? "INTEGER" : "REAL";
 	return "TEXT"; // strings and everything else
 }
 
-function inferColumnTypes(data: Record<string, unknown>[]): Map<string, SqliteType> {
+function inferColumnTypes(
+	data: Record<string, unknown>[],
+): Map<string, SqliteType> {
 	const types = new Map<string, SqliteType>();
 
 	// Collect all keys, sorted alphabetically for determinism
@@ -244,26 +255,45 @@ interface ExistingColumn {
 	type: string;
 }
 
-function getExistingColumns(sql: ToolContext["sql"], table: string): ExistingColumn[] {
+function getExistingColumns(
+	sql: ToolContext["sql"],
+	table: string,
+): ExistingColumn[] {
 	// PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
 	// Quote the table name to handle SQL reserved words (e.g. "group", "order")
 	const pragmaQuery = `PRAGMA table_info("${table}")`;
-	const strings = Object.assign([pragmaQuery], { raw: [pragmaQuery] }) as unknown as TemplateStringsArray;
+	const strings = Object.assign([pragmaQuery], {
+		raw: [pragmaQuery],
+	}) as unknown as TemplateStringsArray;
 	const rows = sql<{ name: string; type: string }>(strings);
 	return rows.map((r) => ({ name: r.name, type: r.type }));
 }
 
-function createTable(sql: ToolContext["sql"], table: string, columns: Map<string, SqliteType>): void {
-	const colDefs = [...columns.entries()].map(([name, type]) => `"${name}" ${type}`).join(", ");
+function createTable(
+	sql: ToolContext["sql"],
+	table: string,
+	columns: Map<string, SqliteType>,
+): void {
+	const colDefs = [...columns.entries()]
+		.map(([name, type]) => `"${name}" ${type}`)
+		.join(", ");
 	const ddl = `CREATE TABLE IF NOT EXISTS "${table}" (${colDefs})`;
-	const strings = Object.assign([ddl], { raw: [ddl] }) as unknown as TemplateStringsArray;
+	const strings = Object.assign([ddl], {
+		raw: [ddl],
+	}) as unknown as TemplateStringsArray;
 	sql(strings);
 }
 
-function addColumns(sql: ToolContext["sql"], table: string, newColumns: Map<string, SqliteType>): void {
+function addColumns(
+	sql: ToolContext["sql"],
+	table: string,
+	newColumns: Map<string, SqliteType>,
+): void {
 	for (const [name, type] of newColumns) {
 		const ddl = `ALTER TABLE "${table}" ADD COLUMN "${name}" ${type}`;
-		const strings = Object.assign([ddl], { raw: [ddl] }) as unknown as TemplateStringsArray;
+		const strings = Object.assign([ddl], {
+			raw: [ddl],
+		}) as unknown as TemplateStringsArray;
 		sql(strings);
 	}
 }
@@ -272,7 +302,7 @@ function batchInsert(
 	sql: ToolContext["sql"],
 	table: string,
 	columns: string[],
-	data: Record<string, unknown>[]
+	data: Record<string, unknown>[],
 ): void {
 	for (let offset = 0; offset < data.length; offset += INSERT_BATCH_SIZE) {
 		const batch = data.slice(offset, offset + INSERT_BATCH_SIZE);
@@ -313,10 +343,21 @@ export const storeTools: ToolEntry[] = [
 			"Store an array of flat objects into a SQLite table. Creates table if needed, evolves schema for new columns. Internal — only callable from V8 isolates.",
 		hidden: true,
 		schema: {
-			table: z.string().describe("Target table name (alphanumeric + underscores, max 64 chars)"),
+			table: z
+				.string()
+				.describe(
+					"Target table name (alphanumeric + underscores, max 64 chars)",
+				),
 			data: z
-				.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])))
-				.describe("Array of flat objects to insert. Values must be scalars (string, number, boolean, null)."),
+				.array(
+					z.record(
+						z.string(),
+						z.union([z.string(), z.number(), z.boolean(), z.null()]),
+					),
+				)
+				.describe(
+					"Array of flat objects to insert. Values must be scalars (string, number, boolean, null).",
+				),
 		},
 		handler: async (input, ctx) => {
 			const { table, data } = input as {
@@ -333,7 +374,9 @@ export const storeTools: ToolEntry[] = [
 			if (dataErr) return dataErr;
 
 			// 3. Validate columns and values
-			const colErr = validateColumnsAndValues(data as Record<string, unknown>[]);
+			const colErr = validateColumnsAndValues(
+				data as Record<string, unknown>[],
+			);
 			if (colErr) return colErr;
 
 			// 4. Infer column types
@@ -375,7 +418,8 @@ export const storeTools: ToolEntry[] = [
 					columns,
 				};
 				if (created) result.created = true;
-				if (columnsAdded && columnsAdded.length > 0) result.columns_added = columnsAdded;
+				if (columnsAdded && columnsAdded.length > 0)
+					result.columns_added = columnsAdded;
 
 				return result;
 			} catch (e: unknown) {

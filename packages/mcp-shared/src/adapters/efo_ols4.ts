@@ -13,7 +13,11 @@ export interface Ols4FetchOpts {
 
 export async function ols4Search(
 	query: string,
-	opts: Ols4FetchOpts & { ontology?: string; rows?: number; exact?: boolean } = {},
+	opts: Ols4FetchOpts & {
+		ontology?: string;
+		rows?: number;
+		exact?: boolean;
+	} = {},
 ): Promise<unknown> {
 	const {
 		fetchImpl = fetch,
@@ -50,9 +54,17 @@ export async function ols4TermDescendants(
 	iri: string,
 	opts: Ols4FetchOpts & { size?: number; page?: number } = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-ols4/1.0", size = 200, page = 0 } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-ols4/1.0",
+		size = 200,
+		page = 0,
+	} = opts;
 	const encoded = encodeURIComponent(encodeURIComponent(iri));
-	const url = new URL(`${OLS4_BASE}/ontologies/${ontology}/terms/${encoded}/descendants`);
+	const url = new URL(
+		`${OLS4_BASE}/ontologies/${ontology}/terms/${encoded}/descendants`,
+	);
 	url.searchParams.set("size", String(size));
 	url.searchParams.set("page", String(page));
 	const ctrl = new AbortController();

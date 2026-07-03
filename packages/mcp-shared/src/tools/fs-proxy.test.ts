@@ -2,10 +2,12 @@
  * Tests for fs-proxy host handlers — validates handler creation and DO routing.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFsProxyHandlers } from "./fs-proxy";
 
-function createMockDoNamespace(responseData: unknown = { success: true, data: "ok" }) {
+function createMockDoNamespace(
+	responseData: unknown = { success: true, data: "ok" },
+) {
 	const fetchFn = vi.fn().mockResolvedValue({
 		json: () => Promise.resolve(responseData),
 	});
@@ -72,7 +74,10 @@ describe("createFsProxyHandlers", () => {
 		});
 		const handlers = createFsProxyHandlers({ doNamespace: namespace });
 
-		const result = await handlers.__fs_write({ path: "/out.json", content: '{"key":"val"}' });
+		const result = await handlers.__fs_write({
+			path: "/out.json",
+			content: '{"key":"val"}',
+		});
 
 		expect(result).toEqual({ path: "/out.json", size: 42 });
 
@@ -96,7 +101,10 @@ describe("createFsProxyHandlers", () => {
 	});
 
 	it("handles non-object args gracefully", async () => {
-		const { namespace, fetchFn } = createMockDoNamespace({ success: true, data: true });
+		const { namespace, fetchFn } = createMockDoNamespace({
+			success: true,
+			data: true,
+		});
 		const handlers = createFsProxyHandlers({ doNamespace: namespace });
 
 		await handlers.__fs_exists(null);

@@ -57,7 +57,9 @@ export function buildKeyFor(build: GenomeBuild | "hg19"): "grch37" | "grch38" {
 }
 
 function serverFor(build: GenomeBuild | "hg19"): string {
-	return build === "GRCh37" || build === "hg19" ? ENSEMBL_GRCH37 : ENSEMBL_GRCH38;
+	return build === "GRCh37" || build === "hg19"
+		? ENSEMBL_GRCH37
+		: ENSEMBL_GRCH38;
 }
 
 function assemblyName(build: GenomeBuild | "hg19"): "GRCh37" | "GRCh38" {
@@ -78,7 +80,8 @@ export function parseVariantString(value: string): ParsedVariant {
 
 	const [chromRaw, posRaw, refRaw, altRaw] = parts;
 	const chromMatch = CHR_RE.exec(chromRaw);
-	if (!chromMatch) throw new Error(`Invalid chromosome: ${JSON.stringify(chromRaw)}`);
+	if (!chromMatch)
+		throw new Error(`Invalid chromosome: ${JSON.stringify(chromRaw)}`);
 	let chrom = chromMatch[1].toUpperCase();
 	if (chrom === "M") chrom = "MT";
 
@@ -90,8 +93,10 @@ export function parseVariantString(value: string): ParsedVariant {
 
 	const ref = refRaw.toUpperCase();
 	const alt = altRaw.toUpperCase();
-	if (!ALLELE_RE.test(ref)) throw new Error(`Invalid REF allele: ${JSON.stringify(refRaw)}`);
-	if (!ALLELE_RE.test(alt)) throw new Error(`Invalid ALT allele: ${JSON.stringify(altRaw)}`);
+	if (!ALLELE_RE.test(ref))
+		throw new Error(`Invalid REF allele: ${JSON.stringify(refRaw)}`);
+	if (!ALLELE_RE.test(alt))
+		throw new Error(`Invalid ALT allele: ${JSON.stringify(altRaw)}`);
 
 	return { chr: chrom, pos, ref, alt };
 }
@@ -108,13 +113,17 @@ export function buildVariantRecord(
 	alt: string | null,
 ): VariantCoord {
 	const record: VariantCoord = { chr: chrom, pos, ref, alt };
-	if (ref != null && alt != null) record.canonical = `${chrom}:${pos}-${ref}-${alt}`;
+	if (ref != null && alt != null)
+		record.canonical = `${chrom}:${pos}-${ref}-${alt}`;
 	return record;
 }
 
 async function getJson(
 	url: string,
-	{ timeoutMs = DEFAULT_TIMEOUT_MS, fetchImpl = fetch }: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+	{
+		timeoutMs = DEFAULT_TIMEOUT_MS,
+		fetchImpl = fetch,
+	}: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
 ): Promise<unknown> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -183,7 +192,8 @@ export async function lookupRsid(
 			mapping.seq_region_name &&
 			typeof mapping.start === "number"
 		) {
-			const alleleString = typeof mapping.allele_string === "string" ? mapping.allele_string : "";
+			const alleleString =
+				typeof mapping.allele_string === "string" ? mapping.allele_string : "";
 			const alleles = alleleString ? alleleString.split("/") : [];
 			return {
 				chr: String(mapping.seq_region_name),
@@ -294,9 +304,19 @@ export async function liftover(
 	opts: ResolveOptions = {},
 ): Promise<VariantCoord> {
 	if (fromBuild === toBuild) {
-		return buildVariantRecord(variant.chr, variant.pos, variant.ref, variant.alt);
+		return buildVariantRecord(
+			variant.chr,
+			variant.pos,
+			variant.ref,
+			variant.alt,
+		);
 	}
-	const positionResult = await lookupPosition(variant.chr, variant.pos, fromBuild, opts);
+	const positionResult = await lookupPosition(
+		variant.chr,
+		variant.pos,
+		fromBuild,
+		opts,
+	);
 	if (!positionResult) {
 		throw new VariantResolutionError(
 			"not_found",
@@ -312,7 +332,9 @@ export async function liftover(
 	}
 	const ref = targetCoord.ref ?? variant.ref ?? null;
 	const alts = targetCoord.alts ?? [];
-	const alt = alts.includes(variant.alt) ? variant.alt : alts[0] ?? variant.alt;
+	const alt = alts.includes(variant.alt)
+		? variant.alt
+		: (alts[0] ?? variant.alt);
 	return buildVariantRecord(targetCoord.chr, targetCoord.pos, ref, alt);
 }
 
@@ -328,7 +350,12 @@ export async function resolveVariant(
 	const otherBuild: GenomeBuild = build === "GRCh37" ? "GRCh38" : "GRCh37";
 	const warnings: string[] = [];
 
-	const positionResult = await lookupPosition(parsed.chr, parsed.pos, build, opts);
+	const positionResult = await lookupPosition(
+		parsed.chr,
+		parsed.pos,
+		build,
+		opts,
+	);
 	if (!positionResult) {
 		throw new VariantResolutionError(
 			"not_found",
@@ -339,14 +366,18 @@ export async function resolveVariant(
 	const ref = positionResult.ref ?? parsed.ref;
 	const alts = positionResult.alts ?? [];
 	if (positionResult.ref && parsed.ref !== positionResult.ref) {
-		warnings.push(`Input ref ${parsed.ref} != resolved ref ${positionResult.ref}; keeping resolved ref.`);
+		warnings.push(
+			`Input ref ${parsed.ref} != resolved ref ${positionResult.ref}; keeping resolved ref.`,
+		);
 	}
 	let alt: string;
 	if (alts.includes(parsed.alt)) {
 		alt = parsed.alt;
 	} else if (alts.length > 0) {
 		alt = alts[0];
-		warnings.push(`Input alt ${parsed.alt} not among resolved alts ${JSON.stringify(alts)}; using ${alt}.`);
+		warnings.push(
+			`Input alt ${parsed.alt} not among resolved alts ${JSON.stringify(alts)}; using ${alt}.`,
+		);
 	} else {
 		alt = parsed.alt;
 	}
@@ -358,7 +389,12 @@ export async function resolveVariant(
 		warnings.push(`Other-build lookup failed: ${(err as Error).message}`);
 	}
 
-	const sameBuild: VariantCoord = buildVariantRecord(parsed.chr, parsed.pos, ref, alt);
+	const sameBuild: VariantCoord = buildVariantRecord(
+		parsed.chr,
+		parsed.pos,
+		ref,
+		alt,
+	);
 	const otherBuildCoord: VariantCoord | null = other
 		? buildVariantRecord(other.chr, other.pos, ref, alt)
 		: null;
@@ -398,7 +434,10 @@ export const COHORT_BUILD: Record<Cohort, GenomeBuild> = {
  * different build than the cohort expects (use `liftover()` first or
  * `resolveVariant()` and pick the right `grch37`/`grch38` field).
  */
-export function formatForCohort(variant: VariantCoord, _cohort: Cohort): string {
+export function formatForCohort(
+	variant: VariantCoord,
+	_cohort: Cohort,
+): string {
 	if (variant.canonical) return variant.canonical;
 	if (variant.ref == null || variant.alt == null) {
 		throw new Error("formatForCohort requires variant.ref and variant.alt");

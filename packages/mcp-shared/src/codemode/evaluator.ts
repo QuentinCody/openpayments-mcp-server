@@ -89,7 +89,7 @@ export function createEvaluator(
 		loader: WorkerLoader;
 		proxy: Fetcher;
 		doId: string;
-	}
+	},
 ): () => Promise<unknown> {
 	// Static boilerplate is precomputed once at module load; only doId and user code vary.
 	const moduleSource =
@@ -115,7 +115,8 @@ export function createEvaluator(
 			};
 		});
 
-		const entrypoint = worker.getEntrypoint() as unknown as CodeModeWorkerEntrypoint;
+		const entrypoint =
+			worker.getEntrypoint() as unknown as CodeModeWorkerEntrypoint;
 		return await entrypoint.evaluate();
 	};
 }

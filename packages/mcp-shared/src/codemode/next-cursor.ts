@@ -10,7 +10,13 @@
  */
 
 /** Query-param names that commonly carry a cursor/page token inside a `next` URL. */
-const URL_CURSOR_PARAMS: readonly string[] = ["cursor", "page", "offset", "after", "page_token"];
+const URL_CURSOR_PARAMS: readonly string[] = [
+	"cursor",
+	"page",
+	"offset",
+	"after",
+	"page_token",
+];
 
 /** True when a value is genuinely URL-shaped — absolute (`scheme://…`) or a
  * root-relative path (`/path?…`). Opaque cursor tokens are not. */
@@ -28,7 +34,10 @@ function isUrlShaped(raw: string): boolean {
  * @param cursorParam the request param the caller resends the cursor as; checked
  *   first so it round-trips, then a fallback list of common token params.
  */
-export function normalizeNextCursor(raw: string, cursorParam = "cursor"): string {
+export function normalizeNextCursor(
+	raw: string,
+	cursorParam = "cursor",
+): string {
 	const qIndex = raw.indexOf("?");
 	// Only mine query params from genuinely URL-shaped values; an opaque token
 	// that merely contains a "?" is returned unchanged (no false truncation).

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildGraphqlProxySource } from "./graphql-proxy";
 
 describe("buildGraphqlProxySource", () => {
@@ -38,7 +38,9 @@ describe("buildGraphqlProxySource", () => {
 	});
 
 	it("includes __stageData for db.stage", () => {
-		expect(source).toContain("async function __stageData(data, tableNameOrOptions)");
+		expect(source).toContain(
+			"async function __stageData(data, tableNameOrOptions)",
+		);
 		expect(source).toContain("codemode.__stage_proxy");
 	});
 
@@ -53,5 +55,20 @@ describe("buildGraphqlProxySource", () => {
 
 	it("handles staged responses with __staged flag", () => {
 		expect(source).toContain("result.__staged");
+	});
+
+	it("a staged result throws a guided error on array methods, passes real props (T6.3)", () => {
+		const factory = new Function("__stagedResults", "console", "codemode", `${source}\nreturn __wrapStaged;`);
+		const wrapStaged = factory([], { warn: () => {} }, {}) as (raw: unknown) => Record<string, unknown>;
+		const staged = wrapStaged({ __staged: true, data_access_id: "gql_1", message: "auto-staged" });
+		expect(() => (staged as { slice: (n: number) => unknown }).slice(0)).toThrow(/STAGED result OBJECT/);
+		expect(staged.data_access_id).toBe("gql_1");
+	});
+
+	it("defines guiding api.get/api.post stubs that point at gql.query (T4.3)", () => {
+		expect(source).toContain("get: function()");
+		expect(source).toContain("post: function()");
+		expect(source).toContain("api.get is not available on this GraphQL server");
+		expect(source).toContain("gql.query");
 	});
 });

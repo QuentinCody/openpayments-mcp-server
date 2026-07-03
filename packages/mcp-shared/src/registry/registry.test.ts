@@ -15,9 +15,17 @@ const entry = (over: Partial<ToolEntry> & { name: string }): ToolEntry =>
 
 // Minimal McpServer.tool capture.
 const makeServer = () => {
-	const registered: Array<{ name: string; handler: (input: unknown) => Promise<unknown> }> = [];
+	const registered: Array<{
+		name: string;
+		handler: (input: unknown) => Promise<unknown>;
+	}> = [];
 	const server = {
-		tool: (name: string, _desc: unknown, _schema: unknown, handler: (input: unknown) => Promise<unknown>) => {
+		tool: (
+			name: string,
+			_desc: unknown,
+			_schema: unknown,
+			handler: (input: unknown) => Promise<unknown>,
+		) => {
 			registered.push({ name, handler });
 		},
 	};
@@ -29,7 +37,9 @@ describe("ToolRegistry.add / lookup", () => {
 		const reg = new ToolRegistry(CTX);
 		const handler = vi.fn(async () => ({ value: 1 }));
 		reg.add(entry({ name: "alpha", handler }));
-		expect(await reg.handleIsolateCall("alpha", [{ a: 1 }])).toEqual({ value: 1 });
+		expect(await reg.handleIsolateCall("alpha", [{ a: 1 }])).toEqual({
+			value: 1,
+		});
 		expect(handler).toHaveBeenCalledWith({ a: 1 }, CTX);
 	});
 });
@@ -60,9 +70,14 @@ describe("ToolRegistry.registerAll", () => {
 
 	it("wraps handler errors as an isError response", async () => {
 		const reg = new ToolRegistry(CTX);
-		reg.add(entry({ name: "boom", handler: async () => {
-			throw new Error("nope");
-		} }));
+		reg.add(
+			entry({
+				name: "boom",
+				handler: async () => {
+					throw new Error("nope");
+				},
+			}),
+		);
 		const { server, registered } = makeServer();
 		reg.registerAll(server);
 		expect(await registered[0].handler({})).toEqual({
@@ -73,14 +88,21 @@ describe("ToolRegistry.registerAll", () => {
 
 	it("stringifies non-Error throws", async () => {
 		const reg = new ToolRegistry(CTX);
-		reg.add(entry({ name: "boom", handler: async () => {
-			throw "raw failure";
-		} }));
+		reg.add(
+			entry({
+				name: "boom",
+				handler: async () => {
+					throw "raw failure";
+				},
+			}),
+		);
 		const { server, registered } = makeServer();
 		reg.registerAll(server);
 		expect(await registered[0].handler({})).toMatchObject({
 			isError: true,
-			content: [{ type: "text", text: JSON.stringify({ error: "raw failure" }) }],
+			content: [
+				{ type: "text", text: JSON.stringify({ error: "raw failure" }) },
+			],
 		});
 	});
 });
@@ -88,7 +110,9 @@ describe("ToolRegistry.registerAll", () => {
 describe("ToolRegistry.handleIsolateCall", () => {
 	it("returns an error object for an unknown tool", async () => {
 		const reg = new ToolRegistry(CTX);
-		expect(await reg.handleIsolateCall("ghost", [])).toEqual({ error: "Unknown tool: ghost" });
+		expect(await reg.handleIsolateCall("ghost", [])).toEqual({
+			error: "Unknown tool: ghost",
+		});
 	});
 
 	it("defaults missing args to an empty object", async () => {
@@ -121,7 +145,9 @@ describe("ToolRegistry type generation", () => {
 		const descriptors = reg.toToolDescriptors();
 		expect(Object.keys(descriptors)).toEqual(["visible"]);
 		expect(descriptors.visible.inputSchema).toBeInstanceOf(z.ZodObject);
-		expect(descriptors.visible.inputSchema.safeParse({ q: "hi" }).success).toBe(true);
+		expect(descriptors.visible.inputSchema.safeParse({ q: "hi" }).success).toBe(
+			true,
+		);
 	});
 
 	it("getDefinitions returns non-hidden name/description/inputSchema triples", () => {
@@ -130,7 +156,10 @@ describe("ToolRegistry type generation", () => {
 		reg.add(entry({ name: "secret", hidden: true }));
 		const defs = reg.getDefinitions();
 		expect(defs).toHaveLength(1);
-		expect(defs[0]).toMatchObject({ name: "visible", description: "desc for visible" });
+		expect(defs[0]).toMatchObject({
+			name: "visible",
+			description: "desc for visible",
+		});
 		expect(defs[0].inputSchema).toBe(reg.getDefinitions()[0].inputSchema);
 	});
 });

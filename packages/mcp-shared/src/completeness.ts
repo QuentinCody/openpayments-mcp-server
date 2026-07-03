@@ -73,7 +73,12 @@ export function asCount(v: unknown): number | undefined {
 		return undefined;
 	}
 	// Elasticsearch-style `hits.total: { value: N, relation: "eq" | "gte" }`
-	if (v && typeof v === "object" && !Array.isArray(v) && "value" in (v as object)) {
+	if (
+		v &&
+		typeof v === "object" &&
+		!Array.isArray(v) &&
+		"value" in (v as object)
+	) {
 		return asCount((v as Record<string, unknown>).value);
 	}
 	return undefined;
@@ -148,6 +153,69 @@ export function inferUpstreamTotal(envelope: unknown): number | undefined {
 	return undefined;
 }
 
+/** A staged result is implausibly large + unranked → the filter likely no-op'd. */
+export interface FilterWarning {
+	warning: "filter_may_not_have_applied";
+	detail: string;
+	total: number;
+}
+
+/** Total at/above which an unsorted, unranked result is treated as a likely no-op filter. */
+const OVER_MATCH_TOTAL_THRESHOLD = 100_000;
+
+/** Read the `meta` container from an envelope root or its `data` wrapper. */
+function pickMeta(
+	root: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+	const direct = root.meta;
+	if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+		return direct as Record<string, unknown>;
+	}
+	const data = root.data;
+	if (data && typeof data === "object" && !Array.isArray(data)) {
+		const nested = (data as Record<string, unknown>).meta;
+		if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+			return nested as Record<string, unknown>;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Detect a silent OVER-MATCH (Finding #2) — the inverse of under-counting. A
+ * response whose reported total is implausibly large AND whose results are
+ * explicitly unsorted / not relevance-ranked is the signature of a text/boolean
+ * filter that was silently ignored: e.g. NIH RePORTER `criteria.text_search`
+ * (the wrong field) instead of `criteria.advanced_text_search` matches the
+ * ENTIRE ~2.9M-project corpus, returns HTTP 200 + `success:true` + a stamped
+ * citation, and stages an arbitrary, non-matching slice as "the answer".
+ *
+ * The returned warning is attached to the staged envelope so the model surfaces
+ * the risk instead of trusting the slice. Returns `undefined` for normal
+ * results (small totals, or large totals that ARE relevance-ranked).
+ */
+export function detectOverMatch(envelope: unknown): FilterWarning | undefined {
+	if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
+		return undefined;
+	const meta = pickMeta(envelope as Record<string, unknown>);
+	if (!meta) return undefined;
+	const total = asCount(meta.total);
+	if (total === undefined || total < OVER_MATCH_TOTAL_THRESHOLD)
+		return undefined;
+	const sortingOff =
+		meta.sorted_by_relevance === false || meta.sort_field === null;
+	if (!sortingOff) return undefined;
+	return {
+		warning: "filter_may_not_have_applied",
+		total,
+		detail:
+			`Upstream reports ${total} matching record(s) with sorting/relevance disabled — the text/boolean ` +
+			`filter may not have applied, so the returned rows are an ARBITRARY slice of the full corpus, not ` +
+			`filtered matches. Verify the criteria field names (e.g. NIH RePORTER requires ` +
+			`criteria.advanced_text_search with search_field in terms/projecttitle/abstract/projectnumber, NOT text_search).`,
+	};
+}
+
 /**
  * Build a completeness verdict by comparing a known upstream total against the
  * number of records actually retrieved. Returns `undefined` when either input
@@ -217,13 +285,17 @@ export function mergeCompleteness(
 
 	const complete = defined.every((p) => p.complete);
 	const firstIncomplete = defined.find((p) => !p.complete);
-	const total_available = defined.find((p) => p.total_available != null)?.total_available;
+	const total_available = defined.find(
+		(p) => p.total_available != null,
+	)?.total_available;
 	const returned = defined.find((p) => p.returned != null)?.returned;
 
 	return {
 		complete,
 		...(total_available != null ? { total_available } : {}),
 		...(returned != null ? { returned } : {}),
-		...(firstIncomplete?.truncation ? { truncation: firstIncomplete.truncation } : {}),
+		...(firstIncomplete?.truncation
+			? { truncation: firstIncomplete.truncation }
+			: {}),
 	};
 }

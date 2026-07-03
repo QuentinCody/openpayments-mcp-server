@@ -74,9 +74,16 @@ const PUBMED_RE = /^(\d{4})(?:\s+([A-Za-z]+)(?:\s+(\d{1,2}))?)?$/;
  *
  * Returns `{iso: "", precision: PRECISION_NONE, valid: false}` on unrecognized input.
  */
-export function parseVariablePrecisionDate(input: unknown): ParsedVariablePrecisionDate {
+export function parseVariablePrecisionDate(
+	input: unknown,
+): ParsedVariablePrecisionDate {
 	if (typeof input !== "string" || input.length === 0) {
-		return { iso: "", precision: PRECISION_NONE, raw: String(input ?? ""), valid: false };
+		return {
+			iso: "",
+			precision: PRECISION_NONE,
+			raw: String(input ?? ""),
+			valid: false,
+		};
 	}
 	const raw = input.trim();
 	if (!raw) {
@@ -87,7 +94,12 @@ export function parseVariablePrecisionDate(input: unknown): ParsedVariablePrecis
 	if (ISO_DATE_ONLY_RE.test(raw)) {
 		const parts = raw.split("-");
 		if (parts.length === 1) {
-			return { iso: parts[0], precision: PRECISION_YEAR, raw: input, valid: true };
+			return {
+				iso: parts[0],
+				precision: PRECISION_YEAR,
+				raw: input,
+				valid: true,
+			};
 		}
 		if (parts.length === 2) {
 			return {
@@ -106,7 +118,12 @@ export function parseVariablePrecisionDate(input: unknown): ParsedVariablePrecis
 	}
 
 	// FHIR full instant or any string with 'T' — let JS parser handle it.
-	if (raw.includes("T") || raw.includes("Z") || raw.includes("+") || /\d{2}:\d{2}/.test(raw)) {
+	if (
+		raw.includes("T") ||
+		raw.includes("Z") ||
+		raw.includes("+") ||
+		/\d{2}:\d{2}/.test(raw)
+	) {
 		const dt = new Date(raw);
 		if (!isNaN(dt.getTime())) {
 			return {
@@ -123,8 +140,13 @@ export function parseVariablePrecisionDate(input: unknown): ParsedVariablePrecis
 	if (pubmed) {
 		const [, year, monthName, day] = pubmed;
 		if (monthName) {
-			const monthCode = PUBMED_MONTH_NAMES[monthName.toLowerCase().slice(0, 4).replace(/[^a-z]/g, "")] ??
-				PUBMED_MONTH_NAMES[monthName.toLowerCase().slice(0, 3)];
+			const monthCode =
+				PUBMED_MONTH_NAMES[
+					monthName
+						.toLowerCase()
+						.slice(0, 4)
+						.replace(/[^a-z]/g, "")
+				] ?? PUBMED_MONTH_NAMES[monthName.toLowerCase().slice(0, 3)];
 			if (monthCode) {
 				if (day) {
 					const dd = day.padStart(2, "0");
@@ -194,10 +216,9 @@ export function variablePrecisionColumnNames(field: string): {
  *   //   { effectiveDateTime: "2024-03", effectiveDateTime_iso: "2024-03",
  *   //     effectiveDateTime_precision: 2, ... }
  */
-export function enrichWithVariablePrecisionDate<T extends Record<string, unknown>>(
-	obj: T,
-	field: string,
-): T {
+export function enrichWithVariablePrecisionDate<
+	T extends Record<string, unknown>,
+>(obj: T, field: string): T {
 	const value = obj[field];
 	if (typeof value !== "string") return obj;
 	const parsed = parseVariablePrecisionDate(value);

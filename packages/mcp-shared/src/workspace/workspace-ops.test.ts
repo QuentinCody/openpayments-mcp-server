@@ -19,13 +19,19 @@ function makeSql() {
 		exec(query: string, ...bindings: unknown[]) {
 			const stmt = db.prepare(query);
 			if (/^\s*(select|with|pragma)/i.test(query)) {
-				const rows = stmt.all(...(bindings as never[])) as Record<string, unknown>[];
+				const rows = stmt.all(...(bindings as never[])) as Record<
+					string,
+					unknown
+				>[];
 				return {
 					toArray: () => rows,
 					// Match Cloudflare SqlStorage.one(): THROW unless exactly one row.
 					// (A forgiving `rows[0]` here masked a real workerd bug — see git log.)
 					one: () => {
-						if (rows.length !== 1) throw new Error(`Expected exactly one result, got ${rows.length}`);
+						if (rows.length !== 1)
+							throw new Error(
+								`Expected exactly one result, got ${rows.length}`,
+							);
 						return rows[0];
 					},
 					[Symbol.iterator]: () => rows[Symbol.iterator](),
@@ -33,27 +39,35 @@ function makeSql() {
 			}
 			stmt.run(...(bindings as never[]));
 			const empty: Record<string, unknown>[] = [];
-			return { toArray: () => empty, one: () => undefined, [Symbol.iterator]: () => empty[Symbol.iterator]() };
+			return {
+				toArray: () => empty,
+				one: () => undefined,
+				[Symbol.iterator]: () => empty[Symbol.iterator](),
+			};
 		},
 	};
 }
 
 const chembl = {
 	dataset: "chembl",
-	data: { results: [
-		{ symbol: "ABL1", action: "inhibitor" },
-		{ symbol: "KIT", action: "inhibitor" },
-	] },
+	data: {
+		results: [
+			{ symbol: "ABL1", action: "inhibitor" },
+			{ symbol: "KIT", action: "inhibitor" },
+		],
+	},
 	schemaHints: { tableName: "targets" },
 	sourceTool: "chembl_execute",
 };
 
 const dgidb = {
 	dataset: "dgidb",
-	data: { results: [
-		{ symbol: "ABL1", interaction_type: "inhibitor" },
-		{ symbol: "FLT3", interaction_type: "inhibitor" },
-	] },
+	data: {
+		results: [
+			{ symbol: "ABL1", interaction_type: "inhibitor" },
+			{ symbol: "FLT3", interaction_type: "inhibitor" },
+		],
+	},
 	schemaHints: { tableName: "targets" },
 	sourceTool: "dgidb_execute",
 };
@@ -61,10 +75,21 @@ const dgidb = {
 describe("prefixSchema", () => {
 	it("prefixes table names and rewrites child-table FK parent refs", () => {
 		const out = prefixSchema(
-			{ tables: [
-				{ name: "study", columns: [], indexes: [] },
-				{ name: "arm", columns: [], indexes: [], childOf: { parentTable: "study", fkColumn: "parent_id", sourceColumn: "arms" } },
-			] },
+			{
+				tables: [
+					{ name: "study", columns: [], indexes: [] },
+					{
+						name: "arm",
+						columns: [],
+						indexes: [],
+						childOf: {
+							parentTable: "study",
+							fkColumn: "parent_id",
+							sourceColumn: "arms",
+						},
+					},
+				],
+			},
 			"ctgov",
 		);
 		expect(out.tables[0].name).toBe("ctgov__study");
@@ -82,7 +107,9 @@ describe("stageDataset", () => {
 		expect(handle.row_count).toBe(2);
 		expect(handle.completeness.complete).toBe(true);
 
-		const rows = sql.exec("SELECT symbol, action FROM chembl__targets ORDER BY symbol").toArray();
+		const rows = sql
+			.exec("SELECT symbol, action FROM chembl__targets ORDER BY symbol")
+			.toArray();
 		expect(rows).toEqual([
 			{ symbol: "ABL1", action: "inhibitor" },
 			{ symbol: "KIT", action: "inhibitor" },
@@ -92,7 +119,10 @@ describe("stageDataset", () => {
 	it("re-staging the same dataset replaces its old tables", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
-		stageDataset(sql, { ...chembl, data: { results: [{ symbol: "EGFR", action: "inhibitor" }] } });
+		stageDataset(sql, {
+			...chembl,
+			data: { results: [{ symbol: "EGFR", action: "inhibitor" }] },
+		});
 		const rows = sql.exec("SELECT symbol FROM chembl__targets").toArray();
 		expect(rows).toEqual([{ symbol: "EGFR" }]);
 	});
@@ -101,7 +131,10 @@ describe("stageDataset", () => {
 describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 	it("derives the table name from the array key when no tableName hint is given", () => {
 		const sql = makeSql();
-		const handle = stageDataset(sql, { dataset: "reactome", data: { items: [{ name: "Glycolysis" }] } });
+		const handle = stageDataset(sql, {
+			dataset: "reactome",
+			data: { items: [{ name: "Glycolysis" }] },
+		});
 		expect(handle.tables).toContain("reactome__items");
 		expect(handle.row_count).toBe(1);
 	});
@@ -113,8 +146,12 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 			data: { genes: [{ name: "TP53" }], drugs: [{ name: "aspirin" }] },
 		});
 		expect(handle.tables.sort()).toEqual(["multi__drugs", "multi__genes"]);
-		expect(sql.exec("SELECT name FROM multi__genes").toArray()).toEqual([{ name: "TP53" }]);
-		expect(sql.exec("SELECT name FROM multi__drugs").toArray()).toEqual([{ name: "aspirin" }]);
+		expect(sql.exec("SELECT name FROM multi__genes").toArray()).toEqual([
+			{ name: "TP53" },
+		]);
+		expect(sql.exec("SELECT name FROM multi__drugs").toArray()).toEqual([
+			{ name: "aspirin" },
+		]);
 	});
 
 	it("populates primary_row_count from the top-level input length (== row_count for flat payloads)", () => {
@@ -123,12 +160,18 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 		expect(flat.primary_row_count).toBe(2);
 		expect(flat.row_count).toBe(2);
 		// Non-tabular JSON fallback stages exactly one primary row.
-		expect(stageDataset(makeSql(), { dataset: "note", data: "scalar" }).primary_row_count).toBe(1);
+		expect(
+			stageDataset(makeSql(), { dataset: "note", data: "scalar" })
+				.primary_row_count,
+		).toBe(1);
 	});
 
 	it("parks non-tabular data as a JSON payload row", () => {
 		const sql = makeSql();
-		const handle = stageDataset(sql, { dataset: "note", data: "just a scalar" });
+		const handle = stageDataset(sql, {
+			dataset: "note",
+			data: "just a scalar",
+		});
 		expect(handle.tables).toEqual(["note__payload"]);
 		expect(handle.row_count).toBe(1);
 		const row = sql.exec(`SELECT root_json FROM "note__payload"`).one();
@@ -137,7 +180,9 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 
 	it("rejects a dataset name that sanitizes to empty", () => {
 		const sql = makeSql();
-		expect(() => stageDataset(sql, { dataset: "***", data: { results: [] } })).toThrow(/Invalid dataset/);
+		expect(() =>
+			stageDataset(sql, { dataset: "***", data: { results: [] } }),
+		).toThrow(/Invalid dataset/);
 	});
 
 	it("tolerates a corrupt manifest row (non-JSON tables/completeness)", () => {
@@ -154,7 +199,9 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 	it("does not flag truncation when the caller supplied their own LIMIT", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
-		const result = queryWorkspace(sql, { sql: "SELECT symbol FROM chembl__targets LIMIT 1" });
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets LIMIT 1",
+		});
 		expect(result.row_count).toBe(1);
 		expect(result.truncated).toBe(false);
 	});
@@ -178,7 +225,10 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 	it("appends a default LIMIT and flags truncation when a full page comes back", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
-		const result = queryWorkspace(sql, { sql: "SELECT symbol FROM chembl__targets", limit: 1 });
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets",
+			limit: 1,
+		});
 		expect(result.row_count).toBe(1);
 		expect(result.truncated).toBe(true);
 		expect(result.sql).toContain("LIMIT 1");
@@ -187,7 +237,9 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 	it("rejects a write disguised as a query", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
-		expect(() => queryWorkspace(sql, { sql: "DROP TABLE chembl__targets" })).toThrow();
+		expect(() =>
+			queryWorkspace(sql, { sql: "DROP TABLE chembl__targets" }),
+		).toThrow();
 	});
 });
 
@@ -228,7 +280,9 @@ describe("clearWorkspace", () => {
 		expect(workspaceSchema(sql).dataset_count).toBe(0);
 		// GLOB (not LIKE) so `_` is literal — `_workspace_datasets` must NOT match.
 		const tables = sql
-			.exec("SELECT name FROM sqlite_master WHERE type='table' AND name GLOB '*__*'")
+			.exec(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name GLOB '*__*'",
+			)
 			.toArray();
 		expect(tables).toEqual([]);
 	});

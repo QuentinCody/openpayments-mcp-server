@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	createCodeModeResponse,
 	createCodeModeError,
-	withCodeMode,
+	createCodeModeResponse,
 	ErrorCodes,
-	type SectionSource,
 	type ResponseMeta,
+	type SectionSource,
 	type SuccessResponse,
+	withCodeMode,
 } from "./response";
 
 describe("createCodeModeResponse", () => {
@@ -29,7 +29,10 @@ describe("createCodeModeResponse", () => {
 	});
 
 	it("includes _meta when provided", () => {
-		const result = createCodeModeResponse({ x: 1 }, { meta: { fetched_at: "now" } });
+		const result = createCodeModeResponse(
+			{ x: 1 },
+			{ meta: { fetched_at: "now" } },
+		);
 		expect(result.structuredContent?._meta?.fetched_at).toBe("now");
 	});
 
@@ -78,7 +81,9 @@ describe("withCodeMode", () => {
 	});
 
 	it("catches errors and maps to error codes", async () => {
-		const fn = async () => { throw new Error("not found"); };
+		const fn = async () => {
+			throw new Error("not found");
+		};
 		const wrapped = withCodeMode(fn, { toolName: "test_tool" });
 		const result = await wrapped({});
 		expect(result.isError).toBe(true);

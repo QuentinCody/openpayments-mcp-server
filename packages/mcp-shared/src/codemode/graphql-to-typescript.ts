@@ -7,7 +7,11 @@
  * start writing queries immediately.
  */
 
-import type { TrimmedIntrospection, TrimmedField, TrimmedType } from "./graphql-introspection";
+import type {
+	TrimmedField,
+	TrimmedIntrospection,
+	TrimmedType,
+} from "./graphql-introspection";
 
 // ── Options ──────────────────────────────────────────────────────────────
 
@@ -40,10 +44,7 @@ function formatReturnType(field: TrimmedField): string {
  * Score a type for relevance. Higher = more likely to be shown.
  * Prefers types that are return types of query root fields.
  */
-function scoreType(
-	type: TrimmedType,
-	referencedTypes: Set<string>,
-): number {
+function scoreType(type: TrimmedType, referencedTypes: Set<string>): number {
 	let score = 0;
 	if (referencedTypes.has(type.name)) score += 10;
 	if (type.fields) score += Math.min(type.fields.length, 10);
@@ -105,14 +106,19 @@ export function introspectionToSummary(
 	}
 
 	if (totalQueryFields > maxQueryFields) {
-		lines.push(`    ... ${totalQueryFields - maxQueryFields} more -- use schema.queryRoot() to see all`);
+		lines.push(
+			`    ... ${totalQueryFields - maxQueryFields} more -- use schema.queryRoot() to see all`,
+		);
 	}
 
 	// --- Key types ---
 	const objectTypes = introspection.types.filter(
-		(t) => t.kind === "OBJECT" && t.name !== introspection.queryType.name
-			&& t.name !== introspection.mutationType?.name
-			&& t.fields && t.fields.length > 0,
+		(t) =>
+			t.kind === "OBJECT" &&
+			t.name !== introspection.queryType.name &&
+			t.name !== introspection.mutationType?.name &&
+			t.fields &&
+			t.fields.length > 0,
 	);
 
 	const rankedTypes = objectTypes
@@ -133,7 +139,9 @@ export function introspectionToSummary(
 
 		const totalObjects = objectTypes.length;
 		if (totalObjects > maxTypes) {
-			lines.push(`  ... ${totalObjects - maxTypes} more types -- use schema.type(name) or schema.search(query) in your code`);
+			lines.push(
+				`  ... ${totalObjects - maxTypes} more types -- use schema.type(name) or schema.search(query) in your code`,
+			);
 		}
 	}
 

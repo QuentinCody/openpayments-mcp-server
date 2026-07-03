@@ -58,9 +58,7 @@ function evaluateMemberAccess(
 	return current;
 }
 
-function parseArrowFunction(
-	source: string,
-): {
+function parseArrowFunction(source: string): {
 	invoke: (value: unknown, index: number, array: unknown[]) => unknown;
 } {
 	const arrowIdx = findTopLevelArrow(source);
@@ -172,9 +170,15 @@ interface BinaryLevel {
 	apply(left: unknown, right: () => unknown, operator: string): unknown;
 }
 
-const BINARY_NULLISH: BinaryLevel = { operators: ["??"], apply: (l, r) => l ?? r() };
+const BINARY_NULLISH: BinaryLevel = {
+	operators: ["??"],
+	apply: (l, r) => l ?? r(),
+};
 const BINARY_OR: BinaryLevel = { operators: ["||"], apply: (l, r) => l || r() };
-const BINARY_AND: BinaryLevel = { operators: ["&&"], apply: (l, r) => l && r() };
+const BINARY_AND: BinaryLevel = {
+	operators: ["&&"],
+	apply: (l, r) => l && r(),
+};
 const BINARY_EQUALITY: BinaryLevel = {
 	operators: ["===", "!==", "==", "!="],
 	apply: (l, r, op) => (op === "===" || op === "==" ? l === r() : l !== r()),
@@ -211,7 +215,8 @@ const BINARY_ADDITIVE: BinaryLevel = {
 };
 const BINARY_MULTIPLICATIVE: BinaryLevel = {
 	operators: ["*", "/"],
-	apply: (l, r, op) => (op === "*" ? Number(l) * Number(r()) : Number(l) / Number(r())),
+	apply: (l, r, op) =>
+		op === "*" ? Number(l) * Number(r()) : Number(l) / Number(r()),
 };
 
 /**
@@ -229,7 +234,8 @@ function evaluateBinaryChain(
 		if (!match) continue;
 		if (level.minIndex !== undefined && match.index < level.minIndex) continue;
 		const left = evaluate(expr.slice(0, match.index));
-		const right = () => evaluate(expr.slice(match.index + match.operator.length));
+		const right = () =>
+			evaluate(expr.slice(match.index + match.operator.length));
 		return level.apply(left, right, match.operator);
 	}
 	return NO_BINARY_MATCH;
@@ -239,12 +245,14 @@ const NOT_A_LITERAL = Symbol("not-a-literal");
 
 /** Parse a primitive literal token (string/bool/null/undefined/number) or return NOT_A_LITERAL. */
 function evaluatePrimitiveLiteral(expr: string): unknown {
-	if (expr[0] === '"' || expr[0] === "'") return readQuotedString(expr, 0).value;
+	if (expr[0] === '"' || expr[0] === "'")
+		return readQuotedString(expr, 0).value;
 	if (expr === "true") return true;
 	if (expr === "false") return false;
 	if (expr === "null") return null;
 	if (expr === "undefined") return undefined;
-	if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(expr)) return Number(expr);
+	if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(expr))
+		return Number(expr);
 	return NOT_A_LITERAL;
 }
 
@@ -255,18 +263,26 @@ const NOT_A_CALL = Symbol("not-a-call");
  * supported string methods (includes/startsWith/endsWith). Returns NOT_A_CALL
  * when `expr` isn't a complete call; throws on an unsupported method.
  */
-function evaluateCallbackCall(expr: string, scope: Record<string, unknown>): unknown {
+function evaluateCallbackCall(
+	expr: string,
+	scope: Record<string, unknown>,
+): unknown {
 	const call = parseCallExpressionAt(expr);
 	if (!call || call.nextPos !== expr.length) return NOT_A_CALL;
 	const lastDot = call.callee.lastIndexOf(".");
 	if (lastDot === -1) return unsupportedExpression();
-	const receiver = evaluateCallbackExpression(call.callee.slice(0, lastDot), scope);
+	const receiver = evaluateCallbackExpression(
+		call.callee.slice(0, lastDot),
+		scope,
+	);
 	const method = call.callee.slice(lastDot + 1);
 	const args = splitTopLevelExpressions(call.argsStr).map((part) =>
 		evaluateCallbackExpression(part, scope),
 	);
 	if (method === "includes" && receiver != null) {
-		return (receiver as { includes: (...a: unknown[]) => boolean }).includes(...args);
+		return (receiver as { includes: (...a: unknown[]) => boolean }).includes(
+			...args,
+		);
 	}
 	if (method === "startsWith" && typeof receiver === "string") {
 		return receiver.startsWith(String(args[0] ?? ""));
@@ -292,7 +308,11 @@ export function evaluateCallbackExpression(
 
 	// Order preserved from the original: high-precedence binary ops, then a bare
 	// method call, then literals, then lower-precedence arithmetic, then members.
-	const high = evaluateBinaryChain(expr, [BINARY_NULLISH, BINARY_OR, BINARY_AND, BINARY_EQUALITY], evaluate);
+	const high = evaluateBinaryChain(
+		expr,
+		[BINARY_NULLISH, BINARY_OR, BINARY_AND, BINARY_EQUALITY],
+		evaluate,
+	);
 	if (high !== NO_BINARY_MATCH) return high;
 
 	const called = evaluateCallbackCall(expr, scope);
@@ -301,7 +321,11 @@ export function evaluateCallbackExpression(
 	const literal = evaluatePrimitiveLiteral(expr);
 	if (literal !== NOT_A_LITERAL) return literal;
 
-	const low = evaluateBinaryChain(expr, [BINARY_RELATIONAL, BINARY_ADDITIVE, BINARY_MULTIPLICATIVE], evaluate);
+	const low = evaluateBinaryChain(
+		expr,
+		[BINARY_RELATIONAL, BINARY_ADDITIVE, BINARY_MULTIPLICATIVE],
+		evaluate,
+	);
 	if (low !== NO_BINARY_MATCH) return low;
 
 	return evaluateMemberAccess(expr, scope);
@@ -321,16 +345,18 @@ function evaluateArrayMethod(
 	if (method === "map" || method === "filter" || method === "find") {
 		if (!Array.isArray(value)) return unsupportedExpression();
 		const callback = parseArrowFunction(argsStr);
-			if (method === "map") {
-				return value.map((entry, index, array) => callback.invoke(entry, index, array));
-			}
+		if (method === "map") {
+			return value.map((entry, index, array) =>
+				callback.invoke(entry, index, array),
+			);
+		}
 		if (method === "filter") {
 			return value.filter((entry, index, array) =>
-				Boolean(callback.invoke(entry, index, array))
+				Boolean(callback.invoke(entry, index, array)),
 			);
 		}
 		return value.find((entry, index, array) =>
-			Boolean(callback.invoke(entry, index, array))
+			Boolean(callback.invoke(entry, index, array)),
 		);
 	}
 
@@ -349,25 +375,37 @@ function evaluateArrayMethod(
 }
 
 /** Build the helper-function lookup the safe interpreter exposes as call targets. */
-function buildSafeHelperFns(helpers: ExpressionHelpers): Record<string, (...a: unknown[]) => unknown> {
+function buildSafeHelperFns(
+	helpers: ExpressionHelpers,
+): Record<string, (...a: unknown[]) => unknown> {
 	return {
-		searchPaths: (q?: unknown, m?: unknown) => helpers.searchPaths(String(q ?? ""), Number(m) || 10),
-		searchSpec: (q?: unknown, m?: unknown) => helpers.searchSpec(String(q ?? ""), Number(m) || 10),
+		searchPaths: (q?: unknown, m?: unknown) =>
+			helpers.searchPaths(String(q ?? ""), Number(m) || 10),
+		searchSpec: (q?: unknown, m?: unknown) =>
+			helpers.searchSpec(String(q ?? ""), Number(m) || 10),
 		listTags: () => helpers.listTags(),
 		listCategories: () => helpers.listCategories(),
 		getOperation: (id?: unknown) => helpers.getOperation(String(id ?? "")),
-		getEndpoint: (p?: unknown, m?: unknown) => helpers.getEndpoint(String(p ?? ""), m ? String(m) : undefined),
-		describeOperation: (id?: unknown) => helpers.describeOperation(String(id ?? "")),
-		describeEndpoint: (p?: unknown, m?: unknown) => helpers.describeEndpoint(String(p ?? ""), m ? String(m) : undefined),
+		getEndpoint: (p?: unknown, m?: unknown) =>
+			helpers.getEndpoint(String(p ?? ""), m ? String(m) : undefined),
+		describeOperation: (id?: unknown) =>
+			helpers.describeOperation(String(id ?? "")),
+		describeEndpoint: (p?: unknown, m?: unknown) =>
+			helpers.describeEndpoint(String(p ?? ""), m ? String(m) : undefined),
 	};
 }
 
 /** Evaluate Object.entries/keys/values over a single safe-expression argument. */
-function evaluateObjectStatic(callee: string, argsStr: string, helpers: ExpressionHelpers): unknown {
+function evaluateObjectStatic(
+	callee: string,
+	argsStr: string,
+	helpers: ExpressionHelpers,
+): unknown {
 	const args = splitTopLevelExpressions(argsStr);
 	if (args.length !== 1) return unsupportedExpression();
 	const target = evaluateSafeExpression(args[0], helpers);
-	if (target == null || typeof target !== "object") return unsupportedExpression();
+	if (target == null || typeof target !== "object")
+		return unsupportedExpression();
 	if (callee === "Object.keys") return Object.keys(target);
 	if (callee === "Object.values") return Object.values(target);
 	return Object.entries(target);
@@ -378,20 +416,29 @@ function evaluateObjectStatic(callee: string, argsStr: string, helpers: Expressi
  * an Object.* static, or a `spec`/`SPEC` property lookup. Returns the value plus
  * the position where any trailing member chain begins.
  */
-function resolveSafeCallBase(normalized: string, helpers: ExpressionHelpers): { value: unknown; pos: number } {
+function resolveSafeCallBase(
+	normalized: string,
+	helpers: ExpressionHelpers,
+): { value: unknown; pos: number } {
 	const baseCall = parseCallExpressionAt(normalized);
 	if (baseCall) {
 		const helperFns = buildSafeHelperFns(helpers);
 		if (helperFns[baseCall.callee]) {
 			const args = baseCall.argsStr.trim() ? parseArgs(baseCall.argsStr) : [];
-			return { value: helperFns[baseCall.callee](...args), pos: baseCall.nextPos };
+			return {
+				value: helperFns[baseCall.callee](...args),
+				pos: baseCall.nextPos,
+			};
 		}
 		if (
 			baseCall.callee === "Object.entries" ||
 			baseCall.callee === "Object.keys" ||
 			baseCall.callee === "Object.values"
 		) {
-			return { value: evaluateObjectStatic(baseCall.callee, baseCall.argsStr, helpers), pos: baseCall.nextPos };
+			return {
+				value: evaluateObjectStatic(baseCall.callee, baseCall.argsStr, helpers),
+				pos: baseCall.nextPos,
+			};
 		}
 		return unsupportedExpression();
 	}
@@ -402,14 +449,19 @@ function resolveSafeCallBase(normalized: string, helpers: ExpressionHelpers): { 
 	for (let i = 0; i < lookupTokens.length; i++) {
 		if (current == null) return unsupportedExpression();
 		const next = Reflect.get(Object(current), lookupTokens[i]);
-		if (next === undefined && i < lookupTokens.length - 1) return unsupportedExpression();
+		if (next === undefined && i < lookupTokens.length - 1)
+			return unsupportedExpression();
 		current = next;
 	}
 	return { value: current, pos: normalized.length };
 }
 
 /** Apply a trailing `.prop` / `[i]` / `?.x` / `.method(...)` chain to a resolved base value. */
-function applySafeMemberChain(start: unknown, normalized: string, startPos: number): unknown {
+function applySafeMemberChain(
+	start: unknown,
+	normalized: string,
+	startPos: number,
+): unknown {
 	let current = start;
 	let pos = startPos;
 	while (pos < normalized.length) {
@@ -428,7 +480,8 @@ function applySafeMemberChain(start: unknown, normalized: string, startPos: numb
 		const optionalAccess = applyOptionalMemberAccess(current, normalized, pos);
 		if (
 			optionalAccess &&
-			(optionalAccess.nextPos >= normalized.length || normalized[optionalAccess.nextPos] !== "(")
+			(optionalAccess.nextPos >= normalized.length ||
+				normalized[optionalAccess.nextPos] !== "(")
 		) {
 			current = optionalAccess.value;
 			pos = optionalAccess.nextPos;
@@ -447,8 +500,12 @@ function applySafeMemberChain(start: unknown, normalized: string, startPos: numb
 		while (pos < normalized.length && /\s/.test(normalized[pos])) pos++;
 
 		if (normalized[pos] === "(") {
-			const call = parseCallExpressionAt(normalized, pos - methodOrProperty.length);
-			if (!call || call.callee !== methodOrProperty) return unsupportedExpression();
+			const call = parseCallExpressionAt(
+				normalized,
+				pos - methodOrProperty.length,
+			);
+			if (!call || call.callee !== methodOrProperty)
+				return unsupportedExpression();
 			current = evaluateArrayMethod(current, methodOrProperty, call.argsStr);
 			pos = call.nextPos;
 			continue;
@@ -460,7 +517,10 @@ function applySafeMemberChain(start: unknown, normalized: string, startPos: numb
 	return current;
 }
 
-export function evaluateSafeExpression(expr: string, helpers: ExpressionHelpers): unknown {
+export function evaluateSafeExpression(
+	expr: string,
+	helpers: ExpressionHelpers,
+): unknown {
 	const normalized = stripOuterParens(expr);
 	const evaluate = (sub: string) => evaluateSafeExpression(sub, helpers);
 
@@ -495,10 +555,16 @@ export function evaluateSafeExpression(expr: string, helpers: ExpressionHelpers)
  * a pattern this mini-interpreter can handle (caller should fall back
  * to new Function()).
  */
-function interpretSearchCode(code: string, helpers: ExpressionHelpers): unknown {
+function interpretSearchCode(
+	code: string,
+	helpers: ExpressionHelpers,
+): unknown {
 	// Strip optional "return " prefix so multiline calls like
 	// `searchPaths(\n  "studies",\n  5\n)` still parse cleanly.
-	const expr = code.replace(/^return\s+/, "").replace(/;$/, "").trim();
+	const expr = code
+		.replace(/^return\s+/, "")
+		.replace(/;$/, "")
+		.trim();
 	if (!expr) {
 		return unsupportedExpression();
 	}
@@ -508,6 +574,9 @@ function interpretSearchCode(code: string, helpers: ExpressionHelpers): unknown 
 /**
  * Execute search code against OpenAPI helpers with the safe interpreter only.
  */
-export function executeSearchCode(code: string, helpers: ExpressionHelpers): unknown {
+export function executeSearchCode(
+	code: string,
+	helpers: ExpressionHelpers,
+): unknown {
 	return interpretSearchCode(code, helpers);
 }

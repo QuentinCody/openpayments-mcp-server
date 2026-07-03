@@ -23,13 +23,9 @@ export function renderUnicodeChart(spec: ChartSpec): string {
 	let rows = spec.data.slice(0, spec.maxCategories ?? MAX_ROWS);
 
 	if (spec.sort === "desc") {
-		rows = [...rows].sort(
-			(a, b) => toNum(b[dataKey]) - toNum(a[dataKey]),
-		);
+		rows = [...rows].sort((a, b) => toNum(b[dataKey]) - toNum(a[dataKey]));
 	} else if (spec.sort === "asc") {
-		rows = [...rows].sort(
-			(a, b) => toNum(a[dataKey]) - toNum(b[dataKey]),
-		);
+		rows = [...rows].sort((a, b) => toNum(a[dataKey]) - toNum(b[dataKey]));
 	}
 
 	switch (spec.type) {

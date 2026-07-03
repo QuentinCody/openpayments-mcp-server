@@ -11,7 +11,15 @@
  * Returns the JS source string to inject into V8 isolates.
  * The introspection JSON is embedded as a frozen global `SCHEMA`.
  */
-export function buildGraphqlSchemaSource(introspectionJson: string): string {
+export function buildGraphqlSchemaSource(
+	introspectionJson: string,
+	opts?: { available?: boolean; note?: string },
+): string {
+	// `available` is false when the upstream disables GraphQL introspection (e.g.
+	// NCI PDC) — the helpers below still exist but operate on an empty schema, so
+	// isolate code can branch on `schema.available` / read `schema.note`.
+	const available = opts?.available !== false;
+	const note = opts?.note ?? null;
 	return `
 // --- GraphQL schema helpers (injected) ---
 var SCHEMA = Object.freeze(JSON.parse(${JSON.stringify(introspectionJson)}));
@@ -23,6 +31,11 @@ for (var __i = 0; __i < SCHEMA.types.length; __i++) {
 Object.freeze(__typeMap);
 
 var schema = {
+  // Whether schema discovery is available. false when the API disables GraphQL
+  // introspection — schema.* helpers return empty; write queries with gql.query().
+  available: ${available},
+  note: ${JSON.stringify(note)},
+
   /**
    * List all types, optionally filtered by kind.
    * schema.types()            -> all types

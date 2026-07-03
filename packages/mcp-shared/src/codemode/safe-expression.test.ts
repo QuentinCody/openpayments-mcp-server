@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { evaluateCallbackExpression, evaluateSafeExpression } from "./safe-expression";
+import {
+	evaluateCallbackExpression,
+	evaluateSafeExpression,
+} from "./safe-expression";
 import { createOpenApiHelpers } from "./search-tool";
 
 // Helper surface for evaluateSafeExpression comes from createOpenApiHelpers;
@@ -23,7 +26,8 @@ const SPEC = {
 
 const H = createOpenApiHelpers(JSON.stringify(SPEC));
 const ev = (code: string) => evaluateSafeExpression(code, H);
-const cb = (src: string, scope: Record<string, unknown> = {}) => evaluateCallbackExpression(src, scope);
+const cb = (src: string, scope: Record<string, unknown> = {}) =>
+	evaluateCallbackExpression(src, scope);
 
 describe("evaluateSafeExpression › binary operators", () => {
 	it("nullish coalescing", () => {
@@ -101,12 +105,18 @@ describe("evaluateSafeExpression › helper functions", () => {
 		expect(ev('searchSpec("health")')).toHaveLength(1);
 	});
 	it("getOperation / getEndpoint", () => {
-		expect((ev('getOperation("getStudies")') as { operationId: string }).operationId).toBe("getStudies");
-		expect((ev('getEndpoint("/health", "get")') as { path: string }).path).toBe("/health");
+		expect(
+			(ev('getOperation("getStudies")') as { operationId: string }).operationId,
+		).toBe("getStudies");
+		expect((ev('getEndpoint("/health", "get")') as { path: string }).path).toBe(
+			"/health",
+		);
 	});
 	it("describeOperation / describeEndpoint", () => {
 		expect(ev('describeOperation("getStudies")')).toContain("GET /studies");
-		expect(ev('describeEndpoint("/studies", "post")')).toContain("POST /studies");
+		expect(ev('describeEndpoint("/studies", "post")')).toContain(
+			"POST /studies",
+		);
 	});
 });
 
@@ -123,7 +133,9 @@ describe("evaluateSafeExpression › Object.* and spec lookup", () => {
 		expect(ev("spec.info.title")).toBe("Test API");
 		expect(ev("SPEC.info.version")).toBe("1.0");
 		expect((ev('spec["info"]') as { title: string }).title).toBe("Test API");
-		expect((ev("spec") as { info: { title: string } }).info.title).toBe("Test API");
+		expect((ev("spec") as { info: { title: string } }).info.title).toBe(
+			"Test API",
+		);
 	});
 });
 
@@ -133,11 +145,21 @@ describe("evaluateSafeExpression › member chains & array methods", () => {
 		expect(ev('searchPaths("", 10).slice(0, 1)')).toHaveLength(1);
 	});
 	it("map / filter / find with arrow callbacks", () => {
-		expect(ev('searchPaths("", 10).map(op => op.path)')).toEqual(["/studies", "/studies", "/health"]);
-		expect(ev('searchPaths("", 10).filter(op => op.method === "get")')).toHaveLength(2);
-		expect((ev('searchPaths("", 10).find(op => op.method === "post")') as { operationId: string }).operationId).toBe(
-			"createStudy",
-		);
+		expect(ev('searchPaths("", 10).map(op => op.path)')).toEqual([
+			"/studies",
+			"/studies",
+			"/health",
+		]);
+		expect(
+			ev('searchPaths("", 10).filter(op => op.method === "get")'),
+		).toHaveLength(2);
+		expect(
+			(
+				ev('searchPaths("", 10).find(op => op.method === "post")') as {
+					operationId: string;
+				}
+			).operationId,
+		).toBe("createStudy");
 	});
 	it("optional chaining via . and ?.[] after a call", () => {
 		expect(ev('getOperation("getStudies")?.path')).toBe("/studies");

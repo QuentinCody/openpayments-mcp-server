@@ -147,12 +147,12 @@ export const adminPurgeMixin = {
 		let tables: string[] = [];
 		try {
 			tables = storage.sql
-				.exec(
-					"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-				)
+				.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
 				.toArray()
 				.map((r) => String(r.name));
-		} catch { /* best-effort: empty or non-SQL storage */ }
+		} catch {
+			/* best-effort: empty or non-SQL storage */
+		}
 		return { sqliteSizeBytes: safeDatabaseSize(storage), tables };
 	},
 };

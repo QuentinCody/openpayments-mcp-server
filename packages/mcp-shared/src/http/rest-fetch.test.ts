@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildQueryString,
 	registerRateLimitPolicy,
@@ -72,14 +72,24 @@ describe("restFetch", () => {
 		vi.useRealTimers();
 	});
 
-	const mkRes = (status: number, body = "{}", headers: Record<string, string> = {}) =>
-		new Response(body, { status, headers });
+	const mkRes = (
+		status: number,
+		body = "{}",
+		headers: Record<string, string> = {},
+	) => new Response(body, { status, headers });
 
-	const callOf = (n: number) => fetchMock.mock.calls[n] as [string, RequestInit & { headers: Record<string, string> }];
+	const callOf = (n: number) =>
+		fetchMock.mock.calls[n] as [
+			string,
+			RequestInit & { headers: Record<string, string> },
+		];
 
 	it("performs a GET with query string and default headers, returning the response", async () => {
 		fetchMock.mockResolvedValueOnce(mkRes(200, '{"ok":true}'));
-		const res = await restFetch("https://api.test/", "/items", { q: "x", n: 2 });
+		const res = await restFetch("https://api.test/", "/items", {
+			q: "x",
+			n: 2,
+		});
 		expect(res.status).toBe(200);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		const [url, init] = callOf(0);
@@ -91,7 +101,10 @@ describe("restFetch", () => {
 
 	it("serializes an object body as JSON and sets Content-Type", async () => {
 		fetchMock.mockResolvedValueOnce(mkRes(200));
-		await restFetch("https://api.test", "/x", undefined, { method: "POST", body: { a: 1 } });
+		await restFetch("https://api.test", "/x", undefined, {
+			method: "POST",
+			body: { a: 1 },
+		});
 		const init = callOf(0)[1];
 		expect(init.body).toBe('{"a":1}');
 		expect(init.headers["Content-Type"]).toBe("application/json");
@@ -99,7 +112,10 @@ describe("restFetch", () => {
 
 	it("passes a string body through unchanged", async () => {
 		fetchMock.mockResolvedValueOnce(mkRes(200));
-		await restFetch("https://api.test", "/x", undefined, { method: "POST", body: "raw-payload" });
+		await restFetch("https://api.test", "/x", undefined, {
+			method: "POST",
+			body: "raw-payload",
+		});
 		expect(callOf(0)[1].body).toBe("raw-payload");
 	});
 
@@ -112,7 +128,9 @@ describe("restFetch", () => {
 
 	it("retries on a 429 and returns the eventual success", async () => {
 		vi.useFakeTimers();
-		fetchMock.mockResolvedValueOnce(mkRes(429)).mockResolvedValueOnce(mkRes(200, '{"ok":1}'));
+		fetchMock
+			.mockResolvedValueOnce(mkRes(429))
+			.mockResolvedValueOnce(mkRes(200, '{"ok":1}'));
 		const p = restFetch("https://api.test", "/x", undefined, { retries: 2 });
 		await vi.advanceTimersByTimeAsync(5000);
 		expect((await p).status).toBe(200);
@@ -132,7 +150,9 @@ describe("restFetch", () => {
 
 	it("recovers when a thrown network error is followed by success", async () => {
 		vi.useFakeTimers();
-		fetchMock.mockRejectedValueOnce(new Error("flaky")).mockResolvedValueOnce(mkRes(200));
+		fetchMock
+			.mockRejectedValueOnce(new Error("flaky"))
+			.mockResolvedValueOnce(mkRes(200));
 		const p = restFetch("https://api.test", "/x", undefined, { retries: 1 });
 		await vi.advanceTimersByTimeAsync(5000);
 		expect((await p).status).toBe(200);
@@ -151,7 +171,9 @@ describe("restFetch", () => {
 	it("serializes requests that share a rate-limit policy key", async () => {
 		registerRateLimitPolicy({ key: "throttled", minIntervalMs: 1000 });
 		fetchMock.mockResolvedValue(mkRes(200));
-		await restFetch("https://api.test", "/first", undefined, { rateLimitKey: "throttled" });
+		await restFetch("https://api.test", "/first", undefined, {
+			rateLimitKey: "throttled",
+		});
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

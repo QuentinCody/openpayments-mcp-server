@@ -17,7 +17,12 @@ export async function clinvarEsummary(
 	ids: string[],
 	opts: ClinvarFetchOpts = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-clinvar/1.0", apiKey } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-clinvar/1.0",
+		apiKey,
+	} = opts;
 	const url = new URL(`${EUTILS_BASE}/esummary.fcgi`);
 	url.searchParams.set("db", "clinvar");
 	url.searchParams.set("id", ids.join(","));
@@ -42,7 +47,12 @@ export async function clinvarEsearchByRsid(
 	rsid: string,
 	opts: ClinvarFetchOpts = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-clinvar/1.0", apiKey } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-clinvar/1.0",
+		apiKey,
+	} = opts;
 	const url = new URL(`${EUTILS_BASE}/esearch.fcgi`);
 	url.searchParams.set("db", "clinvar");
 	url.searchParams.set("term", `${rsid}[Variant ID]`);

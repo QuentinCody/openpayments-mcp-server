@@ -45,7 +45,10 @@ const lastRequestTime = new Map<string, number>();
  * Wait until the minimum interval has elapsed for a given rate-limit key.
  * Uses a simple timestamp map — sufficient for single-isolate Workers.
  */
-async function waitForRateLimit(key: string, minIntervalMs: number): Promise<void> {
+async function waitForRateLimit(
+	key: string,
+	minIntervalMs: number,
+): Promise<void> {
 	const now = Date.now();
 	const last = lastRequestTime.get(key) ?? 0;
 	const elapsed = now - last;
@@ -96,7 +99,11 @@ async function getCached(url: string): Promise<Response | undefined> {
 	}
 }
 
-async function putCached(url: string, response: Response, ttl: number): Promise<void> {
+async function putCached(
+	url: string,
+	response: Response,
+	ttl: number,
+): Promise<void> {
 	try {
 		const cache = getWorkerCache();
 		if (!cache) return;
@@ -117,10 +124,14 @@ export function buildQueryString(params: Record<string, unknown>): string {
 		if (value === undefined || value === null) continue;
 		if (Array.isArray(value)) {
 			for (const item of value) {
-				parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`);
+				parts.push(
+					`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`,
+				);
 			}
 		} else {
-			parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+			parts.push(
+				`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`,
+			);
 		}
 	}
 	return parts.join("&");
@@ -226,5 +237,7 @@ export async function restFetch(
 		}
 	}
 
-	throw lastError ?? new Error(`restFetch failed after ${retries + 1} attempts`);
+	throw (
+		lastError ?? new Error(`restFetch failed after ${retries + 1} attempts`)
+	);
 }

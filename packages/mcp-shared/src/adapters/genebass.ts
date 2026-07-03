@@ -17,7 +17,12 @@ export async function genebassGeneBurden(
 	burdenSet: string = "pLoF",
 	opts: GenebassFetchOpts & { params?: Record<string, unknown> } = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 20_000, userAgent = "bio-mcp-genebass/1.0", params = {} } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 20_000,
+		userAgent = "bio-mcp-genebass/1.0",
+		params = {},
+	} = opts;
 	const url = new URL(`${GENEBASS_BASE}/gene_burden_phewas`);
 	url.searchParams.set("gene_id", ensemblGeneId);
 	url.searchParams.set("burden_set", burdenSet);
@@ -33,7 +38,9 @@ export async function genebassGeneBurden(
 			signal: ctrl.signal,
 		});
 		if (!resp.ok) {
-			throw new Error(`Genebass HTTP ${resp.status}: ${await resp.text().catch(() => "")}`);
+			throw new Error(
+				`Genebass HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
+			);
 		}
 		return await resp.json();
 	} finally {

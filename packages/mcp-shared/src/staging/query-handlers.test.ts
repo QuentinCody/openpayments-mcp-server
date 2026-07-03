@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createGetSchemaHandler, createQueryDataHandler } from "./query-handlers";
+import {
+	createGetSchemaHandler,
+	createQueryDataHandler,
+} from "./query-handlers";
 
 const json = (body: unknown, status = 200) =>
-	new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+	new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
 
 type Route = (body: unknown, url: URL) => Response | Promise<Response>;
 
@@ -31,54 +37,120 @@ function makeDo(routes: Partial<Record<string, Route>>) {
 	return { ns: ns as never, calls };
 }
 
-const okSchema = () => json({ success: true, schema: { tables: { t1: { columns: [] } } } });
+const okSchema = () =>
+	json({ success: true, schema: { tables: { t1: { columns: [] } } } });
 
 describe("createQueryDataHandler — per-server path (unchanged)", () => {
 	const handler = createQueryDataHandler("DATA_DO", "civic");
 
 	it("errors when the DO binding is missing", async () => {
 		const res = await handler({ data_access_id: "x", sql: "SELECT 1" }, {});
-		expect(res.structuredContent).toMatchObject({ success: false, error: { code: "DATA_ACCESS_ERROR" } });
+		expect(res.structuredContent).toMatchObject({
+			success: false,
+			error: { code: "DATA_ACCESS_ERROR" },
+		});
 	});
 
 	it("returns success with completeness on a good query", async () => {
-		const { ns } = makeDo({ "/schema": okSchema, "/query": () => json({ success: true, results: [{ a: 1 }], row_count: 1, truncated: true, total_matching: 9 }) });
-		const res = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: ns });
+		const { ns } = makeDo({
+			"/schema": okSchema,
+			"/query": () =>
+				json({
+					success: true,
+					results: [{ a: 1 }],
+					row_count: 1,
+					truncated: true,
+					total_matching: 9,
+				}),
+		});
+		const res = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: ns },
+		);
 		expect(res.structuredContent).toMatchObject({ success: true });
 		expect(JSON.stringify(res)).toContain("row_limit");
 	});
 
 	it("maps blocked SQL to INVALID_SQL and validated errors to SQL_VALIDATION_ERROR", async () => {
 		const env = { DATA_DO: makeDo({ "/schema": okSchema }).ns };
-		const blocked = await handler({ data_access_id: "x", sql: "DROP TABLE t" }, env);
-		expect((blocked.structuredContent as { error: { code: string } }).error.code).toBe("INVALID_SQL");
+		const blocked = await handler(
+			{ data_access_id: "x", sql: "DROP TABLE t" },
+			env,
+		);
+		expect(
+			(blocked.structuredContent as { error: { code: string } }).error.code,
+		).toBe("INVALID_SQL");
 
-		const validatedNs = makeDo({ "/schema": okSchema, "/query": () => json({ success: false, error: "bad", validated: true }) }).ns;
-		const validated = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: validatedNs });
-		expect((validated.structuredContent as { error: { code: string } }).error.code).toBe("SQL_VALIDATION_ERROR");
+		const validatedNs = makeDo({
+			"/schema": okSchema,
+			"/query": () => json({ success: false, error: "bad", validated: true }),
+		}).ns;
+		const validated = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: validatedNs },
+		);
+		expect(
+			(validated.structuredContent as { error: { code: string } }).error.code,
+		).toBe("SQL_VALIDATION_ERROR");
 	});
 
 	it("maps 'not found' query errors to DATA_ACCESS_ERROR", async () => {
-		const nfNs = makeDo({ "/schema": okSchema, "/query": () => json({ success: false, error: "relation not found" }) }).ns;
-		const nf = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: nfNs });
-		expect((nf.structuredContent as { error: { code: string } }).error.code).toBe("DATA_ACCESS_ERROR");
+		const nfNs = makeDo({
+			"/schema": okSchema,
+			"/query": () => json({ success: false, error: "relation not found" }),
+		}).ns;
+		const nf = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: nfNs },
+		);
+		expect(
+			(nf.structuredContent as { error: { code: string } }).error.code,
+		).toBe("DATA_ACCESS_ERROR");
 	});
 
 	it("defaults to SQL_EXECUTION_ERROR for a generic query failure", async () => {
-		const errNs = makeDo({ "/schema": okSchema, "/query": () => json({ success: false, error: "syntax error near FROM" }) }).ns;
-		const res = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: errNs });
-		expect((res.structuredContent as { error: { code: string } }).error.code).toBe("SQL_EXECUTION_ERROR");
+		const errNs = makeDo({
+			"/schema": okSchema,
+			"/query": () => json({ success: false, error: "syntax error near FROM" }),
+		}).ns;
+		const res = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: errNs },
+		);
+		expect(
+			(res.structuredContent as { error: { code: string } }).error.code,
+		).toBe("SQL_EXECUTION_ERROR");
 	});
 
 	it("emits a complete:true verdict when a query returns truncated:false", async () => {
-		const { ns } = makeDo({ "/schema": okSchema, "/query": () => json({ success: true, results: [{ a: 1 }], row_count: 1, truncated: false, total_matching: 1 }) });
-		const res = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: ns });
-		expect(JSON.stringify(res)).toContain("\"complete\":true");
+		const { ns } = makeDo({
+			"/schema": okSchema,
+			"/query": () =>
+				json({
+					success: true,
+					results: [{ a: 1 }],
+					row_count: 1,
+					truncated: false,
+					total_matching: 1,
+				}),
+		});
+		const res = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: ns },
+		);
+		expect(JSON.stringify(res)).toContain('"complete":true');
 	});
 
 	it("omits the completeness verdict when truncated is absent", async () => {
-		const { ns } = makeDo({ "/schema": okSchema, "/query": () => json({ success: true, results: [{ a: 1 }], row_count: 1 }) });
-		const res = await handler({ data_access_id: "civic_1", sql: "SELECT * FROM t" }, { DATA_DO: ns });
+		const { ns } = makeDo({
+			"/schema": okSchema,
+			"/query": () =>
+				json({ success: true, results: [{ a: 1 }], row_count: 1 }),
+		});
+		const res = await handler(
+			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
+			{ DATA_DO: ns },
+		);
 		expect(res.structuredContent).toMatchObject({ success: true });
 		expect(JSON.stringify(res)).not.toContain("completeness");
 	});
@@ -86,9 +158,22 @@ describe("createQueryDataHandler — per-server path (unchanged)", () => {
 
 describe("createQueryDataHandler — workspace routing (ADR-006 Phase 0)", () => {
 	it("routes to /ws/query when workspace + workspaceNamespace are present", async () => {
-		const { ns, calls } = makeDo({ "/ws/query": () => json({ success: true, rows: [{ a: 1 }], row_count: 1, truncated: false }) });
-		const handler = createQueryDataHandler("DATA_DO", "chembl", { workspaceNamespace: ns });
-		const res = await handler({ workspace: "W", sql: "SELECT * FROM chembl__t" }, {}); // note: no per-server DO binding needed
+		const { ns, calls } = makeDo({
+			"/ws/query": () =>
+				json({
+					success: true,
+					rows: [{ a: 1 }],
+					row_count: 1,
+					truncated: false,
+				}),
+		});
+		const handler = createQueryDataHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
+		const res = await handler(
+			{ workspace: "W", sql: "SELECT * FROM chembl__t" },
+			{},
+		); // note: no per-server DO binding needed
 		expect(res.structuredContent).toMatchObject({ success: true });
 		expect(JSON.stringify(res)).toContain("ws:W");
 		// per-server /query NOT hit; /ws/query was
@@ -97,24 +182,40 @@ describe("createQueryDataHandler — workspace routing (ADR-006 Phase 0)", () =>
 	});
 
 	it("errors when workspace SQL is missing", async () => {
-		const { ns } = makeDo({ "/ws/query": () => json({ success: true, rows: [] }) });
-		const handler = createQueryDataHandler("DATA_DO", "chembl", { workspaceNamespace: ns });
+		const { ns } = makeDo({
+			"/ws/query": () => json({ success: true, rows: [] }),
+		});
+		const handler = createQueryDataHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
 		const res = await handler({ workspace: "W" }, {});
-		expect(res.structuredContent).toMatchObject({ success: false, error: { code: "SQL_EXECUTION_ERROR" } });
+		expect(res.structuredContent).toMatchObject({
+			success: false,
+			error: { code: "SQL_EXECUTION_ERROR" },
+		});
 	});
 
 	it("surfaces workspace query failures as an error response", async () => {
-		const { ns } = makeDo({ "/ws/query": () => json({ success: false, error: "bad sql" }) });
-		const handler = createQueryDataHandler("DATA_DO", "chembl", { workspaceNamespace: ns });
+		const { ns } = makeDo({
+			"/ws/query": () => json({ success: false, error: "bad sql" }),
+		});
+		const handler = createQueryDataHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
 		const res = await handler({ workspace: "W", sql: "SELECT 1" }, {});
-		expect((res.structuredContent as { error: { code: string } }).error.code).toBe("SQL_EXECUTION_ERROR");
+		expect(
+			(res.structuredContent as { error: { code: string } }).error.code,
+		).toBe("SQL_EXECUTION_ERROR");
 	});
 
 	it("does NOT route to workspace when only the input id is present (no binding)", async () => {
 		const handler = createQueryDataHandler("DATA_DO", "chembl");
 		const res = await handler({ workspace: "W", sql: "SELECT 1" }, {});
 		// falls through to per-server path → missing binding error
-		expect(res.structuredContent).toMatchObject({ success: false, error: { code: "DATA_ACCESS_ERROR" } });
+		expect(res.structuredContent).toMatchObject({
+			success: false,
+			error: { code: "DATA_ACCESS_ERROR" },
+		});
 	});
 });
 
@@ -127,22 +228,56 @@ describe("createGetSchemaHandler — per-server path (unchanged)", () => {
 	});
 
 	it("returns a specific dataset's schema, or an error", async () => {
-		const ok = await handler({ data_access_id: "civic_1" }, { DATA_DO: makeDo({ "/schema": okSchema }).ns });
+		const ok = await handler(
+			{ data_access_id: "civic_1" },
+			{ DATA_DO: makeDo({ "/schema": okSchema }).ns },
+		);
 		expect(ok.structuredContent).toMatchObject({ success: true });
 
-		const bad = await handler({ data_access_id: "civic_1" }, { DATA_DO: makeDo({ "/schema": () => json({ success: false, error: "nope" }) }).ns });
-		expect(bad.structuredContent).toMatchObject({ success: false, error: { code: "DATA_ACCESS_ERROR" } });
+		const bad = await handler(
+			{ data_access_id: "civic_1" },
+			{
+				DATA_DO: makeDo({
+					"/schema": () => json({ success: false, error: "nope" }),
+				}).ns,
+			},
+		);
+		expect(bad.structuredContent).toMatchObject({
+			success: false,
+			error: { code: "DATA_ACCESS_ERROR" },
+		});
 	});
 
 	it("lists datasets for the scope when no id given (empty and populated)", async () => {
-		const empty = await handler({}, { DATA_DO: makeDo({ "/list": () => json({ success: true, datasets: [] }) }).ns }, "chat-1");
+		const empty = await handler(
+			{},
+			{
+				DATA_DO: makeDo({
+					"/list": () => json({ success: true, datasets: [] }),
+				}).ns,
+			},
+			"chat-1",
+		);
 		expect(JSON.stringify(empty)).toContain("No staged datasets");
 
 		const populated = await handler(
 			{},
 			{
 				DATA_DO: makeDo({
-					"/list": () => json({ success: true, datasets: [{ data_access_id: "civic_1", tool_name: "civic_search", tables: ["t1"], total_rows: 5, tool_prefix: "civic", created_at: "now" }] }),
+					"/list": () =>
+						json({
+							success: true,
+							datasets: [
+								{
+									data_access_id: "civic_1",
+									tool_name: "civic_search",
+									tables: ["t1"],
+									total_rows: 5,
+									tool_prefix: "civic",
+									created_at: "now",
+								},
+							],
+						}),
 				}).ns,
 			},
 			"chat-1",
@@ -153,7 +288,11 @@ describe("createGetSchemaHandler — per-server path (unchanged)", () => {
 	});
 
 	it("reports listing failures", async () => {
-		const ns = makeDo({ "/list": () => { throw new Error("registry unreachable"); } }).ns;
+		const ns = makeDo({
+			"/list": () => {
+				throw new Error("registry unreachable");
+			},
+		}).ns;
 		const res = await handler({}, { DATA_DO: ns }, "chat-1");
 		expect(res.structuredContent).toMatchObject({ success: false });
 	});
@@ -161,8 +300,17 @@ describe("createGetSchemaHandler — per-server path (unchanged)", () => {
 
 describe("createGetSchemaHandler — workspace routing (ADR-006 Phase 0)", () => {
 	it("routes to /ws/schema when workspace + workspaceNamespace are present", async () => {
-		const { ns, calls } = makeDo({ "/ws/schema": () => json({ success: true, dataset_count: 1, datasets: [{ dataset: "chembl" }] }) });
-		const handler = createGetSchemaHandler("DATA_DO", "chembl", { workspaceNamespace: ns });
+		const { ns, calls } = makeDo({
+			"/ws/schema": () =>
+				json({
+					success: true,
+					dataset_count: 1,
+					datasets: [{ dataset: "chembl" }],
+				}),
+		});
+		const handler = createGetSchemaHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
 		const res = await handler({ workspace: "W" }, {});
 		expect(res.structuredContent).toMatchObject({ success: true });
 		expect(JSON.stringify(res)).toContain("chembl");
@@ -170,14 +318,91 @@ describe("createGetSchemaHandler — workspace routing (ADR-006 Phase 0)", () =>
 	});
 
 	it("scopes to a single dataset and surfaces workspace errors", async () => {
-		const { ns, calls } = makeDo({ "/ws/schema": () => json({ success: true, dataset_count: 1, datasets: [] }) });
-		const handler = createGetSchemaHandler("DATA_DO", "chembl", { workspaceNamespace: ns });
+		const { ns, calls } = makeDo({
+			"/ws/schema": () =>
+				json({ success: true, dataset_count: 1, datasets: [] }),
+		});
+		const handler = createGetSchemaHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
 		await handler({ workspace: "W", dataset: "chembl" }, {});
 		expect(calls.find((c) => c.path === "/ws/schema")).toBeDefined();
 
-		const failNs = makeDo({ "/ws/schema": () => json({ success: false, error: "no manifest" }) }).ns;
-		const failHandler = createGetSchemaHandler("DATA_DO", "chembl", { workspaceNamespace: failNs });
+		const failNs = makeDo({
+			"/ws/schema": () => json({ success: false, error: "no manifest" }),
+		}).ns;
+		const failHandler = createGetSchemaHandler("DATA_DO", "chembl", {
+			workspaceNamespace: failNs,
+		});
 		const res = await failHandler({ workspace: "W" }, {});
-		expect((res.structuredContent as { error: { code: string } }).error.code).toBe("DATA_ACCESS_ERROR");
+		expect(
+			(res.structuredContent as { error: { code: string } }).error.code,
+		).toBe("DATA_ACCESS_ERROR");
+	});
+});
+
+describe("self-describing query errors — schema on 'no such column/table'", () => {
+	const richSchema = () =>
+		json({
+			success: true,
+			schema: {
+				tables: { assoc: { columns: [{ name: "pvalue" }, { name: "beta" }] } },
+			},
+		});
+
+	it("appends the staged schema to a per-server 'no such column' error", async () => {
+		const handler = createQueryDataHandler("DATA_DO", "gwas");
+		const { ns } = makeDo({
+			"/schema": richSchema,
+			"/query": () => json({ success: false, error: "no such column: pval" }),
+		});
+		const res = await handler(
+			{ data_access_id: "gwas_1", sql: "SELECT pval FROM assoc" },
+			{ DATA_DO: ns },
+		);
+		const text = JSON.stringify(res);
+		expect(text).toContain("no such column: pval");
+		expect(text).toContain("assoc(pvalue, beta)");
+		expect(
+			(res.structuredContent as { error: { code: string } }).error.code,
+		).toBe("SQL_EXECUTION_ERROR");
+	});
+
+	it("appends the workspace schema to a workspace 'no such column' error", async () => {
+		const { ns } = makeDo({
+			"/ws/query": () => json({ success: false, error: "no such column: x" }),
+			"/ws/schema": () =>
+				json({
+					success: true,
+					dataset_count: 1,
+					datasets: [
+						{ tables: [{ name: "chembl__t", columns: [{ name: "id" }] }] },
+					],
+				}),
+		});
+		const handler = createQueryDataHandler("DATA_DO", "chembl", {
+			workspaceNamespace: ns,
+		});
+		const res = await handler(
+			{ workspace: "W", sql: "SELECT x FROM chembl__t" },
+			{},
+		);
+		const text = JSON.stringify(res);
+		expect(text).toContain("no such column: x");
+		expect(text).toContain("chembl__t(id)");
+	});
+
+	it("reframes the compound-SELECT cap into an actionable remedy", async () => {
+		const handler = createQueryDataHandler("DATA_DO", "gwas");
+		const { ns } = makeDo({
+			"/schema": richSchema,
+			"/query": () =>
+				json({ success: false, error: "too many terms in compound SELECT" }),
+		});
+		const res = await handler(
+			{ data_access_id: "gwas_1", sql: "SELECT 1 UNION SELECT 2" },
+			{ DATA_DO: ns },
+		);
+		expect(JSON.stringify(res)).toMatch(/batches of at most 8/);
 	});
 });

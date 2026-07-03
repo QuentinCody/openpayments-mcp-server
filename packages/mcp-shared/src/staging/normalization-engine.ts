@@ -9,10 +9,15 @@
  *   const result = engine.process(data, sql);
  */
 
-import type { DomainConfig, SqlExec, StagingResult, TableSchema } from "./types";
-import { discoverEntities } from "./entity-discovery";
-import { buildSchemas, buildFallbackSchema } from "./schema-builder";
 import { insertData } from "./data-inserter";
+import { discoverEntities } from "./entity-discovery";
+import { buildFallbackSchema, buildSchemas } from "./schema-builder";
+import type {
+	DomainConfig,
+	SqlExec,
+	StagingResult,
+	TableSchema,
+} from "./types";
 
 export class NormalizationEngine {
 	constructor(private readonly config?: DomainConfig) {}

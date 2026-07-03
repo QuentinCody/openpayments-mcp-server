@@ -30,7 +30,9 @@ export interface WorkspaceMaterialization {
 export function workspaceCompleteness(
 	upstreamTotal: number | undefined,
 	wsResult: WorkspaceMaterialization,
-): { complete: boolean; total_available?: number; returned?: number } | undefined {
+):
+	| { complete: boolean; total_available?: number; returned?: number }
+	| undefined {
 	// Pagination asks "did we fetch every upstream RECORD?" — compare upstreamTotal
 	// (a count of upstream records) to the records fetched = primary/parent rows, NOT
 	// the total materialized rows (which inflate with child/grandchild rows and would
@@ -39,15 +41,20 @@ export function workspaceCompleteness(
 	// `returned` keeps the total materialized count for the human-facing display field.
 	const returned = wsResult.row_count;
 	const paginationIncomplete =
-		upstreamTotal !== undefined && primaryRows !== undefined && primaryRows < upstreamTotal;
+		upstreamTotal !== undefined &&
+		primaryRows !== undefined &&
+		primaryRows < upstreamTotal;
 	const materializationIncomplete = wsResult.completeness?.complete === false;
 	if (paginationIncomplete || materializationIncomplete) {
 		return {
 			complete: false,
-			...(upstreamTotal !== undefined ? { total_available: upstreamTotal } : {}),
+			...(upstreamTotal !== undefined
+				? { total_available: upstreamTotal }
+				: {}),
 			...(returned !== undefined ? { returned } : {}),
 		};
 	}
-	if (wsResult.completeness || upstreamTotal !== undefined) return { complete: true };
+	if (wsResult.completeness || upstreamTotal !== undefined)
+		return { complete: true };
 	return undefined;
 }

@@ -16,14 +16,21 @@ export async function hpaGene(
 	ensemblId: string,
 	opts: HpaFetchOpts = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-hpa/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-hpa/1.0",
+	} = opts;
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	try {
-		const resp = await fetchImpl(`${HPA_BASE}/${encodeURIComponent(ensemblId)}.json`, {
-			headers: { Accept: "application/json", "User-Agent": userAgent },
-			signal: ctrl.signal,
-		});
+		const resp = await fetchImpl(
+			`${HPA_BASE}/${encodeURIComponent(ensemblId)}.json`,
+			{
+				headers: { Accept: "application/json", "User-Agent": userAgent },
+				signal: ctrl.signal,
+			},
+		);
 		if (!resp.ok) throw new Error(`HPA HTTP ${resp.status}`);
 		return await resp.json();
 	} finally {
@@ -35,7 +42,12 @@ export async function hpaSearch(
 	query: string,
 	opts: HpaFetchOpts & { columns?: string } = {},
 ): Promise<unknown> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-hpa/1.0", columns } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-hpa/1.0",
+		columns,
+	} = opts;
 	const url = new URL(`${HPA_BASE}/api/search_download.php`);
 	url.searchParams.set("search", query);
 	url.searchParams.set("format", "json");

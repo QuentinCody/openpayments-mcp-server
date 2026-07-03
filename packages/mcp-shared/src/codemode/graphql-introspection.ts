@@ -161,7 +161,10 @@ export function flattenTypeRef(ref: RawTypeRef | null | undefined): string {
 const MAX_DESCRIPTION_LENGTH = 100;
 const INTERNAL_TYPE_PREFIX = "__";
 
-function truncate(s: string | null | undefined, max: number): string | undefined {
+function truncate(
+	s: string | null | undefined,
+	max: number,
+): string | undefined {
 	if (!s) return undefined;
 	if (s.length <= max) return s;
 	return `${s.slice(0, max - 3)}...`;
@@ -171,21 +174,38 @@ function trimArg(raw: Record<string, unknown>): TrimmedArg {
 	return {
 		name: String(raw.name || ""),
 		type: flattenTypeRef(raw.type as RawTypeRef),
-		...(raw.defaultValue != null ? { defaultValue: String(raw.defaultValue) } : {}),
-		...(raw.description ? { description: truncate(String(raw.description), MAX_DESCRIPTION_LENGTH) } : {}),
+		...(raw.defaultValue != null
+			? { defaultValue: String(raw.defaultValue) }
+			: {}),
+		...(raw.description
+			? {
+					description: truncate(
+						String(raw.description),
+						MAX_DESCRIPTION_LENGTH,
+					),
+				}
+			: {}),
 	};
 }
 
 function trimField(raw: Record<string, unknown>): TrimmedField {
-	const args = Array.isArray(raw.args) && raw.args.length > 0
-		? raw.args.map((a: Record<string, unknown>) => trimArg(a))
-		: undefined;
+	const args =
+		Array.isArray(raw.args) && raw.args.length > 0
+			? raw.args.map((a: Record<string, unknown>) => trimArg(a))
+			: undefined;
 
 	return {
 		name: String(raw.name || ""),
 		type: flattenTypeRef(raw.type as RawTypeRef),
 		...(args ? { args } : {}),
-		...(raw.description ? { description: truncate(String(raw.description), MAX_DESCRIPTION_LENGTH) } : {}),
+		...(raw.description
+			? {
+					description: truncate(
+						String(raw.description),
+						MAX_DESCRIPTION_LENGTH,
+					),
+				}
+			: {}),
 	};
 }
 
@@ -193,8 +213,17 @@ function trimInputField(raw: Record<string, unknown>): TrimmedInputField {
 	return {
 		name: String(raw.name || ""),
 		type: flattenTypeRef(raw.type as RawTypeRef),
-		...(raw.defaultValue != null ? { defaultValue: String(raw.defaultValue) } : {}),
-		...(raw.description ? { description: truncate(String(raw.description), MAX_DESCRIPTION_LENGTH) } : {}),
+		...(raw.defaultValue != null
+			? { defaultValue: String(raw.defaultValue) }
+			: {}),
+		...(raw.description
+			? {
+					description: truncate(
+						String(raw.description),
+						MAX_DESCRIPTION_LENGTH,
+					),
+				}
+			: {}),
 	};
 }
 
@@ -213,28 +242,44 @@ function trimType(raw: Record<string, unknown>): TrimmedType | null {
 		kind: String(raw.kind || "OBJECT"),
 	};
 
-	const desc = truncate(raw.description as string | undefined, MAX_DESCRIPTION_LENGTH);
+	const desc = truncate(
+		raw.description as string | undefined,
+		MAX_DESCRIPTION_LENGTH,
+	);
 	if (desc) result.description = desc;
 
 	if (Array.isArray(raw.fields) && raw.fields.length > 0) {
-		result.fields = raw.fields.map((f: Record<string, unknown>) => trimField(f));
+		result.fields = raw.fields.map((f: Record<string, unknown>) =>
+			trimField(f),
+		);
 	}
 
 	if (Array.isArray(raw.inputFields) && raw.inputFields.length > 0) {
-		result.inputFields = raw.inputFields.map((f: Record<string, unknown>) => trimInputField(f));
+		result.inputFields = raw.inputFields.map((f: Record<string, unknown>) =>
+			trimInputField(f),
+		);
 	}
 
 	if (Array.isArray(raw.enumValues) && raw.enumValues.length > 0) {
 		result.enumValues = raw.enumValues.map((e: Record<string, unknown>) => ({
 			name: String(e.name || ""),
-			...(e.description ? { description: truncate(String(e.description), MAX_DESCRIPTION_LENGTH) } : {}),
+			...(e.description
+				? {
+						description: truncate(
+							String(e.description),
+							MAX_DESCRIPTION_LENGTH,
+						),
+					}
+				: {}),
 		}));
 	}
 
 	if (Array.isArray(raw.possibleTypes) && raw.possibleTypes.length > 0) {
-		result.possibleTypes = raw.possibleTypes.map((t: Record<string, unknown>) => ({
-			name: String(t.name || ""),
-		}));
+		result.possibleTypes = raw.possibleTypes.map(
+			(t: Record<string, unknown>) => ({
+				name: String(t.name || ""),
+			}),
+		);
 	}
 
 	return result;
@@ -247,11 +292,15 @@ function trimType(raw: Record<string, unknown>): TrimmedType | null {
 export function trimIntrospectionResult(
 	raw: Record<string, unknown>,
 ): TrimmedIntrospection {
-	const schema = raw.__schema as Record<string, unknown> | undefined
-		?? raw as Record<string, unknown>;
+	const schema =
+		(raw.__schema as Record<string, unknown> | undefined) ??
+		(raw as Record<string, unknown>);
 
 	const queryType = schema.queryType as { name: string } | undefined;
-	const mutationType = schema.mutationType as { name: string } | null | undefined;
+	const mutationType = schema.mutationType as
+		| { name: string }
+		| null
+		| undefined;
 	const rawTypes = Array.isArray(schema.types) ? schema.types : [];
 
 	const types: TrimmedType[] = [];

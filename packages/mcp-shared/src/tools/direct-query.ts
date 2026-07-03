@@ -76,7 +76,10 @@ export function stripComments(sql: string): string {
  * More restrictive than `isReadOnly()` in sql-helpers — blocks PRAGMA and EXPLAIN,
  * enforces SELECT/WITH prefix, and scans for all write keywords.
  */
-export function isStrictReadOnly(sql: string): { valid: boolean; error?: string } {
+export function isStrictReadOnly(sql: string): {
+	valid: boolean;
+	error?: string;
+} {
 	const stripped = stripComments(sql);
 
 	if (!stripped) {
@@ -118,7 +121,8 @@ export function extractTableNames(sql: string): Set<string> {
 	// Match FROM/JOIN followed by an optional schema-qualified identifier.
 	// Groups: 1=quoted first ident, 2=unquoted first ident,
 	//         3=quoted second ident (after dot), 4=unquoted second ident (after dot)
-	const pattern = /\b(?:FROM|JOIN)\s+(?:"([^"]+)"|(\w+))(?:\.(?:"([^"]+)"|(\w+)))?/gi;
+	const pattern =
+		/\b(?:FROM|JOIN)\s+(?:"([^"]+)"|(\w+))(?:\.(?:"([^"]+)"|(\w+)))?/gi;
 	for (const match of stripped.matchAll(pattern)) {
 		const first = (match[1] || match[2]).toLowerCase();
 		const second = (match[3] || match[4] || "").toLowerCase();
@@ -136,7 +140,10 @@ export function extractTableNames(sql: string): Set<string> {
 /**
  * Validate that all referenced tables are allowed.
  */
-export function validateTableAccess(tables: Set<string>, deniedTables: Set<string> = DENIED_TABLES): { valid: boolean; error?: string } {
+export function validateTableAccess(
+	tables: Set<string>,
+	deniedTables: Set<string> = DENIED_TABLES,
+): { valid: boolean; error?: string } {
 	for (const table of tables) {
 		if (deniedTables.has(table)) {
 			return { valid: false, error: `Access denied to table: ${table}` };
@@ -150,7 +157,7 @@ export function validateTableAccess(tables: Set<string>, deniedTables: Set<strin
  */
 export function redactRow(
 	row: Record<string, unknown>,
-	redactedColumns: Set<string> = REDACTED_COLUMNS
+	redactedColumns: Set<string> = REDACTED_COLUMNS,
 ): Record<string, unknown> {
 	const result: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(row)) {
@@ -184,11 +191,15 @@ const sqlParam = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 export const directQueryTools: ToolEntry[] = [
 	{
 		name: "__query",
-		description: "Execute a read-only SQL query against the database. Internal — only callable from V8 isolates.",
+		description:
+			"Execute a read-only SQL query against the database. Internal — only callable from V8 isolates.",
 		hidden: true,
 		schema: {
 			sql: z.string().describe("SQL SELECT statement with ? placeholders"),
-			params: z.array(sqlParam).optional().describe("Parameter values for ? placeholders"),
+			params: z
+				.array(sqlParam)
+				.optional()
+				.describe("Parameter values for ? placeholders"),
 		},
 		handler: async (input, ctx) => {
 			const { sql: querySql, params } = input as {
@@ -214,7 +225,11 @@ export const directQueryTools: ToolEntry[] = [
 
 			// 4. Execute
 			try {
-				const rows = executeSql<Record<string, unknown>>(ctx.sql, limitedSql, params);
+				const rows = executeSql<Record<string, unknown>>(
+					ctx.sql,
+					limitedSql,
+					params,
+				);
 
 				const truncated = rows.length > MAX_ROWS;
 				const resultRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
@@ -226,7 +241,8 @@ export const directQueryTools: ToolEntry[] = [
 				const serialized = JSON.stringify(redacted);
 				if (serialized.length > MAX_RESULT_BYTES) {
 					return {
-						error: "Result exceeds 1MB size limit. Add a LIMIT clause or narrow your SELECT columns.",
+						error:
+							"Result exceeds 1MB size limit. Add a LIMIT clause or narrow your SELECT columns.",
 						error_code: "QUERY_TOO_LARGE",
 					};
 				}
@@ -240,25 +256,39 @@ export const directQueryTools: ToolEntry[] = [
 	},
 	{
 		name: "__query_batch",
-		description: "Execute multiple read-only SQL queries in a single round-trip. Internal — only callable from V8 isolates.",
+		description:
+			"Execute multiple read-only SQL queries in a single round-trip. Internal — only callable from V8 isolates.",
 		hidden: true,
 		schema: {
 			queries: z
 				.array(
 					z.object({
-						sql: z.string().describe("SQL SELECT statement with ? placeholders"),
-						params: z.array(sqlParam).optional().describe("Parameter values for ? placeholders"),
-					})
+						sql: z
+							.string()
+							.describe("SQL SELECT statement with ? placeholders"),
+						params: z
+							.array(sqlParam)
+							.optional()
+							.describe("Parameter values for ? placeholders"),
+					}),
 				)
-				.describe("Array of queries to execute sequentially in a single round-trip."),
+				.describe(
+					"Array of queries to execute sequentially in a single round-trip.",
+				),
 		},
 		handler: async (input, ctx) => {
 			const { queries } = input as {
-				queries: { sql: string; params?: (string | number | boolean | null)[] }[];
+				queries: {
+					sql: string;
+					params?: (string | number | boolean | null)[];
+				}[];
 			};
 
 			if (queries.length > MAX_BATCH_QUERIES) {
-				return { error: `Maximum ${MAX_BATCH_QUERIES} queries per batch`, error_code: "QUERY_BLOCKED" };
+				return {
+					error: `Maximum ${MAX_BATCH_QUERIES} queries per batch`,
+					error_code: "QUERY_BLOCKED",
+				};
 			}
 
 			const results: unknown[] = [];
@@ -275,14 +305,21 @@ export const directQueryTools: ToolEntry[] = [
 				const tables = extractTableNames(q.sql);
 				const tableCheck = validateTableAccess(tables);
 				if (!tableCheck.valid) {
-					results.push({ error: tableCheck.error, error_code: "QUERY_BLOCKED" });
+					results.push({
+						error: tableCheck.error,
+						error_code: "QUERY_BLOCKED",
+					});
 					continue;
 				}
 
 				const limitedSql = ensureLimit(q.sql);
 
 				try {
-					const rows = executeSql<Record<string, unknown>>(ctx.sql, limitedSql, q.params);
+					const rows = executeSql<Record<string, unknown>>(
+						ctx.sql,
+						limitedSql,
+						q.params,
+					);
 					const truncated = rows.length > MAX_ROWS;
 					const resultRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 					results.push(resultRows.map((row) => redactRow(row)));

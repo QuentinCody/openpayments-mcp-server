@@ -30,7 +30,11 @@ interface GqlField {
 	isDeprecated?: boolean;
 }
 
-function unwrapGqlType(type: GqlTypeRef): { typeName: string; required: boolean; isList: boolean } {
+function unwrapGqlType(type: GqlTypeRef): {
+	typeName: string;
+	required: boolean;
+	isList: boolean;
+} {
 	let required = false;
 	let isList = false;
 	let current = type;
@@ -93,7 +97,10 @@ export function graphQlToCatalog(
 	const root = introspection as Record<string, unknown>;
 	const schema =
 		(root.__schema as Record<string, unknown>) ||
-		((root.data as Record<string, unknown>)?.__schema as Record<string, unknown>);
+		((root.data as Record<string, unknown>)?.__schema as Record<
+			string,
+			unknown
+		>);
 
 	if (!schema) {
 		return {
@@ -103,24 +110,34 @@ export function graphQlToCatalog(
 				endpointCount: 0,
 				endpoints: [],
 			},
-			diagnostics: [{ level: "error", message: "No __schema found in introspection result" }],
+			diagnostics: [
+				{
+					level: "error",
+					message: "No __schema found in introspection result",
+				},
+			],
 		};
 	}
 
 	const types = schema.types as Array<Record<string, unknown>> | undefined;
 	if (!types) {
 		return {
-			catalog: { name: options.name, baseUrl: options.baseUrl, endpointCount: 0, endpoints: [] },
+			catalog: {
+				name: options.name,
+				baseUrl: options.baseUrl,
+				endpointCount: 0,
+				endpoints: [],
+			},
 			diagnostics: [{ level: "error", message: "No types found in schema" }],
 		};
 	}
 
-	const queryTypeName = (schema.queryType as Record<string, unknown> | undefined)?.name as
-		| string
-		| undefined;
-	const mutationTypeName = (schema.mutationType as Record<string, unknown> | undefined)?.name as
-		| string
-		| undefined;
+	const queryTypeName = (
+		schema.queryType as Record<string, unknown> | undefined
+	)?.name as string | undefined;
+	const mutationTypeName = (
+		schema.mutationType as Record<string, unknown> | undefined
+	)?.name as string | undefined;
 
 	// Process queries
 	if (queryTypeName) {
@@ -137,7 +154,9 @@ export function graphQlToCatalog(
 									type: gqlTypeToParamType(arg.type),
 									required: unwrapGqlType(arg.type).required,
 									description: arg.description || arg.name,
-									...(arg.defaultValue != null ? { default: arg.defaultValue } : {}),
+									...(arg.defaultValue != null
+										? { default: arg.defaultValue }
+										: {}),
 								}),
 							)
 						: undefined;
@@ -154,7 +173,10 @@ export function graphQlToCatalog(
 					...(field.description ? { description: field.description } : {}),
 					category: "queries",
 					...(queryParams ? { queryParams } : {}),
-					body: { contentType: "application/json", description: "GraphQL query" },
+					body: {
+						contentType: "application/json",
+						description: "GraphQL query",
+					},
 					responseShape: gqlTypeToShapeString(field.type),
 					usageHint: `api.post('/graphql', { query: '{ ${field.name}${requiredArgs ? `(${requiredArgs})` : ""} { ... } }' })`,
 					...(field.isDeprecated ? { deprecated: true } : {}),
@@ -176,7 +198,10 @@ export function graphQlToCatalog(
 					summary: `Mutation: ${field.name}${field.description ? ` — ${field.description}` : ""}`,
 					...(field.description ? { description: field.description } : {}),
 					category: "mutations",
-					body: { contentType: "application/json", description: "GraphQL mutation" },
+					body: {
+						contentType: "application/json",
+						description: "GraphQL mutation",
+					},
 					responseShape: gqlTypeToShapeString(field.type),
 					...(field.isDeprecated ? { deprecated: true } : {}),
 				});
@@ -185,7 +210,10 @@ export function graphQlToCatalog(
 	}
 
 	if (endpoints.length === 0) {
-		diagnostics.push({ level: "warn", message: "No queries or mutations found in schema" });
+		diagnostics.push({
+			level: "warn",
+			message: "No queries or mutations found in schema",
+		});
 	}
 
 	const catalog: ApiCatalog = {

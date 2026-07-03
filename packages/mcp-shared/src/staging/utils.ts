@@ -2,23 +2,31 @@
  * Staging utilities — decision logic, DO interaction, data access ID generation.
  */
 
-import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import {
+	type Completeness,
 	deriveMaterializationCompleteness,
 	mergeCompleteness,
 	paginationCompleteness,
-	type Completeness,
 } from "../completeness";
+import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { SchemaHints } from "./schema-inference";
-import { buildStagingMetadata, type StagingMetadata, type TableRelationship } from "./staging-metadata";
-import { DO_FETCH_ORIGIN, stageIntoWorkspace, type WorkspaceTarget } from "./workspace-staging";
+import {
+	buildStagingMetadata,
+	type StagingMetadata,
+	type TableRelationship,
+} from "./staging-metadata";
+import {
+	DO_FETCH_ORIGIN,
+	stageIntoWorkspace,
+	type WorkspaceTarget,
+} from "./workspace-staging";
 
 // The standard query_data / get_schema tool handlers were extracted to keep this
 // file under the line cap. Re-exported here so the long-standing
 // `@bio-mcp/shared/staging/utils` import path (used across all servers) is stable.
 export {
-	createQueryDataHandler,
 	createGetSchemaHandler,
+	createQueryDataHandler,
 	type DataHandlerOptions,
 } from "./query-handlers";
 
@@ -52,7 +60,12 @@ interface QueryResponse {
 	error?: string;
 	truncated?: boolean;
 	total_matching?: number;
-	diagnostics?: Array<{ severity: string; message: string; help?: string; kind: string }>;
+	diagnostics?: Array<{
+		severity: string;
+		message: string;
+		help?: string;
+		kind: string;
+	}>;
 	validated?: boolean;
 }
 
@@ -66,7 +79,10 @@ async function parseJsonResponse<T>(resp: Response, fallback: T): Promise<T> {
 }
 
 /** Decide whether a response should be staged based on byte size. */
-export function shouldStage(responseBytes: number, threshold?: number): boolean {
+export function shouldStage(
+	responseBytes: number,
+	threshold?: number,
+): boolean {
 	return responseBytes > (threshold ?? DEFAULT_STAGING_THRESHOLD);
 }
 
@@ -224,22 +240,31 @@ export async function stageToDoAndRespond(
 	});
 
 	const processResp = await doInstance.fetch(processReq);
-	const processResult = await parseJsonResponse<ProcessResponse>(processResp, { success: false, error: "Empty response from DO" });
+	const processResult = await parseJsonResponse<ProcessResponse>(processResp, {
+		success: false,
+		error: "Empty response from DO",
+	});
 
 	if (!processResult.success) {
-		throw new Error(`Failed to stage data in Durable Object: ${processResult.error || "unknown error"}`);
+		throw new Error(
+			`Failed to stage data in Durable Object: ${processResult.error || "unknown error"}`,
+		);
 	}
 
 	// Fetch schema
 	const schemaResp = await doInstance.fetch(
 		new Request(`${DO_FETCH_ORIGIN}/schema`),
 	);
-	const schemaResult = await parseJsonResponse<SchemaResponse>(schemaResp, { success: false });
+	const schemaResult = await parseJsonResponse<SchemaResponse>(schemaResp, {
+		success: false,
+	});
 
 	const tables = processResult.tables_created ?? [];
 	const primaryTable = tables[0];
 	const primaryTableRows = processResult.table_row_counts
-		? (primaryTable ? (processResult.table_row_counts[primaryTable] ?? 0) : undefined)
+		? primaryTable
+			? (processResult.table_row_counts[primaryTable] ?? 0)
+			: undefined
 		: undefined;
 
 	// Compute a canonical completeness verdict for the staged set. Two signals,
@@ -247,8 +272,14 @@ export async function stageToDoAndRespond(
 	//   1. pagination — upstream reported more records than we staged
 	//   2. materialization — rows dropped while writing into SQLite
 	const warnings = processResult.staging_warnings ?? {};
-	const failedRows = typeof warnings.rows_skipped === "number" ? warnings.rows_skipped : undefined;
-	const dataLossWarning = typeof warnings.data_loss_warning === "string" ? warnings.data_loss_warning : undefined;
+	const failedRows =
+		typeof warnings.rows_skipped === "number"
+			? warnings.rows_skipped
+			: undefined;
+	const dataLossWarning =
+		typeof warnings.data_loss_warning === "string"
+			? warnings.data_loss_warning
+			: undefined;
 	const completeness: Completeness | undefined = mergeCompleteness(
 		paginationCompleteness(options?.upstreamTotal, primaryTableRows),
 		deriveMaterializationCompleteness({
@@ -265,7 +296,15 @@ export async function stageToDoAndRespond(
 	// the *value's meaning* has shifted from MCP transport session to app scope.
 	const resolvedScope = getRequestScope(scope);
 	if (resolvedScope) {
-		await registerStagedDataset(doNamespace, resolvedScope, dataAccessId, tables, processResult.total_rows, resolvedToolPrefix, provenance?.toolName);
+		await registerStagedDataset(
+			doNamespace,
+			resolvedScope,
+			dataAccessId,
+			tables,
+			processResult.total_rows,
+			resolvedToolPrefix,
+			provenance?.toolName,
+		);
 	}
 
 	return {
@@ -316,14 +355,29 @@ export async function queryDataFromDo(
 	if (sanitizedSql.split(";").filter(Boolean).length > 1) {
 		throw new Error("Only single SQL statements are allowed");
 	}
-
+	// T3.4 — a read-only PRAGMA table_info(<table>) describe is allowed past the
+	// SELECT-only / no-PRAGMA rules so a model can learn a staged table's columns.
+	const isDescribe = /^pragma\s+table_info\s*\(/i.test(sanitizedSql);
 	const dangerousKeywords = [
-		"DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE",
-		"TRUNCATE", "REPLACE", "EXEC", "EXECUTE", "PRAGMA",
-		"ATTACH", "DETACH", "REINDEX", "VACUUM", "ANALYZE",
+		"DROP",
+		"DELETE",
+		"INSERT",
+		"UPDATE",
+		"ALTER",
+		"CREATE",
+		"TRUNCATE",
+		"REPLACE",
+		"EXEC",
+		"EXECUTE",
+		"PRAGMA",
+		"ATTACH",
+		"DETACH",
+		"REINDEX",
+		"VACUUM",
+		"ANALYZE",
 	];
 	const upperSql = sanitizedSql.toUpperCase();
-	for (const keyword of dangerousKeywords) {
+	for (const keyword of isDescribe ? [] : dangerousKeywords) {
 		// Use word-boundary regex to avoid false positives on column names
 		// like "created_at" matching CREATE, "updated_at" matching UPDATE, etc.
 		const regex = new RegExp(`\\b${keyword}\\b`);
@@ -333,13 +387,11 @@ export async function queryDataFromDo(
 			);
 		}
 	}
-
-	if (!/^\s*(SELECT|WITH)\b/i.test(sanitizedSql)) {
+	if (!/^\s*(SELECT|WITH|PRAGMA\s+table_info)\b/i.test(sanitizedSql)) {
 		throw new Error("Only SELECT/WITH queries are allowed");
 	}
-
 	let finalSql = sanitizedSql;
-	if (!sanitizedSql.toLowerCase().includes("limit")) {
+	if (!isDescribe && !sanitizedSql.toLowerCase().includes("limit")) {
 		finalSql += ` LIMIT ${limit}`;
 	}
 
@@ -354,7 +406,9 @@ export async function queryDataFromDo(
 	//   { success: true, schema: { table_count: N, tables: { "tbl1": {...}, ... } } }
 	// NOT an array. Check tables map keys (ignoring internal names).
 	try {
-		const probe = await doInstance.fetch(new Request(`${DO_FETCH_ORIGIN}/schema`));
+		const probe = await doInstance.fetch(
+			new Request(`${DO_FETCH_ORIGIN}/schema`),
+		);
 		if (probe.ok) {
 			const probeJson = (await probe.json()) as {
 				schema?: { tables?: Record<string, unknown>; table_count?: number };
@@ -389,12 +443,16 @@ export async function queryDataFromDo(
 		}),
 	);
 
-	const result = await parseJsonResponse<QueryResponse>(response, { success: false, error: "Empty response from DO" });
+	const result = await parseJsonResponse<QueryResponse>(response, {
+		success: false,
+		error: "Empty response from DO",
+	});
 
 	if (!result.success) {
 		const err = new Error(`Query failed: ${result.error || "Unknown error"}`);
 		if (result.diagnostics) {
-			(err as Error & { diagnostics: typeof result.diagnostics }).diagnostics = result.diagnostics;
+			(err as Error & { diagnostics: typeof result.diagnostics }).diagnostics =
+				result.diagnostics;
 		}
 		if (result.validated) {
 			(err as Error & { validated: boolean }).validated = true;
@@ -404,9 +462,11 @@ export async function queryDataFromDo(
 
 	return {
 		rows: result.results ?? [],
-		row_count: result.row_count ?? (result.results?.length ?? 0),
+		row_count: result.row_count ?? result.results?.length ?? 0,
 		...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
-		...(result.total_matching !== undefined ? { total_matching: result.total_matching } : {}),
+		...(result.total_matching !== undefined
+			? { total_matching: result.total_matching }
+			: {}),
 		sql: finalSql,
 		data_access_id: dataAccessId,
 		executed_at: new Date().toISOString(),
@@ -430,7 +490,10 @@ export async function getSchemaFromDo(
 	const response = await doInstance.fetch(
 		new Request(`${DO_FETCH_ORIGIN}/schema`),
 	);
-	const result = await parseJsonResponse<SchemaResponse>(response, { success: false, error: "Empty response from DO" });
+	const result = await parseJsonResponse<SchemaResponse>(response, {
+		success: false,
+		error: "Empty response from DO",
+	});
 
 	if (!result.success) {
 		throw new Error(`Schema retrieval failed: ${result.error}`);

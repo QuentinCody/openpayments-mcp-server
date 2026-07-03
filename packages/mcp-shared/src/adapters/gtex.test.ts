@@ -8,7 +8,11 @@ describe("gtex adapter", () => {
 			captured.push(typeof input === "string" ? input : (input as Request).url);
 			return new Response(JSON.stringify({ data: [] }), { status: 200 });
 		};
-		await gtexGet("/variant/variantById", { variantId: "chr10_114758349_C_T_b38" }, { fetchImpl: f });
+		await gtexGet(
+			"/variant/variantById",
+			{ variantId: "chr10_114758349_C_T_b38" },
+			{ fetchImpl: f },
+		);
 		expect(captured[0]).toContain("variantId=chr10_114758349_C_T_b38");
 	});
 

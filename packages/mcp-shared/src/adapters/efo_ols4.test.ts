@@ -6,7 +6,9 @@ describe("efo_ols4 adapter", () => {
 		const captured: string[] = [];
 		const f: typeof fetch = async (input) => {
 			captured.push(typeof input === "string" ? input : (input as Request).url);
-			return new Response(JSON.stringify({ response: { docs: [] } }), { status: 200 });
+			return new Response(JSON.stringify({ response: { docs: [] } }), {
+				status: 200,
+			});
 		};
 		await ols4Search("type 2 diabetes", { fetchImpl: f });
 		expect(captured[0]).toContain("/ols4/api/search");
@@ -18,9 +20,13 @@ describe("efo_ols4 adapter", () => {
 		const captured: string[] = [];
 		const f: typeof fetch = async (input) => {
 			captured.push(typeof input === "string" ? input : (input as Request).url);
-			return new Response(JSON.stringify({ _embedded: { terms: [] } }), { status: 200 });
+			return new Response(JSON.stringify({ _embedded: { terms: [] } }), {
+				status: 200,
+			});
 		};
-		await ols4TermDescendants("efo", "http://www.ebi.ac.uk/efo/EFO_0001360", { fetchImpl: f });
+		await ols4TermDescendants("efo", "http://www.ebi.ac.uk/efo/EFO_0001360", {
+			fetchImpl: f,
+		});
 		expect(captured[0]).toContain("/descendants");
 	});
 });

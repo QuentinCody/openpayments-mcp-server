@@ -14,6 +14,14 @@
  *     of objects, REST API responses, simple data).
  */
 
+import { getDomainConfigByName } from "./domain-config";
+import { isEntity } from "./entity-discovery";
+import { NormalizationEngine } from "./normalization-engine";
+import {
+	detectArrays,
+	inferSchema,
+	materializeSchema,
+} from "./schema-inference";
 import type {
 	DomainConfig,
 	SqlExec,
@@ -21,14 +29,6 @@ import type {
 	StagingHints,
 	StagingResult,
 } from "./types";
-import { getDomainConfigByName } from "./domain-config";
-import { NormalizationEngine } from "./normalization-engine";
-import {
-	detectArrays,
-	inferSchema,
-	materializeSchema,
-} from "./schema-inference";
-import { isEntity } from "./entity-discovery";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -60,11 +60,20 @@ export function stageData(
 	// Determine tier
 	const tier = hints?.tier ?? detectTier(data, resolvedConfig);
 
-	if (tier === 2) {
-		return runTier2(data, sql, resolvedConfig);
+	// T5.3 — staging must never hard-fail to zero. If structured normalization
+	// throws (e.g. a SQLite column/size limit on CREATE TABLE), fall back to
+	// storing the raw response as a queryable JSON payload rather than losing
+	// every row. The failure reason is surfaced on the result, not swallowed.
+	try {
+		return tier === 2
+			? runTier2(data, sql, resolvedConfig)
+			: runTier1(data, sql, hints);
+	} catch (err) {
+		const fallback = storeFallbackPayload(data, sql);
+		const message = err instanceof Error ? err.message : String(err);
+		fallback.error = `structured staging failed (${message}); stored the raw response as a queryable JSON payload`;
+		return fallback;
 	}
-
-	return runTier1(data, sql, hints);
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +125,8 @@ function nestedItemCandidates(value: unknown): unknown[] {
 		candidates.push(wrapper.nodes[0]);
 	}
 	if (Array.isArray(wrapper.edges) && wrapper.edges.length > 0) {
-		const firstNode = (wrapper.edges as Array<Record<string, unknown>>)[0]?.node;
+		const firstNode = (wrapper.edges as Array<Record<string, unknown>>)[0]
+			?.node;
 		if (firstNode) candidates.push(firstNode);
 	}
 	if (Array.isArray(wrapper.rows) && wrapper.rows.length > 0) {
@@ -129,7 +139,10 @@ function nestedItemCandidates(value: unknown): unknown[] {
  * Check whether an object has nested entity relationships
  * (objects with IDs containing arrays of other ID-bearing objects).
  */
-export function hasNestedEntities(obj: unknown, config?: DomainConfig): boolean {
+export function hasNestedEntities(
+	obj: unknown,
+	config?: DomainConfig,
+): boolean {
 	if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
 
 	if (!isEntity(obj, config)) return false;
@@ -140,8 +153,13 @@ export function hasNestedEntities(obj: unknown, config?: DomainConfig): boolean 
 		}
 
 		// A nested entity itself (1:1 relationship) may carry its own nested entities
-		const isNonArrayObject = value && typeof value === "object" && !Array.isArray(value);
-		if (isNonArrayObject && isEntity(value, config) && hasNestedEntities(value, config)) {
+		const isNonArrayObject =
+			value && typeof value === "object" && !Array.isArray(value);
+		if (
+			isNonArrayObject &&
+			isEntity(value, config) &&
+			hasNestedEntities(value, config)
+		) {
 			return true;
 		}
 	}
@@ -165,8 +183,10 @@ function unwrapToArray(data: unknown): unknown[] | null {
 			.map((e) => e.node)
 			.filter(Boolean);
 	}
-	if (record.nodes && Array.isArray(record.nodes)) return record.nodes as unknown[];
-	if (record.rows && Array.isArray(record.rows)) return record.rows as unknown[];
+	if (record.nodes && Array.isArray(record.nodes))
+		return record.nodes as unknown[];
+	if (record.rows && Array.isArray(record.rows))
+		return record.rows as unknown[];
 
 	// REST API patterns
 	const knownKeys = ["data", "results", "items", "records", "hits", "entries"];
@@ -241,8 +261,7 @@ function runTier1(
 		const actualName =
 			schema.tables.length === 1
 				? schema.tables[0].name
-				: (schema.tables.find((t) => t.name === tableName)?.name ??
-					tableName);
+				: (schema.tables.find((t) => t.name === tableName)?.name ?? tableName);
 		rowsMap.set(actualName, arr.rows);
 	}
 
@@ -256,10 +275,7 @@ function runTier1(
 	};
 }
 
-function storeFallbackPayload(
-	data: unknown,
-	sql: SqlExec,
-): StagingResult {
+function storeFallbackPayload(data: unknown, sql: SqlExec): StagingResult {
 	sql.exec(
 		`CREATE TABLE IF NOT EXISTS payloads (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,10 +283,7 @@ function storeFallbackPayload(
 			created_at TEXT DEFAULT CURRENT_TIMESTAMP
 		)`,
 	);
-	sql.exec(
-		`INSERT INTO payloads (root_json) VALUES (?)`,
-		JSON.stringify(data),
-	);
+	sql.exec(`INSERT INTO payloads (root_json) VALUES (?)`, JSON.stringify(data));
 
 	return {
 		success: true,

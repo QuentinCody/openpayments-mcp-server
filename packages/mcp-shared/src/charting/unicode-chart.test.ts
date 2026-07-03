@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { renderUnicodeChart } from "./unicode-chart.js";
+import { describe, expect, it } from "vitest";
 import type { ChartSpec } from "./chart-types.js";
+import { renderUnicodeChart } from "./unicode-chart.js";
 
 function makeSpec(overrides: Partial<ChartSpec> = {}): ChartSpec {
 	return {

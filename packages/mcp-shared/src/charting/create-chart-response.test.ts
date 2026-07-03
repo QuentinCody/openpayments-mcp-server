@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { createChartResponse } from "./create-chart-response.js";
+import { describe, expect, it } from "vitest";
 import type { ChartResponseOptions } from "./chart-types.js";
+import { createChartResponse } from "./create-chart-response.js";
 
 function makeOpts(
 	overrides: Partial<ChartResponseOptions> = {},
@@ -75,9 +75,9 @@ describe("createChartResponse", () => {
 		expect(
 			(result.structuredContent.data as { truncated?: boolean }).truncated,
 		).toBe(true);
-		expect(
-			(result.content[0] as { text: string }).text,
-		).toContain("Showing 200 of 300");
+		expect((result.content[0] as { text: string }).text).toContain(
+			"Showing 200 of 300",
+		);
 	});
 
 	it("prepends textPreamble when provided", () => {

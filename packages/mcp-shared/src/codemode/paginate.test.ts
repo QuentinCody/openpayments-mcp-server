@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractItems, extractNextCursor, paginateAll, type PageFetcher } from "./paginate";
+import {
+	extractItems,
+	extractNextCursor,
+	type PageFetcher,
+	paginateAll,
+} from "./paginate";
 
 describe("extractItems", () => {
 	it("returns a bare array directly", () => {
@@ -7,7 +12,9 @@ describe("extractItems", () => {
 	});
 
 	it("honors an explicit dot-path itemsField", () => {
-		expect(extractItems({ payload: { rows: [{ a: 1 }] } }, "payload.rows")).toEqual({
+		expect(
+			extractItems({ payload: { rows: [{ a: 1 }] } }, "payload.rows"),
+		).toEqual({
 			items: [{ a: 1 }],
 			field: "payload.rows",
 		});
@@ -24,7 +31,10 @@ describe("extractItems", () => {
 
 	it("auto-detects NCBI esearchresult.idlist", () => {
 		const resp = { esearchresult: { count: "266", idlist: ["1", "2", "3"] } };
-		expect(extractItems(resp)).toEqual({ items: ["1", "2", "3"], field: "esearchresult.idlist" });
+		expect(extractItems(resp)).toEqual({
+			items: ["1", "2", "3"],
+			field: "esearchresult.idlist",
+		});
 	});
 
 	it("returns empty when nothing array-like is found", () => {
@@ -35,7 +45,9 @@ describe("extractItems", () => {
 
 describe("extractNextCursor", () => {
 	it("reads an explicit nextField", () => {
-		expect(extractNextCursor({ paging: { token: "abc" } }, "paging.token")).toBe("abc");
+		expect(
+			extractNextCursor({ paging: { token: "abc" } }, "paging.token"),
+		).toBe("abc");
 	});
 
 	it("auto-detects common cursor keys and stringifies numbers", () => {
@@ -50,13 +62,19 @@ describe("extractNextCursor", () => {
 });
 
 /** Build a fetcher over a fixed pool using offset/limit semantics. */
-function offsetPool(total: number, key = "results"): { fetch: PageFetcher; calls: Record<string, unknown>[] } {
+function offsetPool(
+	total: number,
+	key = "results",
+): { fetch: PageFetcher; calls: Record<string, unknown>[] } {
 	const calls: Record<string, unknown>[] = [];
 	const fetch: PageFetcher = async (params) => {
 		calls.push(params);
 		const offset = Number(params.offset ?? 0);
 		const limit = Number(params.limit ?? 100);
-		const slice = Array.from({ length: total }, (_, i) => i).slice(offset, offset + limit);
+		const slice = Array.from({ length: total }, (_, i) => i).slice(
+			offset,
+			offset + limit,
+		);
 		return { count: total, [key]: slice };
 	};
 	return { fetch, calls };
@@ -69,7 +87,11 @@ describe("paginateAll — offset strategy", () => {
 		expect(result.items).toHaveLength(250);
 		expect(result.pages).toBe(3); // 100 + 100 + 50
 		expect(result.total_available).toBe(250);
-		expect(result.completeness).toMatchObject({ complete: true, total_available: 250, returned: 250 });
+		expect(result.completeness).toMatchObject({
+			complete: true,
+			total_available: 250,
+			returned: 250,
+		});
 		expect(calls[0]).toMatchObject({ offset: 0, limit: 100 });
 		expect(calls[2]).toMatchObject({ offset: 200, limit: 100 });
 	});
@@ -107,14 +129,21 @@ describe("paginateAll — offset strategy", () => {
 			calls.push(params);
 			const start = Number(params.retstart ?? 0);
 			const n = Number(params.retmax ?? 0);
-			const idlist = Array.from({ length: 7 }, (_, i) => String(i)).slice(start, start + n);
+			const idlist = Array.from({ length: 7 }, (_, i) => String(i)).slice(
+				start,
+				start + n,
+			);
 			return { esearchresult: { count: "7", idlist } };
 		};
-		const result = await paginateAll(fetch, { db: "nuccore" }, {
-			offsetParam: "retstart",
-			limitParam: "retmax",
-			pageSize: 3,
-		});
+		const result = await paginateAll(
+			fetch,
+			{ db: "nuccore" },
+			{
+				offsetParam: "retstart",
+				limitParam: "retmax",
+				pageSize: 3,
+			},
+		);
 		expect(result.items).toHaveLength(7);
 		expect(result.completeness.complete).toBe(true);
 		expect(calls[0]).toMatchObject({ db: "nuccore", retstart: 0, retmax: 3 });
@@ -130,7 +159,11 @@ describe("paginateAll — page strategy", () => {
 			const start = (page - 1) * size;
 			return { data: all.slice(start, start + size) };
 		};
-		const result = await paginateAll(fetch, {}, { strategy: "page", pageSize: 5 });
+		const result = await paginateAll(
+			fetch,
+			{},
+			{ strategy: "page", pageSize: 5 },
+		);
 		expect(result.items).toHaveLength(12);
 		expect(result.pages).toBe(3); // 5 + 5 + 2
 		expect(result.completeness.complete).toBe(true);
@@ -162,7 +195,10 @@ describe("paginateAll — cursor strategy", () => {
 describe("paginateAll — completeness reconciliation", () => {
 	it("flags incompleteness when a natural stop falls short of the reported total", async () => {
 		// total says 100 but the endpoint only ever returns 10 then stops short
-		const fetch: PageFetcher = async () => ({ total_count: 100, results: [1, 2, 3] });
+		const fetch: PageFetcher = async () => ({
+			total_count: 100,
+			results: [1, 2, 3],
+		});
 		const result = await paginateAll(fetch, {}, { pageSize: 5 });
 		expect(result.items).toEqual([1, 2, 3]);
 		expect(result.completeness.complete).toBe(false);
@@ -175,8 +211,14 @@ describe("paginateAll — cursor strategy with full-URL next (CourtListener/DRF)
 	it("re-sends the extracted cursor token, not the whole URL", async () => {
 		// Mirrors DRF: each `next` is an absolute URL embedding ?cursor=<token>.
 		const pages: Record<string, { items: number[]; next?: string }> = {
-			"": { items: [1, 2], next: "https://www.courtlistener.com/api/rest/v4/search/?cursor=c1" },
-			c1: { items: [3, 4], next: "https://www.courtlistener.com/api/rest/v4/search/?cursor=c2" },
+			"": {
+				items: [1, 2],
+				next: "https://www.courtlistener.com/api/rest/v4/search/?cursor=c1",
+			},
+			c1: {
+				items: [3, 4],
+				next: "https://www.courtlistener.com/api/rest/v4/search/?cursor=c2",
+			},
 			c2: { items: [5] },
 		};
 		const seen: string[] = [];
@@ -186,7 +228,11 @@ describe("paginateAll — cursor strategy with full-URL next (CourtListener/DRF)
 			const p = pages[cur];
 			return { count: 5, next: p.next ?? null, results: p.items };
 		};
-		const result = await paginateAll(fetch, {}, { strategy: "cursor", itemsField: "results" });
+		const result = await paginateAll(
+			fetch,
+			{},
+			{ strategy: "cursor", itemsField: "results" },
+		);
 		expect(result.items).toEqual([1, 2, 3, 4, 5]);
 		expect(result.pages).toBe(3);
 		// CRITICAL: the cursor param must be the bare token, never the full URL.

@@ -6,7 +6,7 @@ import { sqlTools } from "./sql";
 // failOn throws an Error; throwOn throws a non-Error (covers the String(e) arm).
 const makeCtx = (failOn?: RegExp, throwOn?: RegExp) => {
 	const calls: string[] = [];
-	const sql = <T,>(strings: TemplateStringsArray, ...params: unknown[]): T[] => {
+	const sql = <T>(strings: TemplateStringsArray, ...params: unknown[]): T[] => {
 		const query = strings.join("?");
 		calls.push(query);
 		if (throwOn?.test(query)) throw "raw string failure";
@@ -25,7 +25,9 @@ const tool = (name: string) => {
 describe("sql_query", () => {
 	it("runs read-only statements", async () => {
 		const { ctx } = makeCtx();
-		expect(await tool("sql_query").handler({ query: "SELECT 1" } as never, ctx)).toEqual([{ ok: 1, params: 0 }]);
+		expect(
+			await tool("sql_query").handler({ query: "SELECT 1" } as never, ctx),
+		).toEqual([{ ok: 1, params: 0 }]);
 	});
 
 	it("forwards parameters", async () => {
@@ -39,16 +41,24 @@ describe("sql_query", () => {
 
 	it("rejects non-read-only statements", async () => {
 		const { ctx } = makeCtx();
-		await expect(tool("sql_query").handler({ query: "INSERT INTO t VALUES (1)" } as never, ctx)).rejects.toThrow(
-			/only allows SELECT/,
-		);
+		await expect(
+			tool("sql_query").handler(
+				{ query: "INSERT INTO t VALUES (1)" } as never,
+				ctx,
+			),
+		).rejects.toThrow(/only allows SELECT/);
 	});
 });
 
 describe("sql_exec", () => {
 	it("executes allowed DDL/DML and wraps the result", async () => {
 		const { ctx } = makeCtx();
-		expect(await tool("sql_exec").handler({ query: "CREATE TABLE t (a)" } as never, ctx)).toEqual({
+		expect(
+			await tool("sql_exec").handler(
+				{ query: "CREATE TABLE t (a)" } as never,
+				ctx,
+			),
+		).toEqual({
 			success: true,
 			result: [{ ok: 1, params: 0 }],
 		});
@@ -56,9 +66,12 @@ describe("sql_exec", () => {
 
 	it("blocks ATTACH/DETACH/LOAD_EXTENSION", async () => {
 		const { ctx } = makeCtx();
-		await expect(tool("sql_exec").handler({ query: "ATTACH DATABASE 'x' AS y" } as never, ctx)).rejects.toThrow(
-			/not allowed/,
-		);
+		await expect(
+			tool("sql_exec").handler(
+				{ query: "ATTACH DATABASE 'x' AS y" } as never,
+				ctx,
+			),
+		).rejects.toThrow(/not allowed/);
 	});
 });
 
@@ -74,14 +87,27 @@ describe("sql_exec_batch", () => {
 				],
 			} as never,
 			ctx,
-		)) as { total: number; succeeded: number; failed: number; results: Array<{ success: boolean; error?: string }> };
+		)) as {
+			total: number;
+			succeeded: number;
+			failed: number;
+			results: Array<{ success: boolean; error?: string }>;
+		};
 
 		expect(result.total).toBe(3);
 		expect(result.succeeded).toBe(1);
 		expect(result.failed).toBe(2);
 		expect(result.results[0]).toMatchObject({ index: 0, success: true });
-		expect(result.results[1]).toMatchObject({ index: 1, success: false, error: expect.stringMatching(/not allowed/) });
-		expect(result.results[2]).toMatchObject({ index: 2, success: false, error: "syntax error" });
+		expect(result.results[1]).toMatchObject({
+			index: 1,
+			success: false,
+			error: expect.stringMatching(/not allowed/),
+		});
+		expect(result.results[2]).toMatchObject({
+			index: 2,
+			success: false,
+			error: "syntax error",
+		});
 		// the blocked statement never reached ctx.sql
 		expect(calls.some((q) => q.includes("ATTACH"))).toBe(false);
 	});
@@ -98,7 +124,12 @@ describe("sql_exec_batch", () => {
 	it("reports all-succeeded for a clean batch", async () => {
 		const { ctx } = makeCtx();
 		const result = (await tool("sql_exec_batch").handler(
-			{ statements: [{ query: "INSERT INTO t VALUES (1)" }, { query: "DELETE FROM t" }] } as never,
+			{
+				statements: [
+					{ query: "INSERT INTO t VALUES (1)" },
+					{ query: "DELETE FROM t" },
+				],
+			} as never,
 			ctx,
 		)) as { succeeded: number; failed: number };
 		expect(result).toMatchObject({ succeeded: 2, failed: 0 });

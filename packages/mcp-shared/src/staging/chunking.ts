@@ -64,7 +64,9 @@ export class ChunkingEngine {
 		try {
 			return JSON.parse(content);
 		} catch {
-			throw new Error(`Failed to parse stored chunked content ${id} (${content.length} chars)`);
+			throw new Error(
+				`Failed to parse stored chunked content ${id} (${content.length} chars)`,
+			);
 		}
 	}
 

@@ -7,13 +7,19 @@ const tableOf = (rows: unknown[], hints?: Parameters<typeof inferSchema>[1]) =>
 describe("inferSchema", () => {
 	it("skips empty arrays and sanitizes table names", () => {
 		expect(inferSchema([{ key: "items", rows: [] }]).tables).toEqual([]);
-		const [table] = inferSchema([{ key: "My-Items!", rows: [{ a: 1 }] }]).tables;
+		const [table] = inferSchema([
+			{ key: "My-Items!", rows: [{ a: 1 }] },
+		]).tables;
 		expect(table.name).toBe("my_items");
 	});
 
 	it("infers scalar column types and flattens nested objects", () => {
-		const [table] = tableOf([{ name: "x", count: 2, ratio: 0.5, user: { name: "u" } }]);
-		const byName = Object.fromEntries(table.columns.map((c) => [c.name, c.type]));
+		const [table] = tableOf([
+			{ name: "x", count: 2, ratio: 0.5, user: { name: "u" } },
+		]);
+		const byName = Object.fromEntries(
+			table.columns.map((c) => [c.name, c.type]),
+		);
 		expect(byName.name).toBe("TEXT");
 		expect(byName.count).toBe("INTEGER");
 		expect(byName.ratio).toBe("REAL");
@@ -42,7 +48,11 @@ describe("inferSchema", () => {
 
 	it("marks scalar-array columns as pipe-delimited TEXT", () => {
 		const [table] = tableOf([{ tags: ["a", "b"] }, { tags: ["c"] }]);
-		expect(table.columns[0]).toMatchObject({ name: "tags", type: "TEXT", pipeDelimited: true });
+		expect(table.columns[0]).toMatchObject({
+			name: "tags",
+			type: "TEXT",
+			pipeDelimited: true,
+		});
 	});
 
 	it("extracts object arrays into child tables with childOf metadata", () => {
@@ -52,7 +62,11 @@ describe("inferSchema", () => {
 		]);
 		expect(tables).toHaveLength(2);
 		const child = tables[1];
-		expect(child.childOf).toMatchObject({ parentTable: "items", fkColumn: "parent_id", sourceColumn: "entries" });
+		expect(child.childOf).toMatchObject({
+			parentTable: "items",
+			fkColumn: "parent_id",
+			sourceColumn: "entries",
+		});
 		// the source column no longer appears on the parent
 		expect(tables[0].columns.some((c) => c.name === "entries")).toBe(false);
 	});
@@ -71,7 +85,12 @@ describe("inferSchema", () => {
 	});
 
 	it("keeps only composite indexes whose columns all exist", () => {
-		const [table] = tableOf([{ a: 1, b: 2 }], { compositeIndexes: [["a", "b"], ["a", "missing"]] });
+		const [table] = tableOf([{ a: 1, b: 2 }], {
+			compositeIndexes: [
+				["a", "b"],
+				["a", "missing"],
+			],
+		});
 		expect(table.compositeIndexes).toEqual([["a", "b"]]);
 	});
 
@@ -82,7 +101,9 @@ describe("inferSchema", () => {
 
 	it("caps wide tables by demoting extra columns into _overflow JSON", () => {
 		// 210 columns -> 199 kept + _overflow; 11 demoted names, shape shows 5 + "+6 more"
-		const wide = Object.fromEntries(Array.from({ length: 210 }, (_, i) => [`c${i}`, i]));
+		const wide = Object.fromEntries(
+			Array.from({ length: 210 }, (_, i) => [`c${i}`, i]),
+		);
 		const [table] = tableOf([wide]);
 		expect(table.columns.length).toBe(200);
 		const overflow = table.columns[table.columns.length - 1];

@@ -9,31 +9,39 @@
  * - db.stage(), db.queryStaged(), api.query() — staging helpers
  * - console.log() capture
  *
+ * Optionally also a SECOND, REST upstream (`restApiFetch`) — api.get/api.post
+ * routed through the same host proxy + DO-SQLite staging (hybrid GraphQL+REST).
+ *
  * API keys never enter the isolate — all HTTP goes through the host's gqlFetch.
  */
 
 import { z } from "zod";
+import type { SourceDescriptor } from "../provenance/provenance";
+import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
+import type { ToolContext } from "../registry/types";
 import {
-	DynamicWorkerExecutor,
-	type WorkerLoaderBinding,
-	type ExecutorFns,
-} from "./execute-tool";
+	createApiProxyTool,
+	createQueryProxyTool,
+	createStageProxyTool,
+} from "../tools/api-proxy";
+import { createFsProxyHandlers } from "../tools/fs-proxy";
+import { createGraphqlProxyTool } from "../tools/graphql-proxy";
+import { buildRestApiOverrideSource } from "./api-proxy";
+import type { ApiFetchFn } from "./catalog";
+import { DynamicWorkerExecutor, type ExecutorFns, type WorkerLoaderBinding } from "./execute-tool";
+import { buildFsProxySource } from "./fs-proxy";
+import { buildGraphqlExecuteDescription } from "./graphql-execute-description";
+import { handleExecutorResult } from "./graphql-execute-result";
 import {
 	fetchIntrospection,
 	type GraphqlFetchFn,
 	type TrimmedIntrospection,
 } from "./graphql-introspection";
-import { buildGraphqlSchemaSource } from "./graphql-schema-source";
 import { buildGraphqlProxySource } from "./graphql-proxy";
+import { registerGraphqlSearchTool } from "./graphql-schema-discovery";
+import { buildGraphqlSchemaSource } from "./graphql-schema-source";
 import { introspectionToSummary } from "./graphql-to-typescript";
-import { createGraphqlProxyTool } from "../tools/graphql-proxy";
-import { createQueryProxyTool, createStageProxyTool } from "../tools/api-proxy";
-import { createFsProxyHandlers } from "../tools/fs-proxy";
-import { buildFsProxySource } from "./fs-proxy";
-import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
-import type { ToolContext } from "../registry/types";
-import { createCodeModeResponse, createCodeModeError, ErrorCodes } from "./response";
-import { type Citation, type SourceDescriptor, buildCitation } from "../provenance/provenance";
+import { createCodeModeError, ErrorCodes } from "./response";
 
 // ---------------------------------------------------------------------------
 // Options & result types
@@ -69,6 +77,13 @@ export interface GraphqlExecuteToolOptions {
 	 *  verifiable `_meta.citation` (source + query/result hashes + timestamp) so a
 	 *  connected agent can attribute and re-verify each claim. Opt-in per server. */
 	source?: SourceDescriptor;
+	/** Optional SECOND upstream — a REST `ApiFetchFn` (e.g. the RCSB Search API).
+	 *  When set, this becomes a hybrid GraphQL+REST Code Mode server: the isolate's
+	 *  `api.get`/`api.post` are wired to it and routed through the same host
+	 *  `__api_proxy` + DO-SQLite auto-staging as `gql.query`. Document the REST
+	 *  surface with `preamble` `//` lines (they appear in the tool description as
+	 *  SERVER NOTES). See docs/adding-mcp-servers.md "Hybrid GraphQL + REST". */
+	restApiFetch?: ApiFetchFn;
 }
 
 export interface GraphqlExecuteToolResult {
@@ -89,7 +104,9 @@ function validateLoader(rawLoader: unknown): WorkerLoaderBinding {
 		!("get" in rawLoader) ||
 		typeof (rawLoader as WorkerLoaderBinding).get !== "function"
 	) {
-		throw new Error("createGraphqlExecuteTool requires a valid Worker Loader binding");
+		throw new Error(
+			"createGraphqlExecuteTool requires a valid Worker Loader binding",
+		);
 	}
 	return rawLoader as WorkerLoaderBinding;
 }
@@ -106,57 +123,13 @@ function toInput(args: unknown): Record<string, unknown> {
 	return {};
 }
 
-function buildDescription(
-	options: GraphqlExecuteToolOptions,
-	apiSummary: string,
-): string {
-	const { prefix, preamble, fsDoNamespace } = options;
-	const name = options.apiName ?? prefix;
-
-	return (
-		`Execute JavaScript code against the ${name} GraphQL API. ` +
-		`Code runs in a sandboxed V8 isolate with:\n` +
-		`- gql.query(queryString, variables?) — execute GraphQL queries (returns data directly, e.g. result.gene not result.data.gene)\n` +
-		`- schema.types(), schema.type(name), schema.search(query) — explore the schema\n` +
-		`- schema.queryRoot() — list available query entry points with args\n` +
-		`- schema.enumValues(name), schema.inputType(name) — inspect enums and input types\n` +
-		`- console logging (log, warn, error, info) — captured output\n` +
-		(fsDoNamespace
-			? `- fs.readFile(path), fs.writeFile(path, content), fs.readJSON(path), fs.writeJSON(path, data) — persistent virtual filesystem\n` +
-				`- fs.readdir(path), fs.mkdir(path), fs.stat(path), fs.exists(path), fs.rm(path), fs.glob(pattern) — directory operations\n`
-			: "") +
-		(preamble ? `\nDomain-specific helper functions and quirks are documented below.\n` : "") +
-		`\nThe last expression or return value is the result.\n` +
-		(apiSummary ? `\n${apiSummary}\n\n` : "\n") +
-		`STAGING: Large responses (>30KB) are auto-staged into SQLite. When this happens, ` +
-		`gql.query returns {__staged: true, data_access_id, schema, tables_created, total_rows, message}. ` +
-		`Scalar properties from the original response are preserved on the staged object.\n\n` +
-		`When staging occurs:\n` +
-		`1. Check result.__staged === true\n` +
-		`2. Read any preserved scalars (result.count, result.total, etc.)\n` +
-		`3. Return the staging metadata — the caller will use ${prefix}_query_data with the data_access_id to explore the data with SQL\n\n` +
-		`DO NOT try to access .results, .data, .entries, .items on a staged response — those arrays were replaced by SQLite tables.\n\n` +
-		`For advanced use: api.query(data_access_id, sql) and db.queryStaged(data_access_id, sql) are available to query staged data ` +
-		`within the same execution (returns {results, row_count}, max 1000 rows, SELECT only).\n\n` +
-		`SCRATCHPAD: db.stage(data, tableName?) stages any array/object into SQLite and returns {data_access_id, tables_created, total_rows}. ` +
-		`Use this to persist computed or filtered results for SQL queries.\n\n` +
-		`IMPORTANT: Use pagination params (first/after, limit/offset) to keep responses small. If you need large datasets, let them auto-stage and return the staging info.` +
-		(preamble ? `\n\nSERVER NOTES:\n${extractPreambleNotes(preamble)}` : "")
-	);
-}
-
-/** Extract comment lines from a preamble to include in tool description. */
-function extractPreambleNotes(preamble: string): string {
-	return preamble
-		.split("\n")
-		.filter((line) => line.trim().startsWith("//"))
-		.map((line) => line.trim().replace(/^\/\/\s?/, ""))
-		.join("\n");
-}
-
 interface WrapCodeOptions {
 	schemaSource: string;
 	gqlProxySource: string;
+	/** REST capability override (api.get/api.post). Empty string when the server
+	 *  wired no `restApiFetch` — a pure-GraphQL isolate. Injected AFTER the gql
+	 *  proxy so it can reassign the stubs and reuse __wrapStaged. */
+	restProxySource: string;
 	userCode: string;
 	preamble: string | undefined;
 	includeFsProxy: boolean;
@@ -168,10 +141,11 @@ function wrapUserCode(opts: WrapCodeOptions): string {
 	return `async () => {
 ${opts.schemaSource}
 ${opts.gqlProxySource}
+${opts.restProxySource}
 ${fsProxy}
 ${opts.preamble ? `\n// --- Preamble (domain helpers) ---\n${opts.preamble}\n// --- End preamble ---\n` : ""}
-// --- User code ---
-${opts.userCode}
+// --- User code (nested scope so a user const gql/schema/api shadows, not collides — T4.2; see codemode/user-scope.ts) ---
+return await (async () => {\n${opts.userCode}\n})();
 // --- End user code ---
 }`;
 }
@@ -188,25 +162,75 @@ interface ExecutionContext {
 	preamble: string | undefined;
 	includeFsProxy: boolean;
 	gqlProxySource: string;
-	buildExecutorFns: (sessionId: string | undefined, workspace?: string) => ExecutorFns;
+	restProxySource: string;
+	buildExecutorFns: (
+		sessionId: string | undefined,
+		workspace?: string,
+	) => ExecutorFns;
 	cache: {
 		introspection: TrimmedIntrospection | undefined;
 		schemaSource: string | undefined;
 		description: string | undefined;
+		/** Set once when the upstream disables introspection (e.g. NCI PDC's Apollo
+		 *  `introspection: false`) so we don't re-fetch every call and the proxy
+		 *  skips pre-flight (getIntrospection stays undefined → passthrough). */
+		introspectionUnavailable?: boolean;
 	};
 }
 
-/** Ensure introspection is fetched and schema source is built. */
+/** Build the isolate's schema-helper source. Real schema when introspection
+ *  succeeded; an empty one flagged `available:false` when the upstream disables
+ *  introspection (so schema.* exists but reports unavailable). */
+function schemaSourceFor(
+	introspection: TrimmedIntrospection | undefined,
+): string {
+	if (introspection) {
+		return buildGraphqlSchemaSource(JSON.stringify(introspection));
+	}
+	return buildGraphqlSchemaSource(
+		JSON.stringify({ queryType: { name: "Query" }, types: [] }),
+		{
+			available: false,
+			note: "This API disables GraphQL introspection — schema.* discovery is unavailable; write queries directly with gql.query() using field names from its published schema docs.",
+		},
+	);
+}
+
+/** Build the `_execute` tool description — real schema summary, or an
+ *  introspection-unavailable note. */
+function describeFor(
+	ctx: ExecutionContext,
+	introspection: TrimmedIntrospection | undefined,
+): string {
+	const summary = introspection
+		? introspectionToSummary(introspection)
+		: "NOTE: this API disables GraphQL introspection — schema.* discovery is unavailable; use gql.query() with field names from its published schema docs.";
+	return buildGraphqlExecuteDescription(
+		{ ...ctx.options, hasRestApi: !!ctx.options.restApiFetch },
+		summary,
+	);
+}
+
+/** Ensure introspection is fetched and schema source is built.
+ *
+ * If the upstream disables introspection (e.g. NCI PDC's Apollo server), the
+ * fetch throws — degrade to raw passthrough: gql.query() still runs, pre-flight
+ * is skipped (introspection stays undefined so the proxy's getIntrospection
+ * returns undefined), and schema.* reports unavailable. Flagged so we don't
+ * re-attempt the fetch on every call. */
 async function ensureIntrospection(ctx: ExecutionContext): Promise<void> {
-	if (!ctx.cache.introspection) {
-		ctx.cache.introspection = await fetchIntrospection(ctx.gqlFetch);
+	if (!ctx.cache.introspection && !ctx.cache.introspectionUnavailable) {
+		try {
+			ctx.cache.introspection = await fetchIntrospection(ctx.gqlFetch);
+		} catch {
+			ctx.cache.introspectionUnavailable = true;
+		}
 	}
 	if (!ctx.cache.schemaSource) {
-		ctx.cache.schemaSource = buildGraphqlSchemaSource(JSON.stringify(ctx.cache.introspection));
+		ctx.cache.schemaSource = schemaSourceFor(ctx.cache.introspection);
 	}
 	if (!ctx.cache.description) {
-		const summary = introspectionToSummary(ctx.cache.introspection);
-		ctx.cache.description = buildDescription(ctx.options, summary);
+		ctx.cache.description = describeFor(ctx, ctx.cache.introspection);
 	}
 }
 
@@ -222,12 +246,19 @@ async function executeCode(
 	const wrappedCode = wrapUserCode({
 		schemaSource: ctx.cache.schemaSource!,
 		gqlProxySource: ctx.gqlProxySource,
+		restProxySource: ctx.restProxySource,
 		userCode: code,
 		preamble: ctx.preamble,
 		includeFsProxy: ctx.includeFsProxy,
 	});
-	const executor = new DynamicWorkerExecutor({ loader: ctx.loader, timeout: ctx.timeout });
-	const result = await executor.execute(wrappedCode, ctx.buildExecutorFns(sessionId, workspace));
+	const executor = new DynamicWorkerExecutor({
+		loader: ctx.loader,
+		timeout: ctx.timeout,
+	});
+	const result = await executor.execute(
+		wrappedCode,
+		ctx.buildExecutorFns(sessionId, workspace),
+	);
 	return await handleExecutorResult(result, {
 		source: ctx.options.source,
 		server: ctx.options.prefix,
@@ -246,29 +277,59 @@ function createExecutorFnsBuilder(
 	prefix: string,
 	fsDoNamespace: unknown,
 	workspaceNamespace?: unknown,
+	apiProxyTool?: ReturnType<typeof createApiProxyTool>,
 ): (sessionId: string | undefined, workspace?: string) => ExecutorFns {
-	const queryProxyTool = doNamespace ? createQueryProxyTool({ doNamespace, workspaceNamespace }) : undefined;
-	const stageProxyTool = doNamespace ? createStageProxyTool({ doNamespace, stagingPrefix: prefix, workspaceNamespace }) : undefined;
+	const queryProxyTool = doNamespace
+		? createQueryProxyTool({ doNamespace, workspaceNamespace })
+		: undefined;
+	const stageProxyTool = doNamespace
+		? createStageProxyTool({
+				doNamespace,
+				stagingPrefix: prefix,
+				workspaceNamespace,
+			})
+		: undefined;
 	const fsHandlers: ExecutorFns = fsDoNamespace
-		? createFsProxyHandlers({ doNamespace: fsDoNamespace as Parameters<typeof createFsProxyHandlers>[0]["doNamespace"] })
+		? createFsProxyHandlers({
+				doNamespace: fsDoNamespace as Parameters<
+					typeof createFsProxyHandlers
+				>[0]["doNamespace"],
+			})
 		: {};
 
 	return (sessionId: string | undefined, workspace?: string) => {
 		const ctx: ToolContext = { sql: () => [], sessionId, workspace };
 		return {
-			__graphql_proxy: async (args: unknown) => graphqlProxyTool.handler(toInput(args), ctx),
+			__graphql_proxy: async (args: unknown) =>
+				graphqlProxyTool.handler(toInput(args), ctx),
 			__query_proxy: async (args: unknown) => {
 				if (!queryProxyTool) {
-					return { __query_error: true, message: "Staged data querying is not available (no DO namespace configured)" };
+					return {
+						__query_error: true,
+						message:
+							"Staged data querying is not available (no DO namespace configured)",
+					};
 				}
 				return queryProxyTool.handler(toInput(args), ctx);
 			},
 			__stage_proxy: async (args: unknown) => {
 				if (!stageProxyTool) {
-					return { __stage_error: true, message: "Data staging is not available (no DO namespace configured)" };
+					return {
+						__stage_error: true,
+						message:
+							"Data staging is not available (no DO namespace configured)",
+					};
 				}
 				return stageProxyTool.handler(toInput(args), ctx);
 			},
+			// Hybrid GraphQL+REST: when a second REST upstream is wired, the isolate's
+			// reassigned api.get/api.post route here (same DO-SQLite auto-staging).
+			...(apiProxyTool
+				? {
+						__api_proxy: async (args: unknown) =>
+							apiProxyTool.handler(toInput(args), ctx),
+					}
+				: {}),
 			...fsHandlers,
 		};
 	};
@@ -280,13 +341,59 @@ function createExecutorFnsBuilder(
 export function createGraphqlExecuteTool(
 	options: GraphqlExecuteToolOptions,
 ): GraphqlExecuteToolResult {
-	const { prefix, gqlFetch, doNamespace, loader: rawLoader, stagingThreshold, timeout = 30_000, preamble, fsDoNamespace, workspaceNamespace } = options;
+	const {
+		prefix,
+		gqlFetch,
+		doNamespace,
+		loader: rawLoader,
+		stagingThreshold,
+		timeout = 30_000,
+		preamble,
+		fsDoNamespace,
+		workspaceNamespace,
+		restApiFetch,
+	} = options;
 
 	const loader = validateLoader(rawLoader);
 	const toolName = `${prefix}_execute`;
 
-	const graphqlProxyTool = createGraphqlProxyTool({ gqlFetch, doNamespace, stagingPrefix: prefix, stagingThreshold, workspaceNamespace });
-	const buildExecutorFns = createExecutorFnsBuilder(graphqlProxyTool, doNamespace, prefix, fsDoNamespace, workspaceNamespace);
+	// Shared mutable cache — `ensureIntrospection` (run before user code) fills
+	// `cache.introspection`, and the proxy reads it via getIntrospection for the
+	// T1.2 pre-flight. Declared first so both the proxy and ctx close over it.
+	const cache: ExecutionContext["cache"] = {
+		introspection: options.introspection,
+		schemaSource: undefined,
+		description: undefined,
+	};
+
+	const graphqlProxyTool = createGraphqlProxyTool({
+		gqlFetch,
+		doNamespace,
+		stagingPrefix: prefix,
+		stagingThreshold,
+		workspaceNamespace,
+		getIntrospection: () => cache.introspection,
+	});
+	// Hybrid GraphQL+REST: a second REST upstream gets its own __api_proxy host
+	// handler, sharing the same DO namespace + stagingPrefix so Search results
+	// stage into the same SQLite as gql.query and are queryable by `_query_data`.
+	const apiProxyTool = restApiFetch
+		? createApiProxyTool({
+				apiFetch: restApiFetch,
+				doNamespace,
+				stagingPrefix: prefix,
+				stagingThreshold,
+				workspaceNamespace,
+			})
+		: undefined;
+	const buildExecutorFns = createExecutorFnsBuilder(
+		graphqlProxyTool,
+		doNamespace,
+		prefix,
+		fsDoNamespace,
+		workspaceNamespace,
+		apiProxyTool,
+	);
 
 	const ctx: ExecutionContext = {
 		gqlFetch,
@@ -296,153 +403,73 @@ export function createGraphqlExecuteTool(
 		preamble,
 		includeFsProxy: !!fsDoNamespace,
 		gqlProxySource: buildGraphqlProxySource(),
+		restProxySource: restApiFetch ? buildRestApiOverrideSource() : "",
 		buildExecutorFns,
-		cache: { introspection: options.introspection, schemaSource: undefined, description: undefined },
+		cache,
 	};
 
-	const initialDescription = buildDescription(options, "Use schema.queryRoot() to discover available query fields.");
+	// T2.2 — when introspection is available at registration (pre-cached/eager),
+	// the description carries the REAL schema summary (query roots, types, args)
+	// instead of the "use schema.queryRoot()" placeholder, so the author sees the
+	// shape at tools/list without a discovery round-trip.
+	const initialDescription = buildGraphqlExecuteDescription(
+		{ ...options, hasRestApi: !!restApiFetch },
+		cache.introspection
+			? introspectionToSummary(cache.introspection)
+			: "Use schema.queryRoot() to discover available query fields.",
+	);
 
 	return {
 		name: toolName,
 		description: initialDescription,
 		schema: {
-			code: z.string().describe(
-				"JavaScript code to execute. Use gql.query() for GraphQL queries and schema.* for discovery. " +
-				"The last expression or explicit return value becomes the result. " +
-				'Example: const r = await gql.query(\'{ target(q: { sym: "EGFR" }) { name tdl } }\'); return r;',
-			),
-			workspace: z.string().optional().describe(
-				"Shared workspace id — stage into a cross-server workspace DO so other servers' datasets can be JOINed in one query. Omit for per-server staging.",
-			),
+			code: z
+				.string()
+				.describe(
+					"JavaScript code to execute. Use gql.query() for GraphQL queries and schema.* for discovery. " +
+						"The last expression or explicit return value becomes the result. " +
+						"Example: const r = await gql.query('{ target(q: { sym: \"EGFR\" }) { name tdl } }'); return r;",
+				),
+			workspace: z
+				.string()
+				.optional()
+				.describe(
+					"Shared workspace id — stage into a cross-server workspace DO so other servers' datasets can be JOINed in one query. Omit for per-server staging.",
+				),
 		},
 
 		register(server: { tool: (...args: unknown[]) => void }) {
-			server.tool(toolName, this.description, this.schema, async (input: { code: string; workspace?: string }, extra: unknown) => {
-				const code = input.code?.trim();
-				if (!code) {
-					return createCodeModeError(ErrorCodes.INVALID_ARGUMENTS, "code is required");
-				}
-				try {
-					const scope = getRequestScope(extra as MaybeExtra | undefined);
-					return await executeCode(ctx, code, scope, input.workspace);
-				} catch (err) {
-					const message = err instanceof Error ? err.message : String(err);
-					return createCodeModeError(ErrorCodes.UNKNOWN_ERROR, `${prefix}_execute failed: ${message}`);
-				}
+			server.tool(
+				toolName,
+				this.description,
+				this.schema,
+				async (input: { code: string; workspace?: string }, extra: unknown) => {
+					const code = input.code?.trim();
+					if (!code) {
+						return createCodeModeError(
+							ErrorCodes.INVALID_ARGUMENTS,
+							"code is required",
+						);
+					}
+					try {
+						const scope = getRequestScope(extra as MaybeExtra | undefined);
+						return await executeCode(ctx, code, scope, input.workspace);
+					} catch (err) {
+						const message = err instanceof Error ? err.message : String(err);
+						return createCodeModeError(
+							ErrorCodes.UNKNOWN_ERROR,
+							`${prefix}_execute failed: ${message}`,
+						);
+					}
+				},
+			);
+			// Sibling discovery tool (#3): shares the lazy introspection cache.
+			registerGraphqlSearchTool(server, {
+				prefix,
+				apiName: options.apiName ?? prefix,
+				gqlFetch,
+				cache,
 			});
 		},
 	};
-}
-
-// ---------------------------------------------------------------------------
-// Result handling (shared with REST execute-tool pattern)
-// ---------------------------------------------------------------------------
-
-/** Provenance context threaded from the factory options into result handling. */
-interface CitationCtx {
-	source?: SourceDescriptor;
-	server: string;
-	tool: string;
-	query: unknown;
-}
-
-/** Records returned, for the citation: staged total_rows, else array length. */
-function countRecords(data: unknown, totalRows: unknown): number | undefined {
-	if (typeof totalRows === "number") return totalRows;
-	if (Array.isArray(data)) return data.length;
-	return undefined;
-}
-
-/** Build the optional `citation` meta when the server declared a source. */
-async function buildCitationMeta(
-	prov: CitationCtx | undefined,
-	data: unknown,
-	recordCount: number | undefined,
-	dataAccessId: string | undefined,
-	retrievedAt: string,
-): Promise<{ citation?: Citation }> {
-	if (!prov?.source) return {};
-	const citation = await buildCitation({
-		source: prov.source,
-		server: prov.server,
-		tool: prov.tool,
-		query: prov.query,
-		result: data,
-		retrievedAt,
-		recordCount,
-		dataAccessId,
-	});
-	return { citation };
-}
-
-async function handleExecutorResult(
-	result: { result?: unknown; error?: string; logs?: string[]; __stagedResults?: Array<Record<string, unknown>> },
-	prov?: CitationCtx,
-) {
-	const retrievedAt = new Date().toISOString();
-
-	if (result.error) {
-		// Recover staging metadata if the error was from accessing staged arrays
-		if (result.__stagedResults?.length) {
-			const staged = result.__stagedResults[result.__stagedResults.length - 1];
-			const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-			const { schema: _s, _staging: _st, ...slim } = staged;
-			const cite = await buildCitationMeta(prov, slim, staged.total_rows as number | undefined, staged.data_access_id as string | undefined, retrievedAt);
-			return createCodeModeResponse(slim, {
-				meta: {
-					staged: true,
-					data_access_id: staged.data_access_id as string,
-					tables_created: staged.tables_created,
-					total_rows: staged.total_rows,
-					...cite,
-					...(logOutput ? { console_output: logOutput } : {}),
-					executed_at: retrievedAt,
-				},
-			});
-		}
-
-		const logOutput = result.logs?.length
-			? `\n\nConsole output:\n${result.logs.join("\n")}`
-			: "";
-		return createCodeModeError(ErrorCodes.API_ERROR, `${result.error}${logOutput}`);
-	}
-
-	const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-	const raw = result.result;
-
-	// Detect staging metadata in the result
-	const isStaged = raw !== null && typeof raw === "object" && !Array.isArray(raw)
-		&& "__staged" in raw && (raw as { __staged: unknown }).__staged === true;
-
-	let responseData: unknown = raw;
-	const stagingMeta: Record<string, unknown> = {};
-
-	if (isStaged) {
-		const resultObj: Record<string, unknown> = { ...raw as object };
-		stagingMeta.staged = true;
-		stagingMeta.data_access_id = resultObj.data_access_id;
-		stagingMeta.tables_created = resultObj.tables_created;
-		stagingMeta.total_rows = resultObj.total_rows;
-
-		// Strip large fields available via get_schema tool
-		const { schema: _s, _staging: _st, ...slim } = resultObj;
-		responseData = slim;
-	}
-
-	const cite = await buildCitationMeta(
-		prov,
-		responseData,
-		countRecords(responseData, stagingMeta.total_rows),
-		stagingMeta.data_access_id as string | undefined,
-		retrievedAt,
-	);
-
-	return createCodeModeResponse(responseData, {
-		meta: {
-			...stagingMeta,
-			...cite,
-			...(logOutput ? { console_output: logOutput } : {}),
-			executed_at: retrievedAt,
-		},
-	});
 }

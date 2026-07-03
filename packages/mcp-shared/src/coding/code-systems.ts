@@ -48,13 +48,15 @@ export const CLINICAL_SYSTEMS = {
 		name: "SNOMED CT",
 		description: "Clinical terminology for diagnoses, findings, procedures",
 		homepage: "https://www.snomed.org",
-		license: "Affiliate license required; Global Patient Set available CC-BY 4.0",
+		license:
+			"Affiliate license required; Global Patient Set available CC-BY 4.0",
 	},
 	icd10cm: {
 		uri: "http://hl7.org/fhir/sid/icd-10-cm",
 		id: "icd10cm",
 		name: "ICD-10-CM",
-		description: "International Classification of Diseases, Clinical Modification (US)",
+		description:
+			"International Classification of Diseases, Clinical Modification (US)",
 		homepage: "https://www.cdc.gov/nchs/icd/icd10cm.htm",
 		license: "Public domain (US Government)",
 	},
@@ -111,7 +113,8 @@ export const CLINICAL_SYSTEMS = {
 		id: "ndc",
 		name: "NDC",
 		description: "National Drug Code (FDA)",
-		homepage: "https://www.fda.gov/drugs/drug-approvals-and-databases/national-drug-code-directory",
+		homepage:
+			"https://www.fda.gov/drugs/drug-approvals-and-databases/national-drug-code-directory",
 		license: "Public domain (US Government)",
 	},
 	ucum: {
@@ -269,18 +272,25 @@ export const BIOMEDICAL_SYSTEMS = {
 } as const satisfies Record<string, CodeSystemDescriptor>;
 
 /** All known systems flattened by URI for runtime lookup. */
-export const SYSTEMS_BY_URI: Readonly<Record<string, CodeSystemDescriptor>> = (() => {
-	const out: Record<string, CodeSystemDescriptor> = {};
-	for (const group of [CLINICAL_SYSTEMS, FHIR_INFRA_SYSTEMS, BIOMEDICAL_SYSTEMS]) {
-		for (const desc of Object.values(group)) {
-			out[desc.uri] = desc;
+export const SYSTEMS_BY_URI: Readonly<Record<string, CodeSystemDescriptor>> =
+	(() => {
+		const out: Record<string, CodeSystemDescriptor> = {};
+		for (const group of [
+			CLINICAL_SYSTEMS,
+			FHIR_INFRA_SYSTEMS,
+			BIOMEDICAL_SYSTEMS,
+		]) {
+			for (const desc of Object.values(group)) {
+				out[desc.uri] = desc;
+			}
 		}
-	}
-	return Object.freeze(out);
-})();
+		return Object.freeze(out);
+	})();
 
 /** Lookup a system descriptor by its canonical URI, returning undefined if unknown. */
-export function getSystemDescriptor(uri: string): CodeSystemDescriptor | undefined {
+export function getSystemDescriptor(
+	uri: string,
+): CodeSystemDescriptor | undefined {
 	return SYSTEMS_BY_URI[uri];
 }
 

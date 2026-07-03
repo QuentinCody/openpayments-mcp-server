@@ -1,6 +1,6 @@
-import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ToolEntry, ToolContext } from "./types";
+import { z } from "zod";
+import type { ToolContext, ToolEntry } from "./types";
 
 /**
  * Tool definition shape for type generation (avoids hard dep on @cloudflare/codemode).
@@ -49,7 +49,13 @@ export class ToolRegistry {
 				try {
 					const result = await tool.handler(input, ctx);
 					return {
-						content: [{ type: "text", text: result === undefined ? "undefined" : JSON.stringify(result) }],
+						content: [
+							{
+								type: "text",
+								text:
+									result === undefined ? "undefined" : JSON.stringify(result),
+							},
+						],
 					};
 				} catch (e: unknown) {
 					const error = e instanceof Error ? e.message : String(e);
@@ -65,7 +71,10 @@ export class ToolRegistry {
 	/**
 	 * Handle a tool call from a V8 isolate (via CodeModeProxy → DO RPC).
 	 */
-	async handleIsolateCall(functionName: string, args: unknown[]): Promise<unknown> {
+	async handleIsolateCall(
+		functionName: string,
+		args: unknown[],
+	): Promise<unknown> {
 		const tool = this.toolByName.get(functionName);
 		if (!tool) {
 			return { error: `Unknown tool: ${functionName}` };
@@ -78,7 +87,9 @@ export class ToolRegistry {
 	 * Build a function map of ALL tools (including hidden) for the DynamicWorkerExecutor.
 	 * Each function takes a single args object and returns the handler result.
 	 */
-	buildExecutorFns(ctx: ToolContext): Record<string, (args: unknown) => Promise<unknown>> {
+	buildExecutorFns(
+		ctx: ToolContext,
+	): Record<string, (args: unknown) => Promise<unknown>> {
 		const fns: Record<string, (args: unknown) => Promise<unknown>> = {};
 		for (const tool of this.tools) {
 			const t = tool;
@@ -95,8 +106,14 @@ export class ToolRegistry {
 	 * Wraps the shape Record<string, ZodType> into z.object() since
 	 * generateTypes expects inputSchema to be a ZodType.
 	 */
-	toToolDescriptors(): Record<string, { description: string; inputSchema: z.ZodType }> {
-		const descriptors: Record<string, { description: string; inputSchema: z.ZodType }> = {};
+	toToolDescriptors(): Record<
+		string,
+		{ description: string; inputSchema: z.ZodType }
+	> {
+		const descriptors: Record<
+			string,
+			{ description: string; inputSchema: z.ZodType }
+		> = {};
 		for (const tool of this.tools) {
 			if (tool.hidden) continue;
 			descriptors[tool.name] = {

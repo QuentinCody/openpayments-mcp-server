@@ -24,15 +24,22 @@ describe("mergeSchemaHints", () => {
 		expect(merged?.tableName).toBe("c");
 		expect(merged?.maxRecursionDepth).toBe(5);
 
-		const fallback = mergeSchemaHints(sh({ tableName: "s", maxRecursionDepth: 3 }), sh({ indexes: ["x"] }));
+		const fallback = mergeSchemaHints(
+			sh({ tableName: "s", maxRecursionDepth: 3 }),
+			sh({ indexes: ["x"] }),
+		);
 		expect(fallback?.tableName).toBe("s");
 		expect(fallback?.maxRecursionDepth).toBe(3);
 	});
 
 	it("merges record hints with the client overriding per key", () => {
 		const merged = mergeSchemaHints(
-			sh({ columnTypes: { a: "TEXT", b: "INTEGER" } as SchemaHints["columnTypes"] }),
-			sh({ columnTypes: { b: "REAL", c: "TEXT" } as SchemaHints["columnTypes"] }),
+			sh({
+				columnTypes: { a: "TEXT", b: "INTEGER" } as SchemaHints["columnTypes"],
+			}),
+			sh({
+				columnTypes: { b: "REAL", c: "TEXT" } as SchemaHints["columnTypes"],
+			}),
 		);
 		expect(merged?.columnTypes).toEqual({ a: "TEXT", b: "REAL", c: "TEXT" });
 	});
@@ -47,7 +54,10 @@ describe("mergeSchemaHints", () => {
 	});
 
 	it("leaves a field undefined when neither side sets it", () => {
-		const merged = mergeSchemaHints(sh({ tableName: "s" }), sh({ tableName: "c" }));
+		const merged = mergeSchemaHints(
+			sh({ tableName: "s" }),
+			sh({ tableName: "c" }),
+		);
 		expect(merged?.indexes).toBeUndefined();
 		expect(merged?.columnTypes).toBeUndefined();
 	});
@@ -63,7 +73,9 @@ describe("mergeSchemaHints", () => {
 
 describe("deduplicateCompositeIndexes", () => {
 	it("removes duplicate column lists, preserving first-occurrence order", () => {
-		expect(deduplicateCompositeIndexes([["a", "b"], ["c"], ["a", "b"]])).toEqual([["a", "b"], ["c"]]);
+		expect(
+			deduplicateCompositeIndexes([["a", "b"], ["c"], ["a", "b"]]),
+		).toEqual([["a", "b"], ["c"]]);
 	});
 	it("returns an empty array unchanged", () => {
 		expect(deduplicateCompositeIndexes([])).toEqual([]);

@@ -33,7 +33,11 @@ interface ZodLike {
 type ZodDef = Record<string, unknown>;
 
 function isZodSchema(val: unknown): val is ZodLike {
-	return val !== null && typeof val === "object" && "_zod" in (val as Record<string, unknown>);
+	return (
+		val !== null &&
+		typeof val === "object" &&
+		"_zod" in (val as Record<string, unknown>)
+	);
 }
 
 /** Inner schema of a single-wrapper Zod type (optional/nullable/promise/…). */
@@ -48,14 +52,17 @@ function innerTypeOf(def: ZodDef): unknown {
 function zodDescription(val: unknown): string | undefined {
 	if (!isZodSchema(val)) return undefined;
 	const description = (val as { description?: unknown }).description;
-	return typeof description === "string" && description.length > 0 ? description : undefined;
+	return typeof description === "string" && description.length > 0
+		? description
+		: undefined;
 }
 
 /** Whether an object field schema is optional (so its key gets a trailing `?`). */
 function isOptionalField(val: unknown): boolean {
 	return (
 		isZodSchema(val) &&
-		(val._zod.def.type === "optional" || (val._zod as { optin?: string }).optin === "optional")
+		(val._zod.def.type === "optional" ||
+			(val._zod as { optin?: string }).optin === "optional")
 	);
 }
 
@@ -77,11 +84,18 @@ const PRIMITIVE_TS: Record<string, string> = {
 };
 
 /** Single-wrapper kinds that render as their inner type, unchanged. */
-const UNWRAP_KINDS = new Set(["pipe", "transform", "default", "catch", "readonly"]);
+const UNWRAP_KINDS = new Set([
+	"pipe",
+	"transform",
+	"default",
+	"catch",
+	"readonly",
+]);
 
 function renderLiteralValue(value: unknown): string {
 	if (typeof value === "string") return `"${value}"`;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (typeof value === "number" || typeof value === "boolean")
+		return String(value);
 	if (value === null) return "null";
 	return "any";
 }
@@ -92,7 +106,8 @@ function literalToTypeString(def: ZodDef): string {
 	if (Array.isArray(values) && values.length > 0) {
 		return values.map(renderLiteralValue).join(" | ");
 	}
-	if ("value" in def) return renderLiteralValue((def as { value?: unknown }).value);
+	if ("value" in def)
+		return renderLiteralValue((def as { value?: unknown }).value);
 	return "any";
 }
 
@@ -113,7 +128,9 @@ function arrayToTypeString(def: ZodDef): string {
 
 function unionToTypeString(def: ZodDef): string {
 	const options = (def as { options?: unknown[] }).options;
-	return Array.isArray(options) ? options.map(zodToTypeString).join(" | ") : "any";
+	return Array.isArray(options)
+		? options.map(zodToTypeString).join(" | ")
+		: "any";
 }
 
 function recordToTypeString(def: ZodDef): string {
@@ -122,7 +139,9 @@ function recordToTypeString(def: ZodDef): string {
 
 function tupleToTypeString(def: ZodDef): string {
 	const items = (def as { items?: unknown[] }).items;
-	return Array.isArray(items) ? `[${items.map(zodToTypeString).join(", ")}]` : "any[]";
+	return Array.isArray(items)
+		? `[${items.map(zodToTypeString).join(", ")}]`
+		: "any[]";
 }
 
 function optionalToTypeString(def: ZodDef): string {

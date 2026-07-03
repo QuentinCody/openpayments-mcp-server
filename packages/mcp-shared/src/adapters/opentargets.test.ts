@@ -4,7 +4,9 @@ import { opentargetsGraphql } from "./opentargets.js";
 describe("opentargets adapter", () => {
 	it("posts a GraphQL query and returns the response data", async () => {
 		const f: typeof fetch = async () =>
-			new Response(JSON.stringify({ data: { search: { total: 1 } } }), { status: 200 });
+			new Response(JSON.stringify({ data: { search: { total: 1 } } }), {
+				status: 200,
+			});
 		const result = await opentargetsGraphql<{ search: { total: number } }>(
 			"query Q { search { total } }",
 			{},

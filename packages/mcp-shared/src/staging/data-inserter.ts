@@ -11,12 +11,9 @@
  *     should already have created columns for them (as _json or flattened).
  */
 
+import { inferEntityType, isEntity } from "./entity-discovery";
+import { findOriginalKey, isValidId } from "./normalizer";
 import type { DomainConfig, SqlExec, TableSchema } from "./types";
-import { isEntity, inferEntityType } from "./entity-discovery";
-import {
-	findOriginalKey,
-	isValidId,
-} from "./normalizer";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -222,9 +219,7 @@ function insertEntityRecord(
 				...values,
 			);
 			try {
-				const idRow = sql
-					.exec(`SELECT last_insert_rowid() as lid`)
-					.toArray();
+				const idRow = sql.exec(`SELECT last_insert_rowid() as lid`).toArray();
 				insertedId = (idRow[0]?.lid as number) ?? null;
 			} catch {
 				insertedId = null;
@@ -256,7 +251,9 @@ type ColumnResolution = { value: unknown } | "skip-column" | null;
 
 /** Auto-increment integer PKs are assigned by SQLite, never mapped from data. */
 function isAutoIncrementPk(columnName: string, schema: TableSchema): boolean {
-	return columnName === "id" && schema.columns[columnName].includes("AUTOINCREMENT");
+	return (
+		columnName === "id" && schema.columns[columnName].includes("AUTOINCREMENT")
+	);
 }
 
 /** Strategy 1: a `<base>_json` column gets the JSON-stringified `<base>` object. */
@@ -295,7 +292,12 @@ function resolveDirectColumn(
 	if (Array.isArray(value) && value.length > 0 && isEntity(value[0], config)) {
 		return "skip-column";
 	}
-	if (value && typeof value === "object" && !Array.isArray(value) && isEntity(value, config)) {
+	if (
+		value &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		isEntity(value, config)
+	) {
 		return null;
 	}
 	return { value };
@@ -311,7 +313,11 @@ function resolveForeignKey(
 ): ColumnResolution {
 	if (!columnName.endsWith("_id")) return null;
 	const originalKey = findOriginalKey(record, columnName.slice(0, -3), config);
-	if (!originalKey || !record[originalKey] || typeof record[originalKey] !== "object") {
+	if (
+		!originalKey ||
+		!record[originalKey] ||
+		typeof record[originalKey] !== "object"
+	) {
 		return null;
 	}
 	const nestedEntity = record[originalKey];
@@ -332,7 +338,11 @@ function resolveNestedField(
 	record: Record<string, unknown>,
 	config?: DomainConfig,
 ): ColumnResolution {
-	if (!columnName.includes("_") || columnName.endsWith("_json") || columnName.endsWith("_id")) {
+	if (
+		!columnName.includes("_") ||
+		columnName.endsWith("_json") ||
+		columnName.endsWith("_id")
+	) {
 		return null;
 	}
 	const parts = columnName.split("_");
@@ -386,18 +396,18 @@ export function mapEntityToSchema(
 		if (schema.columns.value) rowData.value = obj;
 		return rowData;
 	}
-
 	for (const columnName of Object.keys(schema.columns)) {
 		if (isAutoIncrementPk(columnName, schema)) continue;
-
 		const resolution = resolveColumn(columnName, record, state, config);
 		if (resolution === "skip-column" || resolution === null) continue;
-
 		if (resolution.value !== null && resolution.value !== undefined) {
 			rowData[columnName] = resolution.value;
 		}
 	}
-
+	// T5.1/T5.3 column-cap spillover: keep the full record so no field is lost.
+	if (schema.columns._overflow_json) {
+		rowData._overflow_json = JSON.stringify(record);
+	}
 	return rowData;
 }
 

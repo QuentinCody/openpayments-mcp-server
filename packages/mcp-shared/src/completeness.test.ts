@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	asCount,
-	inferUpstreamTotal,
-	paginationCompleteness,
 	deriveMaterializationCompleteness,
+	detectOverMatch,
+	inferUpstreamTotal,
 	mergeCompleteness,
+	paginationCompleteness,
 } from "./completeness";
 
 describe("asCount", () => {
@@ -68,11 +69,15 @@ describe("inferUpstreamTotal", () => {
 
 	it("reads Solr numFound and Elasticsearch hits.total", () => {
 		expect(inferUpstreamTotal({ response: { numFound: 9 } })).toBe(9);
-		expect(inferUpstreamTotal({ hits: { total: { value: 12, relation: "eq" } } })).toBe(12);
+		expect(
+			inferUpstreamTotal({ hits: { total: { value: 12, relation: "eq" } } }),
+		).toBe(12);
 	});
 
 	it("falls back to a bare root count (DRF-style list)", () => {
-		expect(inferUpstreamTotal({ count: 137, next: "http://x?page=2", results: [] })).toBe(137);
+		expect(
+			inferUpstreamTotal({ count: 137, next: "http://x?page=2", results: [] }),
+		).toBe(137);
 	});
 
 	it("prefers an explicit total_count over an ambiguous count", () => {
@@ -81,11 +86,15 @@ describe("inferUpstreamTotal", () => {
 
 	it("ignores a container key whose value is an array (not a metadata object)", () => {
 		// `hits` here is an array of results, not an ES {total} object → no false match
-		expect(inferUpstreamTotal({ hits: [{ id: 1 }, { id: 2 }] })).toBeUndefined();
+		expect(
+			inferUpstreamTotal({ hits: [{ id: 1 }, { id: 2 }] }),
+		).toBeUndefined();
 	});
 
 	it("returns undefined when no recognizable total field is present", () => {
-		expect(inferUpstreamTotal({ results: [{ a: 1 }], foo: "bar" })).toBeUndefined();
+		expect(
+			inferUpstreamTotal({ results: [{ a: 1 }], foo: "bar" }),
+		).toBeUndefined();
 	});
 });
 
@@ -97,26 +106,47 @@ describe("paginationCompleteness", () => {
 
 	it("flags incompleteness when upstream total exceeds retrieved", () => {
 		const c = paginationCompleteness(50000, 50);
-		expect(c).toMatchObject({ complete: false, total_available: 50000, returned: 50 });
+		expect(c).toMatchObject({
+			complete: false,
+			total_available: 50000,
+			returned: 50,
+		});
 		expect(c?.truncation?.reason).toBe("page_limit");
 		expect(c?.truncation?.detail).toContain("50000");
 		expect(c?.truncation?.remedy).toContain("getAll");
 	});
 
 	it("reports complete when retrieved meets or exceeds the total", () => {
-		expect(paginationCompleteness(50, 50)).toEqual({ complete: true, total_available: 50, returned: 50 });
-		expect(paginationCompleteness(50, 60)).toEqual({ complete: true, total_available: 50, returned: 60 });
+		expect(paginationCompleteness(50, 50)).toEqual({
+			complete: true,
+			total_available: 50,
+			returned: 50,
+		});
+		expect(paginationCompleteness(50, 60)).toEqual({
+			complete: true,
+			total_available: 50,
+			returned: 60,
+		});
 	});
 });
 
 describe("deriveMaterializationCompleteness", () => {
 	it("is complete when no rows failed", () => {
-		expect(deriveMaterializationCompleteness({ inputRows: 100, failedRows: 0, returned: 100 })).toEqual({
+		expect(
+			deriveMaterializationCompleteness({
+				inputRows: 100,
+				failedRows: 0,
+				returned: 100,
+			}),
+		).toEqual({
 			complete: true,
 			returned: 100,
 		});
 		// failedRows undefined → treated as no failure
-		expect(deriveMaterializationCompleteness({ returned: 5 })).toEqual({ complete: true, returned: 5 });
+		expect(deriveMaterializationCompleteness({ returned: 5 })).toEqual({
+			complete: true,
+			returned: 5,
+		});
 	});
 
 	it("is incomplete when rows were dropped, using the provided warning", () => {
@@ -129,11 +159,16 @@ describe("deriveMaterializationCompleteness", () => {
 		expect(c.complete).toBe(false);
 		expect(c.returned).toBe(88);
 		expect(c.truncation?.reason).toBe("insertion_failure");
-		expect(c.truncation?.detail).toBe("12 of 100 rows (12.0%) failed to stage.");
+		expect(c.truncation?.detail).toBe(
+			"12 of 100 rows (12.0%) failed to stage.",
+		);
 	});
 
 	it("synthesizes a detail when no warning string is supplied", () => {
-		const withInput = deriveMaterializationCompleteness({ inputRows: 30, failedRows: 3 });
+		const withInput = deriveMaterializationCompleteness({
+			inputRows: 30,
+			failedRows: 3,
+		});
 		expect(withInput.truncation?.detail).toContain("3 of 30");
 		const withoutInput = deriveMaterializationCompleteness({ failedRows: 3 });
 		expect(withoutInput.truncation?.detail).toContain("3 row");
@@ -147,7 +182,9 @@ describe("mergeCompleteness", () => {
 	});
 
 	it("is complete only when every defined part is complete", () => {
-		expect(mergeCompleteness({ complete: true, returned: 5 }, undefined)).toEqual({
+		expect(
+			mergeCompleteness({ complete: true, returned: 5 }, undefined),
+		).toEqual({
 			complete: true,
 			returned: 5,
 		});
@@ -175,11 +212,54 @@ describe("mergeCompleteness", () => {
 	it("an incomplete part makes the whole incomplete even if another is complete", () => {
 		const merged = mergeCompleteness(
 			{ complete: true, total_available: 50, returned: 50 },
-			{ complete: false, returned: 50, truncation: { reason: "insertion_failure" } },
+			{
+				complete: false,
+				returned: 50,
+				truncation: { reason: "insertion_failure" },
+			},
 		);
 		expect(merged?.complete).toBe(false);
 		expect(merged?.truncation?.reason).toBe("insertion_failure");
 		// total_available picked from the first part that defines it
 		expect(merged?.total_available).toBe(50);
+	});
+});
+
+describe("detectOverMatch (Finding #2 / T1.3)", () => {
+	it("flags the NIH RePORTER no-op text filter (huge total, sorting off)", () => {
+		const warn = detectOverMatch({
+			meta: { total: 2_944_145, sorted_by_relevance: false, sort_field: null },
+			results: [{ project: 1 }],
+		});
+		expect(warn?.warning).toBe("filter_may_not_have_applied");
+		expect(warn?.total).toBe(2_944_145);
+		expect(warn?.detail).toContain("advanced_text_search");
+	});
+
+	it("reads meta from a `data` wrapper too", () => {
+		const warn = detectOverMatch({
+			data: { meta: { total: 500_000, sort_field: null } },
+		});
+		expect(warn?.warning).toBe("filter_may_not_have_applied");
+	});
+
+	it("does NOT flag a normal small result", () => {
+		expect(
+			detectOverMatch({ meta: { total: 42, sorted_by_relevance: false } }),
+		).toBeUndefined();
+	});
+
+	it("does NOT flag a large total that IS relevance-ranked", () => {
+		expect(
+			detectOverMatch({
+				meta: { total: 9_000_000, sorted_by_relevance: true },
+			}),
+		).toBeUndefined();
+	});
+
+	it("returns undefined for non-objects / missing meta", () => {
+		expect(detectOverMatch(null)).toBeUndefined();
+		expect(detectOverMatch([1, 2])).toBeUndefined();
+		expect(detectOverMatch({ results: [] })).toBeUndefined();
 	});
 });

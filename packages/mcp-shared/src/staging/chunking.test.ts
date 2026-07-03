@@ -4,11 +4,19 @@ import { ChunkingEngine, type SqlExec } from "./chunking";
 // Stateful SQL fake: records content_chunks inserts, replays them on the
 // ordered SELECT. CREATE/INDEX/metadata statements are no-ops.
 const makeSql = () => {
-	const chunks: Array<{ content_id: string; chunk_index: number; chunk_data: string }> = [];
+	const chunks: Array<{
+		content_id: string;
+		chunk_index: number;
+		chunk_data: string;
+	}> = [];
 	const sql: SqlExec = {
 		exec: (query: string, ...b: unknown[]) => {
 			if (query.includes("INSERT INTO content_chunks")) {
-				chunks.push({ content_id: b[0] as string, chunk_index: b[1] as number, chunk_data: b[2] as string });
+				chunks.push({
+					content_id: b[0] as string,
+					chunk_index: b[1] as number,
+					chunk_data: b[2] as string,
+				});
 			}
 			return {
 				toArray: () => {
@@ -78,21 +86,25 @@ describe("smartJsonStringify / smartJsonParse", () => {
 
 	it("throws on malformed non-reference JSON", async () => {
 		const { sql } = makeSql();
-		await expect(engine().smartJsonParse("not json{", sql)).rejects.toThrow(/Failed to parse JSON value/);
+		await expect(engine().smartJsonParse("not json{", sql)).rejects.toThrow(
+			/Failed to parse JSON value/,
+		);
 	});
 
 	it("throws when a referenced content id is missing", async () => {
 		const { sql } = makeSql();
-		await expect(engine().smartJsonParse("__CHUNKED__:nope", sql)).rejects.toThrow(/Missing chunked content nope/);
+		await expect(
+			engine().smartJsonParse("__CHUNKED__:nope", sql),
+		).rejects.toThrow(/Missing chunked content nope/);
 	});
 
 	it("throws when stored chunked content is not valid JSON", async () => {
 		const { sql } = makeSql();
 		const e = engine();
 		const meta = await e.storeChunkedContent("not json {", "text", sql);
-		await expect(e.smartJsonParse(e.createContentReference(meta), sql)).rejects.toThrow(
-			/Failed to parse stored chunked content/,
-		);
+		await expect(
+			e.smartJsonParse(e.createContentReference(meta), sql),
+		).rejects.toThrow(/Failed to parse stored chunked content/);
 	});
 });
 
@@ -102,7 +114,11 @@ describe("storeChunkedContent / retrieveChunkedContent", () => {
 		const e = engine();
 		const content = "y".repeat(40 * 1024);
 		const meta = await e.storeChunkedContent(content, "json", sql);
-		expect(meta).toMatchObject({ contentType: "json", originalSize: content.length, compressed: false });
+		expect(meta).toMatchObject({
+			contentType: "json",
+			originalSize: content.length,
+			compressed: false,
+		});
 		expect(meta.totalChunks).toBeGreaterThan(1);
 		expect(meta.contentId).toMatch(/^chunk_/);
 		expect(await e.retrieveChunkedContent(meta.contentId, sql)).toBe(content);

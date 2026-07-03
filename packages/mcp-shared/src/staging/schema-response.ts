@@ -25,7 +25,9 @@ export interface ColumnMetaEntry {
 }
 
 /** Index inferred-schema columns carrying json_shape / pipe-delimited hints, keyed `table.column`. */
-export function buildColumnMeta(inferredSchema: InferredSchema | undefined): Map<string, ColumnMetaEntry> {
+export function buildColumnMeta(
+	inferredSchema: InferredSchema | undefined,
+): Map<string, ColumnMetaEntry> {
 	const columnMeta = new Map<string, ColumnMetaEntry>();
 	if (!inferredSchema) return columnMeta;
 	for (const table of inferredSchema.tables) {
@@ -48,7 +50,10 @@ export function buildProfileByTable(
 	const profileByTable = new Map<string, Record<string, unknown>>();
 	if (!columnProfiles) return profileByTable;
 	for (const tp of columnProfiles) {
-		profileByTable.set(tp.table, tp.columns as unknown as Record<string, unknown>);
+		profileByTable.set(
+			tp.table,
+			tp.columns as unknown as Record<string, unknown>,
+		);
 	}
 	return profileByTable;
 }
@@ -72,7 +77,9 @@ export function buildColumnDescriptor(
 ): ColumnDescriptor {
 	const colName = rawCol.name as string;
 	const meta = columnMeta.get(`${tableName}.${colName}`);
-	const tableProfiles = profileByTable.get(tableName) as Record<string, Record<string, unknown>> | undefined;
+	const tableProfiles = profileByTable.get(tableName) as
+		| Record<string, Record<string, unknown>>
+		| undefined;
 	const colProfile = tableProfiles?.[colName];
 	return {
 		name: colName,
@@ -96,8 +103,11 @@ export function buildRelationshipJoins(
 ): RelationshipWithJoin[] {
 	return relationships.map((rel) => {
 		// Parent PK is _rowid when the parent carries its own data "id" column, else "id".
-		const parentTable = inferredSchema?.tables.find((t) => t.name === rel.parent_table);
-		const parentHasDataId = parentTable?.columns.some((c) => c.name === "id") ?? false;
+		const parentTable = inferredSchema?.tables.find(
+			(t) => t.name === rel.parent_table,
+		);
+		const parentHasDataId =
+			parentTable?.columns.some((c) => c.name === "id") ?? false;
 		const parentKeyCol = parentHasDataId ? "_rowid" : "id";
 		return {
 			...rel,
@@ -107,7 +117,9 @@ export function buildRelationshipJoins(
 }
 
 /** Normalize a raw _staging_metadata row into a typed ProvenanceRow (string/number fields only). */
-export function normalizeProvenance(rawRow: Record<string, unknown> | undefined): ProvenanceRow | undefined {
+export function normalizeProvenance(
+	rawRow: Record<string, unknown> | undefined,
+): ProvenanceRow | undefined {
 	if (rawRow === undefined) return undefined;
 	const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 	const num = (v: unknown): number | null => (typeof v === "number" ? v : null);

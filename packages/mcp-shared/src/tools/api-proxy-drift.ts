@@ -51,7 +51,9 @@ const HTTP_METHODS = new Set([
 ]);
 
 function uniqueStrings(values: Array<string | undefined>): string[] {
-	return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+	return Array.from(
+		new Set(values.filter((value): value is string => Boolean(value))),
+	);
 }
 
 function extractCatalogEndpoints(catalog?: ApiCatalog): KnownEndpoint[] {
@@ -85,7 +87,7 @@ function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
 	for (const [path, pathItem] of Object.entries(spec.paths)) {
 		if (!isRecord(pathItem)) continue;
 		const pathParams: SpecParameter[] = Array.isArray(pathItem.parameters)
-			? pathItem.parameters.filter(isRecord) as SpecParameter[]
+			? (pathItem.parameters.filter(isRecord) as SpecParameter[])
 			: [];
 
 		for (const [method, operation] of Object.entries(pathItem)) {
@@ -93,8 +95,10 @@ function extractSpecEndpoints(spec?: ResolvedSpec): KnownEndpoint[] {
 				continue;
 			}
 
-			const operationParams: SpecParameter[] = Array.isArray(operation.parameters)
-				? operation.parameters.filter(isRecord) as SpecParameter[]
+			const operationParams: SpecParameter[] = Array.isArray(
+				operation.parameters,
+			)
+				? (operation.parameters.filter(isRecord) as SpecParameter[])
 				: [];
 			const mergedParams = [...pathParams, ...operationParams];
 
@@ -122,7 +126,10 @@ export function buildKnownEndpointIndex(
 ): KnownEndpoint[] {
 	const merged = new Map<string, KnownEndpoint>();
 
-	for (const endpoint of [...extractCatalogEndpoints(catalog), ...extractSpecEndpoints(openApiSpec)]) {
+	for (const endpoint of [
+		...extractCatalogEndpoints(catalog),
+		...extractSpecEndpoints(openApiSpec),
+	]) {
 		const key = `${endpoint.method} ${endpoint.path}`;
 		const existing = merged.get(key);
 		if (!existing) {
@@ -154,7 +161,10 @@ function pathTemplateToRegExp(pathTemplate: string): RegExp {
 }
 
 function pathMatches(requestPath: string, endpointPath: string): boolean {
-	return requestPath === endpointPath || pathTemplateToRegExp(endpointPath).test(requestPath);
+	return (
+		requestPath === endpointPath ||
+		pathTemplateToRegExp(endpointPath).test(requestPath)
+	);
 }
 
 function pathSegments(path: string): string[] {
@@ -162,7 +172,9 @@ function pathSegments(path: string): string[] {
 		.split("/")
 		.filter(Boolean)
 		.map((segment) => segment.toLowerCase())
-		.map((segment) => (segment.startsWith("{") && segment.endsWith("}") ? "{}" : segment));
+		.map((segment) =>
+			segment.startsWith("{") && segment.endsWith("}") ? "{}" : segment,
+		);
 }
 
 function scoreSuggestion(
@@ -174,7 +186,10 @@ function scoreSuggestion(
 	const endpointSegments = pathSegments(endpoint.path);
 	let score = endpoint.method === method ? 10 : 0;
 
-	const sharedPrefix = Math.min(requestSegments.length, endpointSegments.length);
+	const sharedPrefix = Math.min(
+		requestSegments.length,
+		endpointSegments.length,
+	);
 	for (let i = 0; i < sharedPrefix; i++) {
 		if (requestSegments[i] === endpointSegments[i]) {
 			score += 4;
@@ -185,7 +200,9 @@ function scoreSuggestion(
 		}
 	}
 
-	const overlap = requestSegments.filter((segment) => endpointSegments.includes(segment)).length;
+	const overlap = requestSegments.filter((segment) =>
+		endpointSegments.includes(segment),
+	).length;
 	score += overlap;
 	score -= Math.abs(requestSegments.length - endpointSegments.length);
 
@@ -215,6 +232,57 @@ function buildSuggestions(
 		}));
 }
 
+/** First non-parameter path segment, lowercased (e.g. "/association/find" → "association"). */
+function firstSegment(path: string): string | undefined {
+	for (const seg of pathSegments(path)) {
+		if (seg !== "{}") return seg;
+	}
+	return undefined;
+}
+
+/**
+ * Pre-flight endpoint check (T1.1). Returns an `unknown_endpoint` {@link DriftHint}
+ * when the request path is almost certainly a hallucination — i.e. it matches no
+ * known endpoint for ANY method, yet a known endpoint shares its first path
+ * segment (the model was "in the neighborhood" of a real endpoint but invented
+ * the leaf, e.g. `/association/find` next to the documented `/association`).
+ *
+ * Returns `undefined` (→ let the call proceed to upstream) when:
+ *   - there are no known endpoints (server passed no catalog/spec), or
+ *   - the path DOES match a known endpoint path (any method — an undocumented
+ *     method on a real path is allowed through), or
+ *   - the path is wholly novel (no sibling under the same first segment), so we
+ *     can't confidently call it a mistake — the reactive drift hint still fires
+ *     on a real 404.
+ *
+ * This deliberately blocks only the high-confidence hallucination case to avoid
+ * false-positives on curated catalogs that omit valid endpoints.
+ */
+export function preflightUnknownEndpoint(
+	method: string,
+	requestPath: string,
+	knownEndpoints: KnownEndpoint[],
+): DriftHint | undefined {
+	if (knownEndpoints.length === 0) return undefined;
+
+	const pathMatchesAnyMethod = knownEndpoints.some((endpoint) =>
+		pathMatches(requestPath, endpoint.path),
+	);
+	// The path is a real endpoint path — never pre-block (method may be valid but
+	// undocumented; let upstream decide).
+	if (pathMatchesAnyMethod) return undefined;
+
+	const reqSegment = firstSegment(requestPath);
+	if (!reqSegment) return undefined;
+	const hasSibling = knownEndpoints.some(
+		(endpoint) => firstSegment(endpoint.path) === reqSegment,
+	);
+	if (!hasSibling) return undefined;
+
+	// High confidence: near a known endpoint but no path match → hallucinated leaf.
+	return buildDriftHint(method, requestPath, 404, knownEndpoints);
+}
+
 export function buildDriftHint(
 	method: string,
 	requestPath: string,
@@ -226,23 +294,32 @@ export function buildDriftHint(
 	const normalizedMethod = method.toUpperCase();
 	const exactMatches = knownEndpoints.filter(
 		(endpoint) =>
-			endpoint.method === normalizedMethod && pathMatches(requestPath, endpoint.path),
+			endpoint.method === normalizedMethod &&
+			pathMatches(requestPath, endpoint.path),
 	);
 	const pathMatchesAnyMethod = knownEndpoints.filter((endpoint) =>
 		pathMatches(requestPath, endpoint.path),
 	);
 
 	if (exactMatches.length === 0) {
-		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
-		const suggestions = buildSuggestions(requestPath, normalizedMethod, knownEndpoints);
-		const suggestionText = suggestions.length > 0
-			? ` Try instead: ${suggestions
-				.map((suggestion) => `${suggestion.method} ${suggestion.path}`)
-				.join(", ")}.`
-			: "";
-		const methodText = knownMethods.length > 0
-			? ` This path exists for methods: ${knownMethods.join(", ")}.`
-			: "";
+		const knownMethods = uniqueStrings(
+			pathMatchesAnyMethod.map((endpoint) => endpoint.method),
+		);
+		const suggestions = buildSuggestions(
+			requestPath,
+			normalizedMethod,
+			knownEndpoints,
+		);
+		const suggestionText =
+			suggestions.length > 0
+				? ` Try instead: ${suggestions
+						.map((suggestion) => `${suggestion.method} ${suggestion.path}`)
+						.join(", ")}.`
+				: "";
+		const methodText =
+			knownMethods.length > 0
+				? ` This path exists for methods: ${knownMethods.join(", ")}.`
+				: "";
 
 		return {
 			kind: "unknown_endpoint",
@@ -274,7 +351,9 @@ export function buildDriftHint(
 	}
 
 	if ([404, 405, 410, 501].includes(status)) {
-		const knownMethods = uniqueStrings(pathMatchesAnyMethod.map((endpoint) => endpoint.method));
+		const knownMethods = uniqueStrings(
+			pathMatchesAnyMethod.map((endpoint) => endpoint.method),
+		);
 		const hasPathParams = matchedEndpoint.pathParamNames.length > 0;
 
 		// 404 on a parameterized path (e.g. /studies/{id}) almost always means
@@ -297,7 +376,9 @@ export function buildDriftHint(
 				(status === 405
 					? `Method ${normalizedMethod} may not be allowed.`
 					: `The endpoint may have been removed or renamed.`) +
-				(knownMethods.length > 0 ? ` Known methods for this path: ${knownMethods.join(", ")}.` : ""),
+				(knownMethods.length > 0
+					? ` Known methods for this path: ${knownMethods.join(", ")}.`
+					: ""),
 			...(knownMethods.length > 0 ? { known_methods: knownMethods } : {}),
 		};
 	}

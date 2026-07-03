@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildGraphqlSchemaSource } from "./graphql-schema-source";
+import { describe, expect, it } from "vitest";
 import type { TrimmedIntrospection } from "./graphql-introspection";
+import { buildGraphqlSchemaSource } from "./graphql-schema-source";
 
 const MOCK_INTROSPECTION: TrimmedIntrospection = {
 	queryType: { name: "Query" },
@@ -27,7 +27,11 @@ const MOCK_INTROSPECTION: TrimmedIntrospection = {
 			name: "Mutation",
 			kind: "OBJECT",
 			fields: [
-				{ name: "addGene", type: "Gene", args: [{ name: "name", type: "String!" }] },
+				{
+					name: "addGene",
+					type: "Gene",
+					args: [{ name: "name", type: "String!" }],
+				},
 			],
 		},
 		{
@@ -70,7 +74,9 @@ const MOCK_INTROSPECTION: TrimmedIntrospection = {
 /**
  * Evaluate the generated source in a minimal sandbox and return the `schema` object.
  */
-function evalSchemaSource(introspection: TrimmedIntrospection): Record<string, (...args: unknown[]) => unknown> {
+function evalSchemaSource(
+	introspection: TrimmedIntrospection,
+): Record<string, (...args: unknown[]) => unknown> {
 	const source = buildGraphqlSchemaSource(JSON.stringify(introspection));
 	// The source declares `var SCHEMA`, `var __typeMap`, `var schema`
 	const fn = new Function(`${source}\nreturn schema;`);
@@ -106,7 +112,10 @@ describe("schema.types()", () => {
 describe("schema.type()", () => {
 	it("returns type by name", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const gene = schema.type("Gene") as { name: string; fields: Array<{ name: string }> };
+		const gene = schema.type("Gene") as {
+			name: string;
+			fields: Array<{ name: string }>;
+		};
 		expect(gene.name).toBe("Gene");
 		expect(gene.fields).toHaveLength(3);
 	});
@@ -120,14 +129,21 @@ describe("schema.type()", () => {
 describe("schema.search()", () => {
 	it("finds types by name", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const results = schema.search("gene") as Array<{ type: string; field: string | null; score: number }>;
+		const results = schema.search("gene") as Array<{
+			type: string;
+			field: string | null;
+			score: number;
+		}>;
 		expect(results.length).toBeGreaterThan(0);
 		expect(results[0].type).toBe("Gene");
 	});
 
 	it("finds fields across types", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const results = schema.search("entrez") as Array<{ type: string; field: string | null }>;
+		const results = schema.search("entrez") as Array<{
+			type: string;
+			field: string | null;
+		}>;
 		const fieldMatch = results.find((r) => r.field === "entrezId");
 		expect(fieldMatch).toBeDefined();
 		expect(fieldMatch?.type).toBe("Gene");
@@ -148,7 +164,11 @@ describe("schema.search()", () => {
 describe("schema.queryRoot()", () => {
 	it("returns query root fields", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const roots = schema.queryRoot() as Array<{ name: string; args: unknown[]; returnType: string }>;
+		const roots = schema.queryRoot() as Array<{
+			name: string;
+			args: unknown[];
+			returnType: string;
+		}>;
 		expect(roots).toHaveLength(2);
 		expect(roots[0].name).toBe("gene");
 		expect(roots[0].returnType).toBe("Gene");
@@ -177,7 +197,10 @@ describe("schema.mutationRoot()", () => {
 describe("schema.inputType()", () => {
 	it("returns input fields", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const fields = schema.inputType("GeneInput") as Array<{ name: string; type: string }>;
+		const fields = schema.inputType("GeneInput") as Array<{
+			name: string;
+			type: string;
+		}>;
 		expect(fields).toHaveLength(2);
 		expect(fields[0].name).toBe("symbol");
 	});
@@ -191,7 +214,10 @@ describe("schema.inputType()", () => {
 describe("schema.enumValues()", () => {
 	it("returns enum values", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
-		const values = schema.enumValues("EvidenceLevel") as Array<{ name: string; description?: string }>;
+		const values = schema.enumValues("EvidenceLevel") as Array<{
+			name: string;
+			description?: string;
+		}>;
 		expect(values).toHaveLength(2);
 		expect(values[0].name).toBe("A");
 		expect(values[0].description).toBe("Validated");
@@ -200,5 +226,22 @@ describe("schema.enumValues()", () => {
 	it("returns null for non-enum type", () => {
 		const schema = evalSchemaSource(MOCK_INTROSPECTION);
 		expect(schema.enumValues("Gene")).toBeNull();
+	});
+});
+
+describe("buildGraphqlSchemaSource introspection-availability flag", () => {
+	it("defaults schema.available to true with a null note", () => {
+		const src = buildGraphqlSchemaSource(JSON.stringify(MOCK_INTROSPECTION));
+		expect(src).toContain("available: true");
+		expect(src).toContain("note: null");
+	});
+
+	it("marks schema.available false and embeds the note when introspection is disabled", () => {
+		const src = buildGraphqlSchemaSource(
+			JSON.stringify({ queryType: { name: "Query" }, types: [] }),
+			{ available: false, note: "introspection disabled" },
+		);
+		expect(src).toContain("available: false");
+		expect(src).toContain('note: "introspection disabled"');
 	});
 });

@@ -32,6 +32,10 @@
       "types": "./dist/workspace/*.d.ts",
       "default": "./dist/workspace/*.js"
     },
+    "./monitor/*": {
+      "types": "./dist/monitor/*.d.ts",
+      "default": "./dist/monitor/*.js"
+    },
     "./entities/*": {
       "types": "./dist/entities/*.d.ts",
       "default": "./dist/entities/*.js"

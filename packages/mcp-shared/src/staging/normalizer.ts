@@ -12,14 +12,30 @@ import type { DomainConfig } from "./types";
 // ---------------------------------------------------------------------------
 
 const TABLE_RESERVED_WORDS = new Set([
-	"table", "index", "view", "column", "primary", "key",
-	"foreign", "constraint",
+	"table",
+	"index",
+	"view",
+	"column",
+	"primary",
+	"key",
+	"foreign",
+	"constraint",
 ]);
 
 const COLUMN_RESERVED_WORDS = new Set([
-	"table", "index", "view", "column", "primary", "key",
-	"foreign", "constraint", "order", "group", "select",
-	"from", "where",
+	"table",
+	"index",
+	"view",
+	"column",
+	"primary",
+	"key",
+	"foreign",
+	"constraint",
+	"order",
+	"group",
+	"select",
+	"from",
+	"where",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -27,8 +43,17 @@ const COLUMN_RESERVED_WORDS = new Set([
 // ---------------------------------------------------------------------------
 
 const DEFAULT_SINGULAR_EXCEPTIONS = new Set([
-	"genus", "species", "series", "analysis", "basis", "axis",
-	"status", "alias", "atlas", "consensus", "corpus",
+	"genus",
+	"species",
+	"series",
+	"analysis",
+	"basis",
+	"axis",
+	"status",
+	"alias",
+	"atlas",
+	"consensus",
+	"corpus",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -77,7 +102,8 @@ export function sanitizeColumnName(
 	let colName = name;
 	if (config?.semanticMappings) {
 		const lower = colName.toLowerCase();
-		const mapped = config.semanticMappings[lower] ?? config.semanticMappings[colName];
+		const mapped =
+			config.semanticMappings[lower] ?? config.semanticMappings[colName];
 		if (mapped) {
 			colName = mapped;
 		}
@@ -115,13 +141,13 @@ export function sanitizeColumnName(
 // singularize
 // ---------------------------------------------------------------------------
 
-export function singularize(
-	word: string,
-	config?: DomainConfig,
-): string {
+export function singularize(word: string, config?: DomainConfig): string {
 	const sanitized = sanitizeTableName(word);
 	const exceptions = config?.singularizationExceptions
-		? new Set([...DEFAULT_SINGULAR_EXCEPTIONS, ...config.singularizationExceptions])
+		? new Set([
+				...DEFAULT_SINGULAR_EXCEPTIONS,
+				...config.singularizationExceptions,
+			])
 		: DEFAULT_SINGULAR_EXCEPTIONS;
 
 	if (exceptions.has(sanitized)) return sanitized;
@@ -140,7 +166,11 @@ export function singularize(
 		return sanitized.slice(0, -1); // "responses" → "response"
 	}
 	// -s → remove (but not -ss)
-	if (sanitized.endsWith("s") && !sanitized.endsWith("ss") && sanitized.length > 2) {
+	if (
+		sanitized.endsWith("s") &&
+		!sanitized.endsWith("ss") &&
+		sanitized.length > 2
+	) {
 		const candidate = sanitized.slice(0, -1);
 		if (candidate.length > 1) return candidate;
 	}
@@ -170,6 +200,14 @@ export function getSQLiteType(value: unknown): string {
 // resolveColumnTypes — merge observed types into a single SQLite type
 // ---------------------------------------------------------------------------
 
+/**
+ * Hard cap on columns per table (T5.1/T5.3). Well under SQLite's ~2000-column
+ * CREATE limit so a pathologically wide response (e.g. an object used as a map)
+ * can't blow the CREATE and fail the whole stage to zero. Mirrors the legacy
+ * `MAX_TABLE_COLUMNS` in schema-inference.ts.
+ */
+export const MAX_TABLE_COLUMNS = 200;
+
 export function resolveColumnTypes(
 	columnTypes: Record<string, Set<string>>,
 ): Record<string, string> {
@@ -188,7 +226,26 @@ export function resolveColumnTypes(
 		}
 	}
 
-	return columns;
+	return capColumns(columns);
+}
+
+/**
+ * If a table would exceed MAX_TABLE_COLUMNS, keep the first (cap - 1) columns and
+ * spill everything else into one `_overflow_json` TEXT column. The data-inserter
+ * fills that column with the full record, so no field is silently lost — the
+ * table still materializes instead of crashing the stage.
+ */
+function capColumns(
+	columns: Record<string, string>,
+): Record<string, string> {
+	const names = Object.keys(columns);
+	if (names.length <= MAX_TABLE_COLUMNS) return columns;
+	const capped: Record<string, string> = {};
+	for (const name of names.slice(0, MAX_TABLE_COLUMNS - 1)) {
+		capped[name] = columns[name];
+	}
+	capped._overflow_json = "TEXT";
+	return capped;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,8 +289,7 @@ export function findOriginalKey(
 
 	// Find key whose sanitized form matches
 	return (
-		keys.find((key) => sanitizeColumnName(key, config) === sanitizedKey) ??
-		null
+		keys.find((key) => sanitizeColumnName(key, config) === sanitizedKey) ?? null
 	);
 }
 

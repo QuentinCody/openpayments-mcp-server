@@ -7,8 +7,8 @@
  * bug class where the two engines disagree on entity types.
  */
 
-import type { DomainConfig } from "./types";
 import { sanitizeTableName, singularize } from "./normalizer";
+import type { DomainConfig } from "./types";
 
 // ---------------------------------------------------------------------------
 // Discovery result
@@ -35,14 +35,11 @@ export function isEntity(obj: unknown, config?: DomainConfig): boolean {
 	const mode = config?.entityDetection ?? "standard";
 
 	// Check for standard ID fields
-	const hasId =
-		record.id !== undefined ||
-		record._id !== undefined;
+	const hasId = record.id !== undefined || record._id !== undefined;
 
 	// Check for extra domain-specific ID fields
-	const hasExtraId = config?.entityIdFields?.some(
-		(f) => record[f] !== undefined,
-	) ?? false;
+	const hasExtraId =
+		config?.entityIdFields?.some((f) => record[f] !== undefined) ?? false;
 
 	if (mode === "strict") {
 		return hasId || hasExtraId;
@@ -76,9 +73,15 @@ export function isEntity(obj: unknown, config?: DomainConfig): boolean {
 		if (record.rcsb_id !== undefined) return true;
 		if (fieldCount >= 3) {
 			const hasIndicators = keys.some((key) =>
-				["name", "title", "description", "type", "formula", "sequence", "value"].includes(
-					key.toLowerCase(),
-				),
+				[
+					"name",
+					"title",
+					"description",
+					"type",
+					"formula",
+					"sequence",
+					"value",
+				].includes(key.toLowerCase()),
 			);
 			if (hasIndicators) return true;
 		}
@@ -94,10 +97,17 @@ export function isEntity(obj: unknown, config?: DomainConfig): boolean {
 			// like { struct: { title: "..." }, exptl: { method: "..." } })
 			return keys.some((key) => {
 				const value = record[key];
-				if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+				if (
+					value !== null &&
+					typeof value === "object" &&
+					!Array.isArray(value)
+				) {
 					const nested = Object.values(value as Record<string, unknown>);
-					return nested.length > 0 && nested.length <= 10 &&
-						nested.every((v) => typeof v !== "object" || v === null);
+					return (
+						nested.length > 0 &&
+						nested.length <= 10 &&
+						nested.every((v) => typeof v !== "object" || v === null)
+					);
 				}
 				return false;
 			});
@@ -213,11 +223,21 @@ function walkAndDiscover(
 				if (parentEntityType && path.length > 0) {
 					const fieldName = path[path.length - 1];
 					if (!isWrapperFieldName(fieldName)) {
-						recordRelationship(relationships, parentEntityType, arrayEntityType);
+						recordRelationship(
+							relationships,
+							parentEntityType,
+							arrayEntityType,
+						);
 					}
 				}
 
-				processEntityProperties(item, arrayEntityType, entities, relationships, config);
+				processEntityProperties(
+					item,
+					arrayEntityType,
+					entities,
+					relationships,
+					config,
+				);
 			}
 		}
 		return;
@@ -231,20 +251,41 @@ function walkAndDiscover(
 			.map((edge) => edge.node)
 			.filter(Boolean);
 		if (nodes.length > 0) {
-			walkAndDiscover(nodes, path, parentEntityType, entities, relationships, config);
+			walkAndDiscover(
+				nodes,
+				path,
+				parentEntityType,
+				entities,
+				relationships,
+				config,
+			);
 		}
 		return;
 	}
 
 	// Unwrap {nodes: [...]} pattern (if not itself an entity)
 	if (record.nodes && Array.isArray(record.nodes) && !isEntity(obj, config)) {
-		walkAndDiscover(record.nodes, path, parentEntityType, entities, relationships, config);
+		walkAndDiscover(
+			record.nodes,
+			path,
+			parentEntityType,
+			entities,
+			relationships,
+			config,
+		);
 		return;
 	}
 
 	// Unwrap {rows: [...]} pattern (Open Targets)
 	if (record.rows && Array.isArray(record.rows) && !isEntity(obj, config)) {
-		walkAndDiscover(record.rows, path, parentEntityType, entities, relationships, config);
+		walkAndDiscover(
+			record.rows,
+			path,
+			parentEntityType,
+			entities,
+			relationships,
+			config,
+		);
 		return;
 	}
 
@@ -258,7 +299,14 @@ function walkAndDiscover(
 
 	// For non-entity objects, explore children
 	for (const [key, value] of Object.entries(record)) {
-		walkAndDiscover(value, [...path, key], parentEntityType, entities, relationships, config);
+		walkAndDiscover(
+			value,
+			[...path, key],
+			parentEntityType,
+			entities,
+			relationships,
+			config,
+		);
 	}
 }
 
@@ -309,7 +357,13 @@ function processRelatedItems(
 	for (const item of items) {
 		if (isEntity(item, config)) {
 			addEntity(entities, relatedType, item);
-			processEntityProperties(item, relatedType, entities, relationships, config);
+			processEntityProperties(
+				item,
+				relatedType,
+				entities,
+				relationships,
+				config,
+			);
 		}
 	}
 }
@@ -326,21 +380,41 @@ function processEntityProperties(
 	for (const [key, value] of Object.entries(record)) {
 		const items = unwrapItemsContainer(value);
 		if (items && items.length > 0) {
-			processRelatedItems(items, key, entityType, entities, relationships, config);
+			processRelatedItems(
+				items,
+				key,
+				entityType,
+				entities,
+				relationships,
+				config,
+			);
 			continue;
 		}
 
-		const isNonArrayObject = value && typeof value === "object" && !Array.isArray(value);
+		const isNonArrayObject =
+			value && typeof value === "object" && !Array.isArray(value);
 		if (!isNonArrayObject) continue;
 
 		if (isEntity(value, config)) {
 			// 1:1 relationships → direct FK column, no junction table.
 			const relatedType = inferEntityType(value, [key], config);
 			addEntity(entities, relatedType, value);
-			processEntityProperties(value, relatedType, entities, relationships, config);
+			processEntityProperties(
+				value,
+				relatedType,
+				entities,
+				relationships,
+				config,
+			);
 		} else {
 			// Non-entity wrapper — explore for nested entities
-			processEntityProperties(value, entityType, entities, relationships, config);
+			processEntityProperties(
+				value,
+				entityType,
+				entities,
+				relationships,
+				config,
+			);
 		}
 	}
 }
@@ -377,9 +451,15 @@ function recordRelationship(
 }
 
 function isWrapperFieldName(name: string): boolean {
-	return ["nodes", "edges", "node", "data", "items", "results", "rows"].includes(
-		name.toLowerCase(),
-	);
+	return [
+		"nodes",
+		"edges",
+		"node",
+		"data",
+		"items",
+		"results",
+		"rows",
+	].includes(name.toLowerCase());
 }
 
 function inferDeterministicFallbackEntityType(

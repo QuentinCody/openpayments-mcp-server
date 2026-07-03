@@ -6,9 +6,13 @@ describe("genebass adapter", () => {
 		const captured: string[] = [];
 		const f: typeof fetch = async (input) => {
 			captured.push(typeof input === "string" ? input : (input as Request).url);
-			return new Response(JSON.stringify({ ok: true, associations: [] }), { status: 200 });
+			return new Response(JSON.stringify({ ok: true, associations: [] }), {
+				status: 200,
+			});
 		};
-		const result = await genebassGeneBurden("ENSG00000147883", "pLoF", { fetchImpl: f });
+		const result = await genebassGeneBurden("ENSG00000147883", "pLoF", {
+			fetchImpl: f,
+		});
 		expect(captured[0]).toContain("gene_id=ENSG00000147883");
 		expect(captured[0]).toContain("burden_set=pLoF");
 		expect(result).toMatchObject({ ok: true });

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { CLINICAL_SYSTEMS } from "./code-systems";
 import {
-	CodingDictRegistry,
 	buildRegistry,
+	CodingDictRegistry,
 	firstCode,
 	safeCodingDisplay,
 	safeConceptDisplay,
@@ -12,20 +12,29 @@ import { LOINC_VITALS_REGISTRATION } from "./dicts/loinc-vitals";
 
 describe("safeCodingDisplay", () => {
 	it("prefers an explicit display", () => {
-		expect(safeCodingDisplay({ system: CLINICAL_SYSTEMS.loinc.uri, code: "8302-2", display: "Height" })).toBe(
-			"Height",
-		);
+		expect(
+			safeCodingDisplay({
+				system: CLINICAL_SYSTEMS.loinc.uri,
+				code: "8302-2",
+				display: "Height",
+			}),
+		).toBe("Height");
 	});
 
 	it("falls back to dict lookup when display is missing", () => {
 		const registry = buildRegistry([LOINC_VITALS_REGISTRATION]);
-		expect(safeCodingDisplay({ system: CLINICAL_SYSTEMS.loinc.uri, code: "8302-2" }, registry)).toBe("Body height");
+		expect(
+			safeCodingDisplay(
+				{ system: CLINICAL_SYSTEMS.loinc.uri, code: "8302-2" },
+				registry,
+			),
+		).toBe("Body height");
 	});
 
 	it("falls back to system|code when no dict matches", () => {
-		expect(safeCodingDisplay({ system: "http://example.com/system", code: "X1" })).toBe(
-			"http://example.com/system|X1",
-		);
+		expect(
+			safeCodingDisplay({ system: "http://example.com/system", code: "X1" }),
+		).toBe("http://example.com/system|X1");
 	});
 
 	it("returns bare code when no system", () => {
@@ -42,9 +51,12 @@ describe("safeCodingDisplay", () => {
 
 	it("ignores empty-string display, falls through to dict", () => {
 		const registry = buildRegistry([LOINC_VITALS_REGISTRATION]);
-		expect(safeCodingDisplay({ system: CLINICAL_SYSTEMS.loinc.uri, code: "29463-7", display: "" }, registry)).toBe(
-			"Body weight",
-		);
+		expect(
+			safeCodingDisplay(
+				{ system: CLINICAL_SYSTEMS.loinc.uri, code: "29463-7", display: "" },
+				registry,
+			),
+		).toBe("Body weight");
 	});
 });
 
@@ -57,18 +69,23 @@ describe("safeConceptDisplay", () => {
 
 	it("falls back to first coding's display", () => {
 		expect(
-			safeConceptDisplay({ coding: [{ system: "x", code: "1", display: "Foo" }, { code: "2" }] }),
+			safeConceptDisplay({
+				coding: [{ system: "x", code: "1", display: "Foo" }, { code: "2" }],
+			}),
 		).toBe("Foo");
 	});
 
 	it("skips first coding if no display, tries second", () => {
 		expect(
-			safeConceptDisplay({
-				coding: [
-					{ system: "unknown", code: "1" },
-					{ system: CLINICAL_SYSTEMS.loinc.uri, code: "8867-4" },
-				],
-			}, registry),
+			safeConceptDisplay(
+				{
+					coding: [
+						{ system: "unknown", code: "1" },
+						{ system: CLINICAL_SYSTEMS.loinc.uri, code: "8867-4" },
+					],
+				},
+				registry,
+			),
 		).toBe("Heart rate");
 	});
 
@@ -81,7 +98,9 @@ describe("safeConceptDisplay", () => {
 
 describe("firstCode", () => {
 	it("returns the first coding's code", () => {
-		expect(firstCode({ coding: [{ code: "active" }, { code: "resolved" }] })).toBe("active");
+		expect(
+			firstCode({ coding: [{ code: "active" }, { code: "resolved" }] }),
+		).toBe("active");
 	});
 
 	it("returns undefined when empty", () => {

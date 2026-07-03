@@ -33,11 +33,22 @@ function __wrapStaged(raw) {
   var hint = " Return this object and use the query_data tool with data_access_id=\\"" +
     raw.data_access_id + "\\" to query it with SQL.";
   var TRAP_KEYS = ["results", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges"];
+  // T6.3 — a staged result is an object, NOT an array. Calling an array method
+  // on it (e.g. openalexPapers.slice(...)) threw a cryptic "slice is not a
+  // function". Return a thrower that explains the staged-data shape instead.
+  var ARRAY_METHODS = ["slice","map","filter","forEach","reduce","reduceRight","find","findIndex","some","every","flatMap","flat","sort","reverse","concat","join","indexOf","lastIndexOf","includes","at","pop","push","shift","unshift","splice","fill","keys","values","entries"];
   return new Proxy(raw, {
     get: function(target, prop) {
-      if (typeof prop === "string" && TRAP_KEYS.indexOf(prop) !== -1 && !(prop in target)) {
-        console.warn("[staging] Accessed \\\"" + prop + "\\\" on staged response — this array was replaced by SQLite tables. " + hint);
-        return undefined;
+      if (typeof prop === "string" && !(prop in target)) {
+        if (TRAP_KEYS.indexOf(prop) !== -1) {
+          console.warn("[staging] Accessed \\"" + prop + "\\" on staged response — this array was replaced by SQLite tables. " + hint);
+          return undefined;
+        }
+        if (ARRAY_METHODS.indexOf(prop) !== -1) {
+          return function() {
+            throw new Error("This is a STAGED result OBJECT, not an array — '." + prop + "()' is not available. The rows live in SQLite, not on this object." + hint);
+          };
+        }
       }
       return target[prop];
     }
@@ -246,6 +257,50 @@ var db = {
     return __stageData(data, tableNameOrOptions);
   },
 };
+
+/** Guiding stub (T4.3): this is a REST server — gql.query doesn't exist here. */
+var gql = {
+  query: function() {
+    throw new Error("gql.query is not available on this REST server — use api.get(path, params) or api.post(path, body, params). Call searchSpec(query) / listCategories() to discover endpoints first.");
+  },
+};
 // --- End API proxy helpers ---
+`;
+}
+
+/**
+ * REST-capability override — injected into a GraphQL isolate (AFTER
+ * {@link buildGraphqlProxySource}) when a server wires a SECOND, REST upstream
+ * via `restApiFetch` (a hybrid GraphQL+REST Code Mode server). It REASSIGNS the
+ * GraphQL proxy's throwing `api.get`/`api.post` stubs to real implementations
+ * routed through the host `__api_proxy`, reusing the already-defined
+ * `__wrapStaged` for auto-staged responses.
+ *
+ * It declares NO `var` — `api`, `db`, `gql`, and `__wrapStaged` already exist
+ * from buildGraphqlProxySource, so redeclaring them in the same module scope is
+ * a parse error. That is precisely why this is a slim mutating override and not
+ * a second {@link buildApiProxySource} concatenation.
+ */
+export function buildRestApiOverrideSource(): string {
+	return `
+// --- REST capability (injected: second upstream via restApiFetch) ---
+function __unwrapApiResult(result) {
+  if (result && result.__api_error) {
+    var errorMessage = result.message || "Unknown error";
+    if (result.drift_hint && result.drift_hint.message) errorMessage += " " + result.drift_hint.message;
+    var err = new Error("API error " + result.status + ": " + errorMessage);
+    err.status = result.status; err.data = result.data; err.driftHint = result.drift_hint;
+    throw err;
+  }
+  if (result && result.__staged) return __wrapStaged(result);
+  return result;
+}
+api.get = async function(path, params) {
+  return __unwrapApiResult(await codemode.__api_proxy({ method: "GET", path: path, params: params || {} }));
+};
+api.post = async function(path, body, params) {
+  return __unwrapApiResult(await codemode.__api_proxy({ method: "POST", path: path, params: params || {}, body: body }));
+};
+// --- End REST capability ---
 `;
 }

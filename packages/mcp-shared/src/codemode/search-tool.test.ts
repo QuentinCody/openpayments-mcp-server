@@ -15,7 +15,13 @@ const SPEC = {
 				description: "Returns studies",
 				tags: ["study", "search"],
 				parameters: [
-					{ name: "q", in: "query", required: true, schema: { type: "string" }, description: "query text" },
+					{
+						name: "q",
+						in: "query",
+						required: true,
+						schema: { type: "string" },
+						description: "query text",
+					},
 					{ name: "page", in: "query", type: "integer" },
 					{},
 				],
@@ -75,7 +81,9 @@ describe("createOpenApiHelpers › describeOperation/describeEndpoint (describeO
 
 	it("returns the missing label for unknown operation/endpoint", () => {
 		expect(H.describeOperation("nope")).toBe("Operation not found: nope");
-		expect(H.describeEndpoint("/nope", "delete")).toBe("Endpoint not found: DELETE /nope");
+		expect(H.describeEndpoint("/nope", "delete")).toBe(
+			"Endpoint not found: DELETE /nope",
+		);
 	});
 
 	it("describeEndpoint resolves by path + method and defaults to GET", () => {

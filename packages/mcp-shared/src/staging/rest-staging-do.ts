@@ -11,23 +11,20 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
+import { VirtualFS } from "../filesystem/virtual-fs";
 import { ChunkingEngine } from "./chunking";
+import { mergeSchemaHints } from "./schema-hints";
 import {
-	detectArrays,
-	inferSchema,
-	materializeSchema,
 	computeColumnProfiles,
+	detectArrays,
 	type InferredSchema,
 	type InferredTable,
+	inferSchema,
+	materializeSchema,
 	type SchemaHints,
 	type TableProfile,
 } from "./schema-inference";
-import { stageData } from "./staging-engine";
-import type { DomainConfig, StagingContext, StagingHints } from "./types";
-import type { TableRelationship } from "./staging-metadata";
-import { VirtualFS } from "../filesystem/virtual-fs";
-import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
-import { mergeSchemaHints } from "./schema-hints";
 import {
 	buildColumnDescriptor,
 	buildColumnMeta,
@@ -36,6 +33,9 @@ import {
 	normalizeProvenance,
 	type ProvenanceRow,
 } from "./schema-response";
+import { stageData } from "./staging-engine";
+import type { TableRelationship } from "./staging-metadata";
+import type { DomainConfig, StagingContext, StagingHints } from "./types";
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for handleProcess / handleQuery / handleRegister
@@ -215,9 +215,7 @@ export class RestStagingDO extends DurableObject {
 				`CREATE INDEX IF NOT EXISTS idx_session_registry_session_time
 					ON _session_registry(session_id, created_at)`,
 			);
-			this.sql.exec(
-				`INSERT INTO _do_migrations (id) VALUES (1)`,
-			);
+			this.sql.exec(`INSERT INTO _do_migrations (id) VALUES (1)`);
 		}
 
 		// Future migrations go here:
@@ -333,7 +331,9 @@ export class RestStagingDO extends DurableObject {
 				failedRows,
 				warnings.length > 0 ? JSON.stringify(warnings) : null,
 			);
-		} catch { /* best-effort: Don't fail staging if metadata update fails */ }
+		} catch {
+			/* best-effort: Don't fail staging if metadata update fails */
+		}
 	}
 
 	/**
@@ -362,7 +362,9 @@ export class RestStagingDO extends DurableObject {
 			// Invalidate cached validator so it rebuilds with the merged schema
 			this.schemaValidator = null;
 			this.schemaValidatorInitFailed = false;
-		} catch { /* best-effort: — schema still works via PRAGMA, just without enrichment */ }
+		} catch {
+			/* best-effort: — schema still works via PRAGMA, just without enrichment */
+		}
 	}
 
 	/** Read the persisted inferred schema, or null if absent / malformed. */
@@ -389,7 +391,9 @@ export class RestStagingDO extends DurableObject {
 				`INSERT OR REPLACE INTO _column_profiles (id, profiles_json) VALUES (1, ?)`,
 				JSON.stringify(profiles),
 			);
-		} catch { /* best-effort: — schema still works without profiles */ }
+		} catch {
+			/* best-effort: — schema still works without profiles */
+		}
 	}
 
 	/**
@@ -412,7 +416,9 @@ export class RestStagingDO extends DurableObject {
 
 	private async handleProcess(request: Request): Promise<Response> {
 		const raw: unknown = await request.json();
-		const container: ProcessRequestBody = (raw !== null && typeof raw === "object" ? raw : {}) as ProcessRequestBody;
+		const container: ProcessRequestBody = (
+			raw !== null && typeof raw === "object" ? raw : {}
+		) as ProcessRequestBody;
 		const data = container.data ?? raw;
 
 		// Extract provenance context from request body
@@ -428,13 +434,7 @@ export class RestStagingDO extends DurableObject {
 			const stagingHints = this.getStagingHints(data);
 
 			const result = this.ctx.storage.transactionSync(() =>
-				stageData(
-					data,
-					this.sql,
-					context,
-					stagingHints,
-					domainConfig,
-				),
+				stageData(data, this.sql, context, stagingHints, domainConfig),
 			);
 
 			return this.jsonResponse({
@@ -453,73 +453,70 @@ export class RestStagingDO extends DurableObject {
 		const arrays = detectArrays(data);
 
 		if (arrays.length > 0 && arrays.some((a) => a.rows.length > 0)) {
-			const schema = inferSchema(arrays, hints);
+			try {
+				const schema = inferSchema(arrays, hints);
+				// Persist inferred schema for enriched handleSchema() output
+				this.persistInferredSchema(schema);
+				const rowsMap = new Map<string, unknown[]>();
+				for (const arr of arrays) {
+					const tableName =
+						hints?.tableName ??
+						arr.key.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
+					const actualName =
+						schema.tables.length === 1
+							? schema.tables[0].name
+							: (schema.tables.find((t) => t.name === tableName)?.name ??
+								tableName);
+					rowsMap.set(actualName, arr.rows);
+				}
 
-			// Persist inferred schema for enriched handleSchema() output
-			this.persistInferredSchema(schema);
-			// Compute and persist column profiles after schema inference
-			// (must come after materializeSchema — we do it below)
+				const result = this.ctx.storage.transactionSync(() =>
+					materializeSchema(schema, rowsMap, this.sql),
+				);
 
-			const rowsMap = new Map<string, unknown[]>();
-			for (const arr of arrays) {
-				const tableName = hints?.tableName ?? arr.key.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
-				const actualName = schema.tables.length === 1
-					? schema.tables[0].name
-					: schema.tables.find((t) => t.name === tableName)?.name ?? tableName;
-				rowsMap.set(actualName, arr.rows);
+				// Track row counts in provenance
+				this.updateProvenanceRowCounts(
+					result.inputRows,
+					result.totalRows,
+					result.failedRows,
+					result.warnings,
+				);
+				// Compute and persist column profiles (runs SQL against populated tables)
+				this.persistColumnProfiles(schema);
+				const relationships = this.extractRelationships(schema);
+				// Build staging warnings if data was lost
+				const stagingWarnings: Record<string, unknown> = {};
+				if (result.failedRows > 0) {
+					stagingWarnings.rows_skipped = result.failedRows;
+					stagingWarnings.sample_errors = result.warnings
+						.slice(0, 5)
+						.map((w) => ({ row: w.rowIndex, table: w.table, error: w.error }));
+				}
+				const lossPercent =
+					result.inputRows > 0
+						? (result.failedRows / result.inputRows) * 100
+						: 0;
+				if (lossPercent > 5) {
+					stagingWarnings.data_loss_warning =
+						`${result.failedRows} of ${result.inputRows} rows (${lossPercent.toFixed(1)}%) failed to stage. ` +
+						`This exceeds the 5% threshold. Review sample_errors for details.`;
+				}
+
+				return this.jsonResponse({
+					success: true,
+					table_count: result.tablesCreated.length,
+					total_rows: result.totalRows,
+					input_rows: result.inputRows,
+					table_row_counts: result.tableRowCounts,
+					tables_created: result.tablesCreated,
+					...(relationships.length > 0 ? { relationships } : {}),
+					...(Object.keys(stagingWarnings).length > 0
+						? { staging_warnings: stagingWarnings }
+						: {}),
+				});
+			} catch (matErr) {
+				console.warn("T5.3 staging fallback: materialization failed", matErr);
 			}
-
-			const result = this.ctx.storage.transactionSync(() =>
-				materializeSchema(
-					schema,
-					rowsMap,
-					this.sql,
-				),
-			);
-
-			// Track row counts in provenance
-			this.updateProvenanceRowCounts(
-				result.inputRows,
-				result.totalRows,
-				result.failedRows,
-				result.warnings,
-			);
-
-			// Compute and persist column profiles (runs SQL against the just-populated tables)
-			this.persistColumnProfiles(schema);
-
-			// Extract relationships from schema
-			const relationships = this.extractRelationships(schema);
-
-			// Build staging warnings if data was lost
-			const stagingWarnings: Record<string, unknown> = {};
-			if (result.failedRows > 0) {
-				stagingWarnings.rows_skipped = result.failedRows;
-				stagingWarnings.sample_errors = result.warnings.slice(0, 5).map((w) => ({
-					row: w.rowIndex,
-					table: w.table,
-					error: w.error,
-				}));
-			}
-			const lossPercent = result.inputRows > 0
-				? (result.failedRows / result.inputRows) * 100
-				: 0;
-			if (lossPercent > 5) {
-				stagingWarnings.data_loss_warning =
-					`${result.failedRows} of ${result.inputRows} rows (${lossPercent.toFixed(1)}%) failed to stage. ` +
-					`This exceeds the 5% threshold. Review sample_errors for details.`;
-			}
-
-			return this.jsonResponse({
-				success: true,
-				table_count: result.tablesCreated.length,
-				total_rows: result.totalRows,
-				input_rows: result.inputRows,
-				table_row_counts: result.tableRowCounts,
-				tables_created: result.tablesCreated,
-				...(relationships.length > 0 ? { relationships } : {}),
-				...(Object.keys(stagingWarnings).length > 0 ? { staging_warnings: stagingWarnings } : {}),
-			});
 		}
 
 		// Fallback: store entire payload as chunked JSON
@@ -530,17 +527,14 @@ export class RestStagingDO extends DurableObject {
 				created_at TEXT DEFAULT CURRENT_TIMESTAMP
 			)`,
 		);
-		const jsonStr = await this.chunking.smartJsonStringify(
-			data,
-			this.sql,
-		);
-		this.sql.exec(
-			`INSERT INTO payloads (root_json) VALUES (?)`,
-			jsonStr,
-		);
+		const jsonStr = await this.chunking.smartJsonStringify(data, this.sql);
+		this.sql.exec(`INSERT INTO payloads (root_json) VALUES (?)`, jsonStr);
 		const count =
-			(this.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as { c: number })
-				?.c ?? 0;
+			(
+				this.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as {
+					c: number;
+				}
+			)?.c ?? 0;
 		return this.jsonResponse({
 			success: true,
 			table_count: 1,
@@ -551,7 +545,9 @@ export class RestStagingDO extends DurableObject {
 
 	private async handleQuery(request: Request): Promise<Response> {
 		const raw: unknown = await request.json();
-		const body: SqlQueryBody = (raw !== null && typeof raw === "object" ? raw : { sql: "" }) as SqlQueryBody;
+		const body: SqlQueryBody = (
+			raw !== null && typeof raw === "object" ? raw : { sql: "" }
+		) as SqlQueryBody;
 
 		// Pre-execution schema validation — catches column/table typos with suggestions
 		const validationError = this.validateSql(body.sql);
@@ -568,7 +564,9 @@ export class RestStagingDO extends DurableObject {
 				// Wrap the user's query (with LIMIT stripped) in a COUNT(*)
 				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
 				const countResult = this.sql.exec(countSql).one();
-				totalMatching = Number((countResult as { c: number })?.c ?? results.length);
+				totalMatching = Number(
+					(countResult as { c: number })?.c ?? results.length,
+				);
 				truncated = totalMatching > results.length;
 			} catch {
 				// If COUNT wrapper fails (e.g. complex CTEs), just report based on results
@@ -588,7 +586,11 @@ export class RestStagingDO extends DurableObject {
 
 	private async handleQueryEnhanced(request: Request): Promise<Response> {
 		const rawEnhanced: unknown = await request.json();
-		const body: SqlQueryBody = (rawEnhanced !== null && typeof rawEnhanced === "object" ? rawEnhanced : { sql: "" }) as SqlQueryBody;
+		const body: SqlQueryBody = (
+			rawEnhanced !== null && typeof rawEnhanced === "object"
+				? rawEnhanced
+				: { sql: "" }
+		) as SqlQueryBody;
 
 		// Pre-execution schema validation — catches column/table typos with suggestions
 		const validationError = this.validateSql(body.sql);
@@ -625,7 +627,9 @@ export class RestStagingDO extends DurableObject {
 			try {
 				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
 				const countResult = this.sql.exec(countSql).one();
-				totalMatching = Number((countResult as { c: number })?.c ?? enhanced.length);
+				totalMatching = Number(
+					(countResult as { c: number })?.c ?? enhanced.length,
+				);
 				truncated = totalMatching > enhanced.length;
 			} catch {
 				truncated = undefined;
@@ -663,7 +667,9 @@ export class RestStagingDO extends DurableObject {
 		let inferredSchema: InferredSchema | undefined;
 		try {
 			const schemaResults = this.sql
-				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_inferred_schema'`)
+				.exec(
+					`SELECT name FROM sqlite_master WHERE type='table' AND name = '_inferred_schema'`,
+				)
 				.toArray();
 			if (schemaResults.length > 0) {
 				const schemaRow = this.sql
@@ -673,7 +679,9 @@ export class RestStagingDO extends DurableObject {
 					inferredSchema = JSON.parse(schemaRow.schema_json) as InferredSchema;
 				}
 			}
-		} catch { /* best-effort: — fall back to PRAGMA-only output */ }
+		} catch {
+			/* best-effort: — fall back to PRAGMA-only output */
+		}
 
 		// Build column metadata lookup from inferred schema
 		const columnMeta = buildColumnMeta(inferredSchema);
@@ -682,17 +690,23 @@ export class RestStagingDO extends DurableObject {
 		let columnProfiles: TableProfile[] | undefined;
 		try {
 			const profileResults = this.sql
-				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_column_profiles'`)
+				.exec(
+					`SELECT name FROM sqlite_master WHERE type='table' AND name = '_column_profiles'`,
+				)
 				.toArray();
 			if (profileResults.length > 0) {
 				const profileRow = this.sql
 					.exec(`SELECT profiles_json FROM _column_profiles WHERE id = 1`)
 					.one() as { profiles_json: string } | undefined;
 				if (profileRow?.profiles_json) {
-					columnProfiles = JSON.parse(profileRow.profiles_json) as TableProfile[];
+					columnProfiles = JSON.parse(
+						profileRow.profiles_json,
+					) as TableProfile[];
 				}
 			}
-		} catch { /* best-effort: non-critical fallback */ }
+		} catch {
+			/* best-effort: non-critical fallback */
+		}
 
 		// Build profile lookup: tableName → { colName → ColumnProfile }
 		const profileByTable = buildProfileByTable(columnProfiles);
@@ -726,21 +740,30 @@ export class RestStagingDO extends DurableObject {
 		const relationships: TableRelationship[] = inferredSchema
 			? this.extractRelationships(inferredSchema)
 			: [];
-		const relationshipsWithJoins = buildRelationshipJoins(relationships, inferredSchema);
+		const relationshipsWithJoins = buildRelationshipJoins(
+			relationships,
+			inferredSchema,
+		);
 
 		// Include provenance metadata if available
 		let provenance: ProvenanceRow | undefined;
 		try {
 			const metaResults = this.sql
-				.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name = '_staging_metadata'`)
+				.exec(
+					`SELECT name FROM sqlite_master WHERE type='table' AND name = '_staging_metadata'`,
+				)
 				.toArray();
 			if (metaResults.length > 0) {
 				const metaRow = this.sql
-					.exec(`SELECT tool_name, server_name, api_url, staged_at, input_rows, stored_rows, failed_rows FROM _staging_metadata ORDER BY id DESC LIMIT 1`)
+					.exec(
+						`SELECT tool_name, server_name, api_url, staged_at, input_rows, stored_rows, failed_rows FROM _staging_metadata ORDER BY id DESC LIMIT 1`,
+					)
 					.toArray();
 				provenance = normalizeProvenance(metaRow[0]);
 			}
-		} catch { /* best-effort: Ignore — provenance is optional */ }
+		} catch {
+			/* best-effort: Ignore — provenance is optional */
+		}
 
 		return this.jsonResponse({
 			success: true,
@@ -748,7 +771,9 @@ export class RestStagingDO extends DurableObject {
 				table_count: Object.keys(tables).length,
 				total_rows: totalRows,
 				tables,
-				...(relationshipsWithJoins.length > 0 ? { relationships: relationshipsWithJoins } : {}),
+				...(relationshipsWithJoins.length > 0
+					? { relationships: relationshipsWithJoins }
+					: {}),
 				metadata: {
 					timestamp: new Date().toISOString(),
 					...(provenance ? { provenance } : {}),
@@ -763,7 +788,9 @@ export class RestStagingDO extends DurableObject {
 	 */
 	private async handleRegister(request: Request): Promise<Response> {
 		const rawRegister: unknown = await request.json();
-		const body: RegisterRequestBody = (rawRegister !== null && typeof rawRegister === "object" ? rawRegister : {}) as RegisterRequestBody;
+		const body: RegisterRequestBody = (
+			rawRegister !== null && typeof rawRegister === "object" ? rawRegister : {}
+		) as RegisterRequestBody;
 
 		if (!body.session_id || !body.data_access_id) {
 			return this.jsonResponse(
@@ -797,7 +824,9 @@ export class RestStagingDO extends DurableObject {
 	private async handleList(sessionId?: string): Promise<Response> {
 		// Check if the registry table exists
 		const tableExists = this.sql
-			.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='_session_registry'`)
+			.exec(
+				`SELECT name FROM sqlite_master WHERE type='table' AND name='_session_registry'`,
+			)
 			.toArray();
 		if (tableExists.length === 0) {
 			return this.jsonResponse({ success: true, datasets: [] });
@@ -821,9 +850,10 @@ export class RestStagingDO extends DurableObject {
 
 		const datasets = rows.map((row) => {
 			const r = row as unknown as SessionRegistryRow;
-			const parsedTables = typeof r.tables_json === "string"
-				? (safeJsonParse(r.tables_json) ?? [])
-				: [];
+			const parsedTables =
+				typeof r.tables_json === "string"
+					? (safeJsonParse(r.tables_json) ?? [])
+					: [];
 			return {
 				data_access_id: r.data_access_id,
 				tool_name: r.tool_name,

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { introspectionToSummary } from "./graphql-to-typescript";
+import { describe, expect, it } from "vitest";
 import type { TrimmedIntrospection } from "./graphql-introspection";
+import { introspectionToSummary } from "./graphql-to-typescript";
 
 const MOCK_INTROSPECTION: TrimmedIntrospection = {
 	queryType: { name: "Query" },
@@ -82,7 +82,9 @@ describe("introspectionToSummary", () => {
 	});
 
 	it("respects maxQueryFields", () => {
-		const summary = introspectionToSummary(MOCK_INTROSPECTION, { maxQueryFields: 1 });
+		const summary = introspectionToSummary(MOCK_INTROSPECTION, {
+			maxQueryFields: 1,
+		});
 		expect(summary).toContain("target(");
 		expect(summary).toContain("... 2 more");
 		expect(summary).not.toContain("disease(");
@@ -95,7 +97,9 @@ describe("introspectionToSummary", () => {
 	});
 
 	it("respects maxFieldsPerType", () => {
-		const summary = introspectionToSummary(MOCK_INTROSPECTION, { maxFieldsPerType: 2 });
+		const summary = introspectionToSummary(MOCK_INTROSPECTION, {
+			maxFieldsPerType: 2,
+		});
 		expect(summary).toMatch(/Target: name, tdl, \.\.\. \+3 more/);
 	});
 

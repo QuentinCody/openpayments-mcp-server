@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-	COHORT_BUILD,
 	buildKeyFor,
 	buildVariantRecord,
+	COHORT_BUILD,
 	formatForCohort,
 	liftover,
 	lookupPosition,
@@ -16,7 +16,12 @@ import {
 
 function makeFetchStub(handlers: Record<string, unknown>): typeof fetch {
 	return (async (input: RequestInfo | URL) => {
-		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+		const url =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.toString()
+					: input.url;
 		for (const [pattern, body] of Object.entries(handlers)) {
 			if (url.includes(pattern)) {
 				return new Response(JSON.stringify(body), {
@@ -31,7 +36,12 @@ function makeFetchStub(handlers: Record<string, unknown>): typeof fetch {
 
 describe("parseVariantString", () => {
 	it("parses dash-separated GRCh38 input", () => {
-		expect(parseVariantString("1-12345-A-G")).toEqual({ chr: "1", pos: 12345, ref: "A", alt: "G" });
+		expect(parseVariantString("1-12345-A-G")).toEqual({
+			chr: "1",
+			pos: 12345,
+			ref: "A",
+			alt: "G",
+		});
 	});
 	it("parses chr-prefixed colon/underscore form", () => {
 		expect(parseVariantString("chr10:200_A/G")).toEqual({
@@ -45,7 +55,9 @@ describe("parseVariantString", () => {
 		expect(parseVariantString("chrM-1-A-T").chr).toBe("MT");
 	});
 	it("rejects malformed input", () => {
-		expect(() => parseVariantString("nonsense")).toThrow(/Invalid variant format/);
+		expect(() => parseVariantString("nonsense")).toThrow(
+			/Invalid variant format/,
+		);
 		expect(() => parseVariantString("")).toThrow(/empty/);
 		expect(() => parseVariantString("1-foo-A-G")).toThrow(/position/);
 		expect(() => parseVariantString("chrZZ-1-A-G")).toThrow(/chromosome/);
@@ -66,7 +78,9 @@ describe("buildKeyFor", () => {
 
 describe("buildVariantRecord", () => {
 	it("computes canonical when ref+alt provided", () => {
-		expect(buildVariantRecord("1", 12345, "A", "G").canonical).toBe("1:12345-A-G");
+		expect(buildVariantRecord("1", 12345, "A", "G").canonical).toBe(
+			"1:12345-A-G",
+		);
 	});
 	it("omits canonical when ref or alt missing", () => {
 		expect(buildVariantRecord("1", 12345, null, "G").canonical).toBeUndefined();
@@ -80,10 +94,14 @@ describe("formatForCohort", () => {
 		).toBe("1:100-A-G");
 	});
 	it("constructs canonical when missing", () => {
-		expect(formatForCohort({ chr: "2", pos: 5, ref: "T", alt: "C" }, "bbj")).toBe("2:5-T-C");
+		expect(
+			formatForCohort({ chr: "2", pos: 5, ref: "T", alt: "C" }, "bbj"),
+		).toBe("2:5-T-C");
 	});
 	it("throws when ref/alt missing", () => {
-		expect(() => formatForCohort({ chr: "1", pos: 1, ref: null, alt: null }, "finngen")).toThrow();
+		expect(() =>
+			formatForCohort({ chr: "1", pos: 1, ref: null, alt: null }, "finngen"),
+		).toThrow();
 	});
 });
 
@@ -140,12 +158,22 @@ describe("resolveRsid", () => {
 		const fetchImpl = makeFetchStub({
 			"https://rest.ensembl.org/variation/human/rs1": {
 				mappings: [
-					{ assembly_name: "GRCh38", seq_region_name: "1", start: 200, allele_string: "A/G" },
+					{
+						assembly_name: "GRCh38",
+						seq_region_name: "1",
+						start: 200,
+						allele_string: "A/G",
+					},
 				],
 			},
 			"https://grch37.rest.ensembl.org/variation/human/rs1": {
 				mappings: [
-					{ assembly_name: "GRCh37", seq_region_name: "1", start: 100, allele_string: "A/G" },
+					{
+						assembly_name: "GRCh37",
+						seq_region_name: "1",
+						start: 100,
+						allele_string: "A/G",
+					},
 				],
 			},
 		});
@@ -168,7 +196,12 @@ describe("resolveVariant grch38 input", () => {
 			],
 			"https://grch37.rest.ensembl.org/variation/human/rs1": {
 				mappings: [
-					{ assembly_name: "GRCh37", seq_region_name: "1", start: 100, allele_string: "A/G" },
+					{
+						assembly_name: "GRCh37",
+						seq_region_name: "1",
+						start: 100,
+						allele_string: "A/G",
+					},
 				],
 			},
 		});
@@ -191,9 +224,9 @@ describe("resolveVariant grch38 input", () => {
 		const fetchImpl = makeFetchStub({
 			"/overlap/region/human/1:200-200": [],
 		});
-		await expect(resolveVariant("grch38", "1-200-A-G", { fetchImpl })).rejects.toBeInstanceOf(
-			VariantResolutionError,
-		);
+		await expect(
+			resolveVariant("grch38", "1-200-A-G", { fetchImpl }),
+		).rejects.toBeInstanceOf(VariantResolutionError);
 	});
 });
 
@@ -214,7 +247,12 @@ describe("liftover", () => {
 			],
 			"https://rest.ensembl.org/variation/human/rs1": {
 				mappings: [
-					{ assembly_name: "GRCh38", seq_region_name: "1", start: 200, allele_string: "A/G" },
+					{
+						assembly_name: "GRCh38",
+						seq_region_name: "1",
+						start: 200,
+						allele_string: "A/G",
+					},
 				],
 			},
 		});
@@ -224,7 +262,13 @@ describe("liftover", () => {
 			"GRCh38",
 			{ fetchImpl },
 		);
-		expect(result).toEqual({ chr: "1", pos: 200, ref: "A", alt: "G", canonical: "1:200-A-G" });
+		expect(result).toEqual({
+			chr: "1",
+			pos: 200,
+			ref: "A",
+			alt: "G",
+			canonical: "1:200-A-G",
+		});
 	});
 
 	it("throws when target build has no mapping", async () => {
@@ -235,7 +279,9 @@ describe("liftover", () => {
 			"https://rest.ensembl.org/variation/human/rs1": { mappings: [] },
 		});
 		await expect(
-			liftover({ chr: "1", pos: 100, ref: "A", alt: "G" }, "GRCh37", "GRCh38", { fetchImpl }),
+			liftover({ chr: "1", pos: 100, ref: "A", alt: "G" }, "GRCh37", "GRCh38", {
+				fetchImpl,
+			}),
 		).rejects.toBeInstanceOf(VariantResolutionError);
 	});
 });

@@ -78,8 +78,37 @@ export interface Citation {
 	record_count?: number;
 	/** Staged-data handle, when the result was staged. */
 	data_access_id?: string;
+	/**
+	 * True when this citation attests an EMPTY result (an absence claim).
+	 * Absence claims are epistemically weaker than data claims: check
+	 * `verification` for whether the emptiness was probe-certified.
+	 */
+	negative_result?: boolean;
+	/**
+	 * How the negative was verified: "probe-certified-empty" (the empty-result
+	 * guard retried the query and confirmed the dataset live via an unfiltered
+	 * probe) or "unverified-empty" (a plain zero-row result — treat as
+	 * UNCONFIRMED absence; re-verify via an alternate key before relying on it).
+	 */
+	verification?: string;
 	/** Pre-formatted, agent/human-readable citation line. */
 	text: string;
+}
+
+/** Pull an empty-result-guard annotation out of a result payload, if present. */
+function extractGuardInfo(
+	result: unknown,
+): { verified_empty?: boolean } | undefined {
+	if (result === null || typeof result !== "object") return undefined;
+	const direct = (result as { __guard?: unknown }).__guard;
+	if (direct && typeof direct === "object") {
+		return direct as { verified_empty?: boolean };
+	}
+	const nested = (result as { data?: { __guard?: unknown } }).data?.__guard;
+	if (nested && typeof nested === "object") {
+		return nested as { verified_empty?: boolean };
+	}
+	return undefined;
 }
 
 export interface BuildCitationInput {
@@ -96,27 +125,63 @@ export interface BuildCitationInput {
 	dataAccessId?: string;
 }
 
+/**
+ * Classify whether a result is an ABSENCE claim, and how strongly verified.
+ * Guard-annotated empties (see `codemode/empty-result-guard`) are
+ * probe-certified; a bare zero-record result is an unverified negative.
+ */
+function classifyNegative(
+	result: unknown,
+	recordCount: number | undefined,
+): { negative_result: true; verification: string } | undefined {
+	const guard = extractGuardInfo(result);
+	if (guard?.verified_empty === true) {
+		return { negative_result: true, verification: "probe-certified-empty" };
+	}
+	if (recordCount === 0) {
+		return { negative_result: true, verification: "unverified-empty" };
+	}
+	return undefined;
+}
+
+function formatNegativeSuffix(verification: string | undefined): string {
+	if (verification === "probe-certified-empty") {
+		return ", NEGATIVE (probe-certified empty)";
+	}
+	if (verification === "unverified-empty") {
+		return ", NEGATIVE (unverified empty — reconfirm before relying on it)";
+	}
+	return "";
+}
+
 function formatCitation(
 	source: SourceDescriptor,
 	tool: string,
 	retrievedAt: string,
 	resultHash: string,
 	recordCount: number | undefined,
+	verification?: string,
 ): string {
-	const name = source.version ? `${source.name} ${source.version}` : source.name;
+	const name = source.version
+		? `${source.name} ${source.version}`
+		: source.name;
 	let line = `${name} — ${tool}, retrieved ${retrievedAt}`;
 	if (typeof recordCount === "number") {
 		line += `, ${recordCount} record${recordCount === 1 ? "" : "s"}`;
 	}
 	line += `, sha256:${resultHash.slice(0, 12)}`;
+	line += formatNegativeSuffix(verification);
 	if (source.url) line += ` (${source.url})`;
 	return line;
 }
 
 /** Build a verifiable citation for a tool result. */
-export async function buildCitation(input: BuildCitationInput): Promise<Citation> {
+export async function buildCitation(
+	input: BuildCitationInput,
+): Promise<Citation> {
 	const query_hash = await sha256Hex(canonicalJson(input.query));
 	const result_hash = await sha256Hex(canonicalJson(input.result));
+	const negative = classifyNegative(input.result, input.recordCount);
 	return {
 		source: input.source,
 		server: input.server,
@@ -124,9 +189,21 @@ export async function buildCitation(input: BuildCitationInput): Promise<Citation
 		retrieved_at: input.retrievedAt,
 		query_hash,
 		result_hash,
-		...(input.recordCount !== undefined ? { record_count: input.recordCount } : {}),
-		...(input.dataAccessId !== undefined ? { data_access_id: input.dataAccessId } : {}),
-		text: formatCitation(input.source, input.tool, input.retrievedAt, result_hash, input.recordCount),
+		...(input.recordCount !== undefined
+			? { record_count: input.recordCount }
+			: {}),
+		...(input.dataAccessId !== undefined
+			? { data_access_id: input.dataAccessId }
+			: {}),
+		...(negative ?? {}),
+		text: formatCitation(
+			input.source,
+			input.tool,
+			input.retrievedAt,
+			result_hash,
+			input.recordCount,
+			negative?.verification,
+		),
 	};
 }
 

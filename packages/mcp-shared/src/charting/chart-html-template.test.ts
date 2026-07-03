@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildChartHtml } from "./chart-html-template.js";
 import type { ChartSpec } from "./chart-types.js";
 
@@ -55,7 +55,9 @@ describe("buildChartHtml", () => {
 	});
 
 	it("escapes HTML in title", () => {
-		const html = buildChartHtml(makeSpec({ title: '<script>alert("xss")</script>' }));
+		const html = buildChartHtml(
+			makeSpec({ title: '<script>alert("xss")</script>' }),
+		);
 		expect(html).not.toContain("<script>alert");
 		expect(html).toContain("&lt;script&gt;");
 	});
@@ -81,8 +83,15 @@ describe("buildChartHtml", () => {
 
 	it("handles each chart type without error", () => {
 		const types = [
-			"bar", "horizontal-bar", "line", "scatter", "pie",
-			"heatmap", "grouped-bar", "stacked-bar", "histogram",
+			"bar",
+			"horizontal-bar",
+			"line",
+			"scatter",
+			"pie",
+			"heatmap",
+			"grouped-bar",
+			"stacked-bar",
+			"histogram",
 		] as const;
 		for (const type of types) {
 			const html = buildChartHtml(makeSpec({ type }));

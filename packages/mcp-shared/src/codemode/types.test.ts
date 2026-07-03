@@ -40,16 +40,24 @@ describe("zodToTypeString — containers", () => {
 		expect(zodToTypeString(z.array(z.string()))).toBe("string[]");
 	});
 	it("parenthesizes union element types in arrays", () => {
-		expect(zodToTypeString(z.array(z.union([z.string(), z.number()])))).toBe("(string | number)[]");
+		expect(zodToTypeString(z.array(z.union([z.string(), z.number()])))).toBe(
+			"(string | number)[]",
+		);
 	});
 	it("renders unions", () => {
-		expect(zodToTypeString(z.union([z.string(), z.number()]))).toBe("string | number");
+		expect(zodToTypeString(z.union([z.string(), z.number()]))).toBe(
+			"string | number",
+		);
 	});
 	it("renders records as Record<string, V>", () => {
-		expect(zodToTypeString(z.record(z.string(), z.number()))).toBe("Record<string, number>");
+		expect(zodToTypeString(z.record(z.string(), z.number()))).toBe(
+			"Record<string, number>",
+		);
 	});
 	it("renders tuples positionally", () => {
-		expect(zodToTypeString(z.tuple([z.string(), z.number()]))).toBe("[string, number]");
+		expect(zodToTypeString(z.tuple([z.string(), z.number()]))).toBe(
+			"[string, number]",
+		);
 	});
 });
 
@@ -82,14 +90,14 @@ describe("zodToTypeString — objects", () => {
 		);
 	});
 	it("appends descriptions as line comments", () => {
-		expect(zodToTypeString(z.object({ id: z.string().describe("the id") }))).toBe(
-			"{\n\tid: string; // the id\n}",
-		);
+		expect(
+			zodToTypeString(z.object({ id: z.string().describe("the id") })),
+		).toBe("{\n\tid: string; // the id\n}");
 	});
 	it("nests recursively", () => {
-		expect(zodToTypeString(z.object({ child: z.object({ x: z.boolean() }) }))).toBe(
-			"{\n\tchild: {\n\tx: boolean;\n};\n}",
-		);
+		expect(
+			zodToTypeString(z.object({ child: z.object({ x: z.boolean() }) })),
+		).toBe("{\n\tchild: {\n\tx: boolean;\n};\n}");
 	});
 });
 
@@ -107,17 +115,25 @@ describe("zodToTypeString — non-schema input", () => {
 describe("generateTypes", () => {
 	it("emits Input/Output types and a codemode tool signature from a full zod object", () => {
 		const out = generateTypes([
-			{ name: "get_thing", description: "Gets a thing", inputSchema: z.object({ id: z.string() }) },
+			{
+				name: "get_thing",
+				description: "Gets a thing",
+				inputSchema: z.object({ id: z.string() }),
+			},
 		]);
 		expect(out).toContain("type GetThingInput = {\n\tid: string;\n}");
 		expect(out).toContain("type GetThingOutput = any");
-		expect(out).toContain("get_thing: (input: GetThingInput) => Promise<GetThingOutput>;");
+		expect(out).toContain(
+			"get_thing: (input: GetThingInput) => Promise<GetThingOutput>;",
+		);
 		expect(out).toContain("/** Gets a thing */");
 		expect(out).toContain("declare const codemode: {");
 	});
 
 	it("treats a plain shape object as an interface", () => {
-		const out = generateTypes([{ name: "search", inputSchema: { q: z.string() } }]);
+		const out = generateTypes([
+			{ name: "search", inputSchema: { q: z.string() } },
+		]);
 		expect(out).toContain("interface SearchInput {\n\tq: string;\n}");
 	});
 
@@ -125,13 +141,15 @@ describe("generateTypes", () => {
 		// Build the empty shape via a variable: an inline empty raw schema literal
 		// is a banned MCP pattern that the source scanner (mcp-sdk-schema-compat) flags.
 		const emptyShape: Record<string, unknown> = {};
-		expect(generateTypes([{ name: "ping", inputSchema: emptyShape }])).toContain(
-			"type PingInput = {}",
-		);
+		expect(
+			generateTypes([{ name: "ping", inputSchema: emptyShape }]),
+		).toContain("type PingInput = {}");
 	});
 
 	it("renders a non-object input schema as an empty type", () => {
-		expect(generateTypes([{ name: "noop", inputSchema: undefined }])).toContain("type NoopInput = {}");
+		expect(generateTypes([{ name: "noop", inputSchema: undefined }])).toContain(
+			"type NoopInput = {}",
+		);
 	});
 
 	it("always includes the query/queryBatch/store helper declarations", () => {

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	enrichWithVariablePrecisionDate,
 	PRECISION_DAY,
 	PRECISION_MONTH,
 	PRECISION_NONE,
 	PRECISION_TIME,
 	PRECISION_YEAR,
-	enrichWithVariablePrecisionDate,
 	parseVariablePrecisionDate,
 	variablePrecisionColumnNames,
 } from "./variable-precision-date";
@@ -126,7 +126,13 @@ describe("enrichWithVariablePrecisionDate", () => {
 
 describe("ORDER BY correctness across mixed precision", () => {
 	it("ISO prefixes sort correctly across YEAR/MONTH/DAY/TIME", () => {
-		const dates = ["2024", "2024-03", "2024-03-15", "2024-03-15T12:34:56Z", "2025"];
+		const dates = [
+			"2024",
+			"2024-03",
+			"2024-03-15",
+			"2024-03-15T12:34:56Z",
+			"2025",
+		];
 		const isos = dates.map((d) => parseVariablePrecisionDate(d).iso);
 		const sorted = [...isos].sort();
 		expect(sorted).toEqual(isos);

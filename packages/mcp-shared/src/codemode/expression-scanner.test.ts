@@ -28,7 +28,9 @@ describe("readQuotedString", () => {
 		expect(nextPos).toBe(7);
 	});
 	it("decodes escape sequences", () => {
-		expect(readQuotedString('"a\\nb\\tc\\\\d\\"e"', 0).value).toBe('a\nb\tc\\d"e');
+		expect(readQuotedString('"a\\nb\\tc\\\\d\\"e"', 0).value).toBe(
+			'a\nb\tc\\d"e',
+		);
 	});
 	it("throws on an unterminated string", () => {
 		expect(() => readQuotedString('"oops', 0)).toThrow();
@@ -53,7 +55,10 @@ describe("splitTopLevelExpressions", () => {
 		expect(splitTopLevelExpressions("a, b, c")).toEqual(["a", "b", "c"]);
 		expect(splitTopLevelExpressions("f(a, b), c")).toEqual(["f(a, b)", "c"]);
 		expect(splitTopLevelExpressions('"x,y", z')).toEqual(['"x,y"', "z"]);
-		expect(splitTopLevelExpressions("[1, 2], {a: 1}")).toEqual(["[1, 2]", "{a: 1}"]);
+		expect(splitTopLevelExpressions("[1, 2], {a: 1}")).toEqual([
+			"[1, 2]",
+			"{a: 1}",
+		]);
 	});
 	it("ignores escaped quotes inside strings", () => {
 		expect(splitTopLevelExpressions('"a\\",b", c')).toEqual(['"a\\",b"', "c"]);
@@ -62,7 +67,11 @@ describe("splitTopLevelExpressions", () => {
 
 describe("parseCallExpressionAt", () => {
 	it("parses callee + args for a simple and dotted call", () => {
-		expect(parseCallExpressionAt("foo(a, b)")).toEqual({ callee: "foo", argsStr: "a, b", nextPos: 9 });
+		expect(parseCallExpressionAt("foo(a, b)")).toEqual({
+			callee: "foo",
+			argsStr: "a, b",
+			nextPos: 9,
+		});
 		expect(parseCallExpressionAt("a.b.c(x)")?.callee).toBe("a.b.c");
 	});
 	it("handles nested parens and quoted parens in args", () => {
@@ -93,8 +102,14 @@ describe("findTopLevelArrow", () => {
 
 describe("findTopLevelOperator", () => {
 	it("returns the first top-level operator match", () => {
-		expect(findTopLevelOperator("a + b", ["+", "-"])).toEqual({ index: 2, operator: "+" });
-		expect(findTopLevelOperator("f(a+b) - c", ["+", "-"])).toEqual({ index: 7, operator: "-" });
+		expect(findTopLevelOperator("a + b", ["+", "-"])).toEqual({
+			index: 2,
+			operator: "+",
+		});
+		expect(findTopLevelOperator("f(a+b) - c", ["+", "-"])).toEqual({
+			index: 7,
+			operator: "-",
+		});
 		expect(findTopLevelOperator('"a+b"', ["+"])).toBe(null);
 	});
 });
@@ -109,7 +124,10 @@ describe("findTopLevelChar", () => {
 
 describe("parseMemberAccess", () => {
 	it("parses dotted and indexed access", () => {
-		expect(parseMemberAccess("a.b.c")).toEqual({ root: "a", segments: ["b", "c"] });
+		expect(parseMemberAccess("a.b.c")).toEqual({
+			root: "a",
+			segments: ["b", "c"],
+		});
 		expect(parseMemberAccess("a[0]")).toEqual({ root: "a", segments: [0] });
 		expect(parseMemberAccess("a['k']")).toEqual({ root: "a", segments: ["k"] });
 	});
@@ -122,8 +140,14 @@ describe("parseMemberAccess", () => {
 describe("parseArrowParam", () => {
 	it("parses identifier and array-destructure params", () => {
 		expect(parseArrowParam("x")).toEqual({ kind: "identifier", name: "x" });
-		expect(parseArrowParam("[a, b]")).toEqual({ kind: "array", names: ["a", "b"] });
-		expect(parseArrowParam("[a, 1]")).toEqual({ kind: "array", names: ["a", null] });
+		expect(parseArrowParam("[a, b]")).toEqual({
+			kind: "array",
+			names: ["a", "b"],
+		});
+		expect(parseArrowParam("[a, 1]")).toEqual({
+			kind: "array",
+			names: ["a", null],
+		});
 	});
 	it("throws on an unsupported param shape", () => {
 		expect(() => parseArrowParam("{a}")).toThrow();
@@ -132,10 +156,26 @@ describe("parseArrowParam", () => {
 
 describe("parseOptionalMemberAccess", () => {
 	it("parses optional and non-optional dotted/indexed access", () => {
-		expect(parseOptionalMemberAccess("?.x", 0)).toEqual({ key: "x", nextPos: 3, optional: true });
-		expect(parseOptionalMemberAccess(".y", 0)).toEqual({ key: "y", nextPos: 2, optional: false });
-		expect(parseOptionalMemberAccess("[0]", 0)).toEqual({ key: 0, nextPos: 3, optional: false });
-		expect(parseOptionalMemberAccess('["k"]', 0)).toEqual({ key: "k", nextPos: 5, optional: false });
+		expect(parseOptionalMemberAccess("?.x", 0)).toEqual({
+			key: "x",
+			nextPos: 3,
+			optional: true,
+		});
+		expect(parseOptionalMemberAccess(".y", 0)).toEqual({
+			key: "y",
+			nextPos: 2,
+			optional: false,
+		});
+		expect(parseOptionalMemberAccess("[0]", 0)).toEqual({
+			key: 0,
+			nextPos: 3,
+			optional: false,
+		});
+		expect(parseOptionalMemberAccess('["k"]', 0)).toEqual({
+			key: "k",
+			nextPos: 5,
+			optional: false,
+		});
 	});
 	it("returns null when the position is not a member accessor", () => {
 		expect(parseOptionalMemberAccess("xyz", 0)).toBe(null);

@@ -7,4 +7,7 @@
 
 export * from "./code-systems";
 export * from "./coding-display";
-export { LOINC_VITALS_DICT, LOINC_VITALS_REGISTRATION } from "./dicts/loinc-vitals";
+export {
+	LOINC_VITALS_DICT,
+	LOINC_VITALS_REGISTRATION,
+} from "./dicts/loinc-vitals";

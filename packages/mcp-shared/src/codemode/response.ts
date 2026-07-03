@@ -63,7 +63,9 @@ export interface ErrorResponse extends Record<string, unknown> {
 	};
 }
 
-export type StructuredResponse<T = unknown> = SuccessResponse<T> | ErrorResponse;
+export type StructuredResponse<T = unknown> =
+	| SuccessResponse<T>
+	| ErrorResponse;
 
 /**
  * Create a Code Mode compatible response with both text (for traditional MCP)
@@ -155,7 +157,10 @@ export function withCodeMode<TArgs, TResult>(
 		transformResult?: (result: TResult) => unknown;
 		extractMeta?: (result: TResult) => Record<string, unknown>;
 	},
-): (args: TArgs, env?: unknown) => Promise<CodeModeResponse<StructuredResponse>> {
+): (
+	args: TArgs,
+	env?: unknown,
+) => Promise<CodeModeResponse<StructuredResponse>> {
 	return async (
 		args: TArgs,
 		env?: unknown,
@@ -176,13 +181,22 @@ export function withCodeMode<TArgs, TResult>(
 
 			if (error instanceof Error) {
 				message = error.message;
-				if (message.includes("Invalid arguments") || message.includes("validation")) {
+				if (
+					message.includes("Invalid arguments") ||
+					message.includes("validation")
+				) {
 					code = ErrorCodes.INVALID_ARGUMENTS;
 				} else if (message.includes("required")) {
 					code = ErrorCodes.MISSING_REQUIRED_PARAM;
-				} else if (message.includes("not found") || message.includes("Not Found")) {
+				} else if (
+					message.includes("not found") ||
+					message.includes("Not Found")
+				) {
 					code = ErrorCodes.NOT_FOUND;
-				} else if (message.includes("timeout") || message.includes("timed out")) {
+				} else if (
+					message.includes("timeout") ||
+					message.includes("timed out")
+				) {
 					code = ErrorCodes.TIMEOUT;
 				} else if (message.includes("rate limit") || message.includes("429")) {
 					code = ErrorCodes.API_RATE_LIMIT;

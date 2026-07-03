@@ -24,7 +24,11 @@ interface McpAgentStub extends DurableObjectStub {
 export class CodeModeProxy extends WorkerEntrypoint<CodeModeProxyEnv> {
 	private stubByDoId = new Map<string, McpAgentStub>();
 
-	async callFunction(options: { functionName: string; args: unknown; doId: string }) {
+	async callFunction(options: {
+		functionName: string;
+		args: unknown;
+		doId: string;
+	}) {
 		let stub = this.stubByDoId.get(options.doId);
 		if (!stub) {
 			const ns = this.env.MCP_OBJECT;

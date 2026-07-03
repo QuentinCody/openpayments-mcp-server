@@ -80,7 +80,10 @@ export async function handleWorkspaceFetch(
 		}
 
 		return json(
-			{ success: false, error: `Unknown workspace route: ${request.method} ${pathname}` },
+			{
+				success: false,
+				error: `Unknown workspace route: ${request.method} ${pathname}`,
+			},
 			404,
 		);
 	} catch (err) {

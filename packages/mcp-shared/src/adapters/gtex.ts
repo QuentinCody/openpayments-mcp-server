@@ -17,7 +17,11 @@ export async function gtexGet<T = unknown>(
 	params: Record<string, unknown> = {},
 	opts: GtexFetchOpts = {},
 ): Promise<T> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, userAgent = "bio-mcp-gtex/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		userAgent = "bio-mcp-gtex/1.0",
+	} = opts;
 	const url = new URL(path.startsWith("http") ? path : `${GTEX_BASE}${path}`);
 	for (const [k, v] of Object.entries(params)) {
 		if (v == null) continue;
@@ -34,7 +38,10 @@ export async function gtexGet<T = unknown>(
 			headers: { Accept: "application/json", "User-Agent": userAgent },
 			signal: ctrl.signal,
 		});
-		if (!resp.ok) throw new Error(`GTEx HTTP ${resp.status}: ${await resp.text().catch(() => "")}`);
+		if (!resp.ok)
+			throw new Error(
+				`GTEx HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
+			);
 		return (await resp.json()) as T;
 	} finally {
 		clearTimeout(timer);
@@ -47,12 +54,16 @@ export async function gtexGet<T = unknown>(
  */
 export async function gtexEqtlsByVariants(
 	variantIds: string[],
-	opts: GtexFetchOpts & { tissueSiteDetailId?: string | string[]; itemsPerPage?: number } = {},
+	opts: GtexFetchOpts & {
+		tissueSiteDetailId?: string | string[];
+		itemsPerPage?: number;
+	} = {},
 ): Promise<unknown> {
 	const params: Record<string, unknown> = {
 		variantId: variantIds,
 		itemsPerPage: opts.itemsPerPage ?? 250,
 	};
-	if (opts.tissueSiteDetailId) params.tissueSiteDetailId = opts.tissueSiteDetailId;
+	if (opts.tissueSiteDetailId)
+		params.tissueSiteDetailId = opts.tissueSiteDetailId;
 	return gtexGet("/association/singleTissueEqtl", params, opts);
 }

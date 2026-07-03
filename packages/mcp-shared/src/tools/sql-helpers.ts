@@ -53,7 +53,10 @@ export function isBlocked(query: string): boolean {
 		return true;
 	}
 	return BLOCKED_STATEMENTS.some(
-		(stmt) => upper.startsWith(stmt) || upper.includes(` ${stmt} `) || upper.includes(` ${stmt}(`)
+		(stmt) =>
+			upper.startsWith(stmt) ||
+			upper.includes(` ${stmt} `) ||
+			upper.includes(` ${stmt}(`),
 	);
 }
 
@@ -61,23 +64,29 @@ export function isBlocked(query: string): boolean {
  * Execute a SQL query with optional parameters using the tagged template literal.
  * Builds a proper tagged template call to ensure parameterized execution.
  */
-export function executeSql<T = Record<string, string | number | boolean | null>>(
+export function executeSql<
+	T = Record<string, string | number | boolean | null>,
+>(
 	sql: SqlTaggedTemplate,
 	query: string,
-	params?: (string | number | boolean | null)[]
+	params?: (string | number | boolean | null)[],
 ): T[] {
 	if (!params || params.length === 0) {
-		const strings = Object.assign([query], { raw: [query] }) as unknown as TemplateStringsArray;
+		const strings = Object.assign([query], {
+			raw: [query],
+		}) as unknown as TemplateStringsArray;
 		return sql<T>(strings);
 	}
 
 	const parts = query.split("?");
 	if (parts.length !== params.length + 1) {
 		throw new Error(
-			`Parameter count mismatch: query has ${parts.length - 1} placeholders but ${params.length} params were provided`
+			`Parameter count mismatch: query has ${parts.length - 1} placeholders but ${params.length} params were provided`,
 		);
 	}
 
-	const strings = Object.assign(parts, { raw: parts }) as unknown as TemplateStringsArray;
+	const strings = Object.assign(parts, {
+		raw: parts,
+	}) as unknown as TemplateStringsArray;
 	return sql<T>(strings, ...params);
 }

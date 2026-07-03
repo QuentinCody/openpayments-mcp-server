@@ -25,7 +25,12 @@ export async function ensemblGet<T = unknown>(
 	path: string,
 	opts: EnsemblFetchOpts = {},
 ): Promise<T> {
-	const { fetchImpl = fetch, timeoutMs = 15_000, build, userAgent = "bio-mcp-ensembl/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 15_000,
+		build,
+		userAgent = "bio-mcp-ensembl/1.0",
+	} = opts;
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	try {
@@ -34,7 +39,10 @@ export async function ensemblGet<T = unknown>(
 			headers: { Accept: "application/json", "User-Agent": userAgent },
 			signal: ctrl.signal,
 		});
-		if (!resp.ok) throw new Error(`Ensembl HTTP ${resp.status}: ${await resp.text().catch(() => "")}`);
+		if (!resp.ok)
+			throw new Error(
+				`Ensembl HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
+			);
 		return (await resp.json()) as T;
 	} finally {
 		clearTimeout(timer);
@@ -46,7 +54,12 @@ export async function ensemblPost<T = unknown>(
 	body: unknown,
 	opts: EnsemblFetchOpts = {},
 ): Promise<T> {
-	const { fetchImpl = fetch, timeoutMs = 20_000, build, userAgent = "bio-mcp-ensembl/1.0" } = opts;
+	const {
+		fetchImpl = fetch,
+		timeoutMs = 20_000,
+		build,
+		userAgent = "bio-mcp-ensembl/1.0",
+	} = opts;
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	try {
@@ -61,7 +74,10 @@ export async function ensemblPost<T = unknown>(
 			body: JSON.stringify(body),
 			signal: ctrl.signal,
 		});
-		if (!resp.ok) throw new Error(`Ensembl HTTP ${resp.status}: ${await resp.text().catch(() => "")}`);
+		if (!resp.ok)
+			throw new Error(
+				`Ensembl HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
+			);
 		return (await resp.json()) as T;
 	} finally {
 		clearTimeout(timer);

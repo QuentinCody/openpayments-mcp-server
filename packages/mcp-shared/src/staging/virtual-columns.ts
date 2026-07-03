@@ -148,7 +148,9 @@ function discoverColumns(samples: unknown[]): VirtualColumnDef[] {
 			if (!columnValues.has(key)) columnValues.set(key, new Set());
 
 			if (typeof value === "number") {
-				columnValues.get(key)!.add(Number.isInteger(value) ? "INTEGER" : "REAL");
+				columnValues
+					.get(key)!
+					.add(Number.isInteger(value) ? "INTEGER" : "REAL");
 			} else if (typeof value === "boolean") {
 				columnValues.get(key)!.add("INTEGER");
 			} else {

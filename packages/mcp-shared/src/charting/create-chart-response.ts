@@ -9,9 +9,9 @@
  * Runs in the Cloudflare Worker (MCP Server), not the V8 isolate sandbox.
  */
 
-import type { ChartSpec, ChartResponseOptions } from "./chart-types.js";
-import { renderUnicodeChart } from "./unicode-chart.js";
 import { buildChartHtml } from "./chart-html-template.js";
+import type { ChartResponseOptions, ChartSpec } from "./chart-types.js";
+import { renderUnicodeChart } from "./unicode-chart.js";
 
 const MAX_CHART_DATA_ROWS = 200;
 
@@ -35,7 +35,9 @@ export interface ChartResponseResult {
 	};
 }
 
-export function createChartResponse(options: ChartResponseOptions): ChartResponseResult {
+export function createChartResponse(
+	options: ChartResponseOptions,
+): ChartResponseResult {
 	const { chart, toolPrefix, textPreamble } = options;
 
 	if (!chart.data || chart.data.length === 0) {

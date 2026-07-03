@@ -49,7 +49,10 @@ export class CodingDictRegistry {
 		}
 	}
 
-	lookup(systemUri: string | undefined, code: string | undefined): string | undefined {
+	lookup(
+		systemUri: string | undefined,
+		code: string | undefined,
+	): string | undefined {
 		if (!systemUri || !code) return undefined;
 		return this.dicts.get(systemUri)?.[code];
 	}
@@ -65,7 +68,10 @@ export class CodingDictRegistry {
  * Returns `undefined` only when both `coding.display` is missing and `code` is
  * missing. Otherwise produces some non-empty string.
  */
-export function safeCodingDisplay(coding: Coding | undefined, registry?: CodingDictRegistry): string | undefined {
+export function safeCodingDisplay(
+	coding: Coding | undefined,
+	registry?: CodingDictRegistry,
+): string | undefined {
 	if (!coding) return undefined;
 	if (coding.display && coding.display.length > 0) return coding.display;
 	const fromDict = registry?.lookup(coding.system, coding.code);
@@ -122,7 +128,9 @@ export function safeConceptDisplay(
  * Pull the first code from a CodeableConcept regardless of system. Useful for
  * status-style fields where downstream code wants the bare token (e.g., `"active"`).
  */
-export function firstCode(concept: CodeableConcept | undefined): string | undefined {
+export function firstCode(
+	concept: CodeableConcept | undefined,
+): string | undefined {
 	if (!concept) return undefined;
 	const c = concept.coding?.[0];
 	return c?.code;
