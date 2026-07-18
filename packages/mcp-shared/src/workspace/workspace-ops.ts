@@ -19,7 +19,13 @@ import {
 	materializeSchema,
 	type SchemaHints,
 } from "../staging/schema-inference";
-import { applyDefaultLimit, assertReadOnlySql } from "../staging/sql-guard";
+import {
+	applyDefaultLimit,
+	assertReadOnlySql,
+	clampLimit,
+	isReadOnlyDescribe,
+	MAX_RESULT_BYTES,
+} from "../staging/sql-guard";
 
 /** The subset of Cloudflare's `SqlStorage` these ops use. */
 export interface WorkspaceSql {
@@ -244,6 +250,44 @@ export interface QueryWorkspaceResult {
 	sql: string;
 	/** A full page came back and the caller set no LIMIT → there may be more rows. */
 	truncated: boolean;
+	/** Why the result was cut short, when a cost ceiling cut it (doc 03). */
+	truncation?: { reason: "size_limit"; detail: string };
+}
+
+/**
+ * Drop rows past the byte ceiling (doc 03 §5).
+ *
+ * The ROW ceiling is already enforced by the clamped LIMIT in the SQL, and
+ * WorkspaceSql exposes only toArray() — no cursor, so no incremental pull and
+ * no rowsRead to budget against. Rows are therefore already materialized by the
+ * time this runs; it bounds the RESPONSE, which is what the 100 KB transport
+ * limit cares about.
+ */
+function capResultBytes(rows: Record<string, unknown>[]): {
+	rows: Record<string, unknown>[];
+	truncation?: { reason: "size_limit"; detail: string };
+} {
+	// Measure the SERIALIZED ARRAY, not the sum of the rows: the `[]` and the `,`
+	// separators are ~1 byte/row, which at thousands of narrow rows is kilobytes
+	// — enough to push a "capped" response back over the 100 KB transport limit
+	// this cap exists to stay under.
+	let bytes = 2;
+	for (let i = 0; i < rows.length; i++) {
+		bytes += JSON.stringify(rows[i]).length + (i > 0 ? 1 : 0);
+		if (bytes > MAX_RESULT_BYTES) {
+			return {
+				rows: rows.slice(0, i),
+				truncation: {
+					reason: "size_limit",
+					detail:
+						`Result stopped at ${i} of ${rows.length} row(s): the next row would ` +
+						`exceed the ${MAX_RESULT_BYTES}-byte response ceiling. Select fewer ` +
+						"columns or add a LIMIT.",
+				},
+			};
+		}
+	}
+	return { rows };
 }
 
 /** The cross-dataset JOIN surface: read-only SQL across every staged table. */
@@ -252,18 +296,36 @@ export function queryWorkspace(
 	params: { sql: string; limit?: number },
 ): QueryWorkspaceResult {
 	const sanitized = assertReadOnlySql(params.sql);
-	const limit = params.limit ?? 100;
+	// doc 03 §1 — a caller limit can only ever be LOWERED to the hard ceiling.
+	const limit = clampLimit(params.limit ?? 100);
 	const callerSetLimit = sanitized.toLowerCase().includes("limit");
-	const finalSql = applyDefaultLimit(sanitized, limit);
-	const rows = sql.exec(finalSql).toArray();
+	// T3.4 — the `PRAGMA table_info(<table>)` describe takes no LIMIT (appending
+	// one is a SQLite syntax error), so it skips applyDefaultLimit. Mirrors
+	// `queryDataFromDo` in ../staging/utils.ts; `assertReadOnlySql` lets the
+	// describe through, so without this the allowed statement always throws.
+	const isDescribe = isReadOnlyDescribe(sanitized);
+	const finalSql = isDescribe ? sanitized : applyDefaultLimit(sanitized, limit);
+	const all = sql.exec(finalSql).toArray();
+	const capped = capResultBytes(all);
+	const rows = capped.rows;
 
 	// Heuristic truncation: a full default page, with no caller LIMIT, means the
 	// result was capped — signal it so the agent paginates. (Deliberately no
 	// COUNT(*) wrapper: it errors on duplicate-column / complex SQL and the exact
 	// total isn't needed to decide whether to fetch more.)
-	const truncated = !callerSetLimit && rows.length >= limit;
+	// A describe is exempt: no LIMIT was applied, so its row count is the table's
+	// full column count — a >=100-column table would otherwise report truncated.
+	const truncated =
+		capped.truncation != null ||
+		(!isDescribe && !callerSetLimit && all.length >= limit);
 
-	return { rows, row_count: rows.length, sql: finalSql, truncated };
+	return {
+		rows,
+		row_count: rows.length,
+		sql: finalSql,
+		truncated,
+		...(capped.truncation ? { truncation: capped.truncation } : {}),
+	};
 }
 
 export interface WorkspaceDatasetInfo {

@@ -57,7 +57,7 @@ export interface SearchToolResult {
 /**
  * Token-based search over catalog endpoints.
  */
-function searchEndpoints(
+export function searchEndpoints(
 	endpoints: ApiEndpoint[],
 	query: string,
 	maxResults: number,
@@ -95,7 +95,7 @@ function searchEndpoints(
 /**
  * Format an endpoint for display.
  */
-function formatEndpoint(ep: ApiEndpoint): string {
+export function formatEndpoint(ep: ApiEndpoint): string {
 	const lines = [`${ep.method} ${ep.path} — ${ep.summary}`];
 	if (ep.coveredByTool)
 		lines.push(`  (also available via tool: ${ep.coveredByTool})`);

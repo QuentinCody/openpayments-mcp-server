@@ -13,7 +13,7 @@
  * This helper centralizes the lookup so call sites don't have to know
  * which channel the scope arrived on. It tries, in order:
  *
- *   1. `extra._meta?.app?.chatId`
+ *   1. `extra._meta?.[CHAT_SCOPE_META_KEY]`
  *      — Spec-aligned. Set by the client when it injects per-call _meta.
  *        Not used today; will be wired up in Phase 0b.
  *
@@ -34,12 +34,26 @@
  * directly; new code should pass `extra`.
  */
 
+/**
+ * `_meta` key carrying the application-level chat scope.
+ *
+ * The MCP `_meta` key format is an optional reverse-DNS prefix plus a name,
+ * and the spec reserves any prefix whose *second* label is `mcp` or
+ * `modelcontextprotocol`. A bare name like `app` is legal but squats on a
+ * generic identifier that another server or extension could also claim, so we
+ * namespace under a domain we control (`bio.quentincody.dev` reversed).
+ *
+ * Exported as a constant so the (not-yet-written) client-side injector and the
+ * server-side reader cannot drift apart on a typo.
+ */
+export const CHAT_SCOPE_META_KEY = "dev.quentincody.bio/chatId";
+
 export interface MaybeExtra {
 	/** MCP transport session ID. Deprecated by the 2026-07-28 spec. */
 	sessionId?: string;
 	/** Per-request metadata from JSON-RPC `params._meta`. */
 	_meta?: {
-		app?: { chatId?: string };
+		[CHAT_SCOPE_META_KEY]?: string;
 		[k: string]: unknown;
 	};
 	/** Underlying HTTP request info (headers etc.) surfaced by the SDK. */
@@ -55,7 +69,7 @@ export function getRequestScope(
 	if (source == null) return undefined;
 	if (typeof source === "string") return source.length > 0 ? source : undefined;
 
-	const fromMeta = source._meta?.app?.chatId;
+	const fromMeta = source._meta?.[CHAT_SCOPE_META_KEY];
 	if (typeof fromMeta === "string" && fromMeta.length > 0) return fromMeta;
 
 	const headers = source.requestInfo?.headers;

@@ -61,6 +61,23 @@ export interface SourceDescriptor {
 	version?: string;
 }
 
+/**
+ * An Ed25519 attestation over a citation's integrity-critical fields (L2).
+ * See `./signing`. A `result_hash` alone proves "these bytes hash to H"; a
+ * signature proves the ISSUING SERVER vouches for { query_hash, result_hash,
+ * time } and can be checked OFFLINE against the server's published JWKS.
+ */
+export interface CitationSignature {
+	/** Signature algorithm (Ed25519). */
+	alg: "Ed25519";
+	/** Key id — matches the `kid` in the server's published JWKS. */
+	key_id: string;
+	/** ISO-8601 time the signature was produced (part of the signed payload). */
+	signed_at: string;
+	/** base64url(Ed25519 signature) over the canonical signing input. */
+	sig: string;
+}
+
 /** A verifiable, re-checkable attribution for a single tool result. */
 export interface Citation {
 	source: SourceDescriptor;
@@ -91,6 +108,12 @@ export interface Citation {
 	 * UNCONFIRMED absence; re-verify via an alternate key before relying on it).
 	 */
 	verification?: string;
+	/**
+	 * Optional Ed25519 attestation (L2). Present only when the issuing server
+	 * has signing enabled. Absent = reproducible (L0) but NOT attested — do not
+	 * describe an unsigned citation as "tamper-evident". See `./signing`.
+	 */
+	signature?: CitationSignature;
 	/** Pre-formatted, agent/human-readable citation line. */
 	text: string;
 }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ToolContext } from "../registry/types";
 import { sqlTools } from "./sql";
+import { MAX_SCRATCH_DO_BYTES } from "./sql-write-guard";
+
+/** A DO already at the byte ceiling (hardening doc 02 §3). */
+const atCeilingStorage = {
+	// SAFETY: the write guard's size gate reads only `databaseSize`.
+	databaseSize: MAX_SCRATCH_DO_BYTES,
+} as unknown as SqlStorage;
 
 // ctx.sql is a tagged template; rejoin on "?" to reconstruct the query.
 // failOn throws an Error; throwOn throws a non-Error (covers the String(e) arm).
@@ -72,6 +79,44 @@ describe("sql_exec", () => {
 				ctx,
 			),
 		).rejects.toThrow(/not allowed/);
+	});
+
+	// Hardening doc 02 §3 — sql_exec stays write-by-design, but bounded.
+	it("still executes a small CREATE TABLE + INSERT (write-by-design preserved)", async () => {
+		const { ctx, calls } = makeCtx();
+		await tool("sql_exec").handler({ query: "CREATE TABLE t (a)" } as never, ctx);
+		await tool("sql_exec").handler(
+			{ query: "INSERT INTO t VALUES (1)" } as never,
+			ctx,
+		);
+		expect(calls).toContain("CREATE TABLE t (a)");
+		expect(calls).toContain("INSERT INTO t VALUES (1)");
+	});
+
+	it("rejects a WITH RECURSIVE without a LIMIT, without executing it", async () => {
+		const { ctx, calls } = makeCtx();
+		await expect(
+			tool("sql_exec").handler(
+				{
+					query:
+						"CREATE TABLE t AS WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT x FROM c",
+				} as never,
+				ctx,
+			),
+		).rejects.toThrow(/recursive CTE is unbounded/i);
+		expect(calls.some((q) => q.includes("CREATE TABLE"))).toBe(false);
+	});
+
+	it("rejects a write when the DO is already at the size ceiling", async () => {
+		const { ctx, calls } = makeCtx();
+		const atCeiling: ToolContext = { ...ctx, sqlStorage: atCeilingStorage };
+		await expect(
+			tool("sql_exec").handler(
+				{ query: "CREATE TABLE t (a)" } as never,
+				atCeiling,
+			),
+		).rejects.toThrow(/ceiling/);
+		expect(calls).toEqual([]);
 	});
 });
 

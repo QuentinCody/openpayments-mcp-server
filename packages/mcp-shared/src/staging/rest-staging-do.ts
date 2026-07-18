@@ -14,6 +14,15 @@ import { DurableObject } from "cloudflare:workers";
 import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
 import { VirtualFS } from "../filesystem/virtual-fs";
 import { ChunkingEngine } from "./chunking";
+import {
+	countTotal,
+	parseSqlQueryBody,
+	pullBoundedRows,
+	pullSignals,
+	queryCostError,
+	readOnlySqlError,
+	type SqlQueryBody,
+} from "./query-endpoint";
 import { mergeSchemaHints } from "./schema-hints";
 import {
 	computeColumnProfiles,
@@ -38,7 +47,7 @@ import type { TableRelationship } from "./staging-metadata";
 import type { DomainConfig, StagingContext, StagingHints } from "./types";
 
 // ---------------------------------------------------------------------------
-// Request body interfaces for handleProcess / handleQuery / handleRegister
+// Request body interfaces for handleProcess / handleRegister
 // ---------------------------------------------------------------------------
 
 interface ProcessRequestBody {
@@ -50,12 +59,6 @@ interface ProcessRequestBody {
 		apiUrl?: string;
 	};
 	schema_hints?: SchemaHints;
-}
-
-interface SqlQueryBody {
-	sql: string;
-	/** When true, also runs a COUNT(*) wrapper to report total matching rows */
-	count_total?: boolean;
 }
 
 interface RegisterRequestBody {
@@ -78,13 +81,10 @@ interface SessionRegistryRow {
 
 // Schema-hint merging (`mergeSchemaHints`) lives in ./schema-hints so the pure
 // logic can be unit-tested without loading this module's `cloudflare:workers`
-// import. See schema-hints.test.ts.
-
-/** Strip LIMIT/OFFSET clause from a SQL query for COUNT(*) wrapping. */
-function stripLimit(sql: string): string {
-	// Remove trailing LIMIT n [OFFSET m] — case-insensitive
-	return sql.replace(/\s+LIMIT\s+\d+(\s+OFFSET\s+\d+)?\s*$/i, "");
-}
+// import. See schema-hints.test.ts. The SQL query-endpoint helpers
+// (`SqlQueryBody`, `parseSqlQueryBody`, `readOnlySqlError`, `countTotal`,
+// `stripLimit`) live in ./query-endpoint for the same reason — see
+// query-endpoint.test.ts.
 
 /** Safely parse JSON, returning undefined on failure. */
 function safeJsonParse(value: string): unknown {
@@ -530,74 +530,85 @@ export class RestStagingDO extends DurableObject {
 		const jsonStr = await this.chunking.smartJsonStringify(data, this.sql);
 		this.sql.exec(`INSERT INTO payloads (root_json) VALUES (?)`, jsonStr);
 		const count =
-			(
-				this.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as {
-					c: number;
-				}
-			)?.c ?? 0;
+			(this.sql.exec(`SELECT COUNT(*) as c FROM payloads`).one() as { c: number })?.c ?? 0;
 		return this.jsonResponse({
 			success: true,
 			table_count: 1,
 			total_rows: count,
 			tables_created: ["payloads"],
+			// Per-table count like the tabular path (line ~510). Without it the
+			// client's pagination denominator was undefined, so a partial slice of a
+			// large result was stamped complete:true — a silent under-count (doc 10).
+			table_row_counts: { payloads: count },
 		});
 	}
 
+	/**
+	 * Pre-flight gate for the query endpoints: read-only-by-default (doc 02) and
+	 * the unbounded-read shape check (doc 03). Runs BEFORE `validateSql` and
+	 * before any `exec`, so a caller that reaches this DO directly can neither
+	 * execute write/DDL SQL nor start an unbounded recursive scan.
+	 */
+	private queryBlocked(body: SqlQueryBody): Response | null {
+		const error = readOnlySqlError(body) ?? queryCostError(body);
+		return error ? this.jsonResponse(error, 400) : null;
+	}
+
+	/** Bounded materialization + the QUERY_COST_LIMIT response (doc 03 §2). */
+	private costLimit(pull: { cost_error?: string }): Response | null {
+		return pull.cost_error
+			? this.jsonResponse(
+					{ success: false, error: pull.cost_error, code: "QUERY_COST_LIMIT" },
+					400,
+				)
+			: null;
+	}
+
 	private async handleQuery(request: Request): Promise<Response> {
-		const raw: unknown = await request.json();
-		const body: SqlQueryBody = (
-			raw !== null && typeof raw === "object" ? raw : { sql: "" }
-		) as SqlQueryBody;
+		const body = parseSqlQueryBody(await request.json());
+
+		const blocked = this.queryBlocked(body);
+		if (blocked) return blocked;
 
 		// Pre-execution schema validation — catches column/table typos with suggestions
 		const validationError = this.validateSql(body.sql);
 		if (validationError) return validationError;
 
-		const res = this.sql.exec(body.sql);
-		const results = res.toArray();
-
-		// If count_total requested, run a COUNT(*) wrapper to determine total matching rows
-		let totalMatching: number | undefined;
-		let truncated: boolean | undefined;
-		if (body.count_total) {
-			try {
-				// Wrap the user's query (with LIMIT stripped) in a COUNT(*)
-				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
-				const countResult = this.sql.exec(countSql).one();
-				totalMatching = Number(
-					(countResult as { c: number })?.c ?? results.length,
-				);
-				truncated = totalMatching > results.length;
-			} catch {
-				// If COUNT wrapper fails (e.g. complex CTEs), just report based on results
-				truncated = undefined;
-				totalMatching = undefined;
-			}
-		}
+		const pull = pullBoundedRows(this.sql.exec(body.sql));
+		const tooCostly = this.costLimit(pull);
+		if (tooCostly) return tooCostly;
+		const results = pull.rows;
 
 		return this.jsonResponse({
 			success: true,
 			results,
 			row_count: results.length,
-			...(truncated !== undefined ? { truncated } : {}),
-			...(totalMatching !== undefined ? { total_matching: totalMatching } : {}),
+			...(body.count_total
+				? countTotal((s) => this.sql.exec(s), body.sql, results.length)
+				: {}),
+			// Spread last: an explicit pull truncation outranks the COUNT heuristic.
+			...pullSignals(pull),
 		});
 	}
 
 	private async handleQueryEnhanced(request: Request): Promise<Response> {
-		const rawEnhanced: unknown = await request.json();
-		const body: SqlQueryBody = (
-			rawEnhanced !== null && typeof rawEnhanced === "object"
-				? rawEnhanced
-				: { sql: "" }
-		) as SqlQueryBody;
+		const body = parseSqlQueryBody(await request.json());
+
+		const blocked = this.queryBlocked(body);
+		if (blocked) return blocked;
 
 		// Pre-execution schema validation — catches column/table typos with suggestions
 		const validationError = this.validateSql(body.sql);
 		if (validationError) return validationError;
 
-		const res = this.sql.exec(body.sql);
-		const rows = res.toArray();
+		// NOTE: the byte cap here measures rows as STORED. Chunked content
+		// references are expanded below, so an enhanced response can still exceed
+		// MAX_RESULT_BYTES — expansion is the feature. The row and scan caps bound
+		// the SQLite side either way.
+		const pull = pullBoundedRows(this.sql.exec(body.sql));
+		const tooCostly = this.costLimit(pull);
+		if (tooCostly) return tooCostly;
+		const rows = pull.rows;
 		const enhanced: Record<string, unknown>[] = [];
 		for (const row of rows) {
 			const out: Record<string, unknown> = {};
@@ -620,29 +631,15 @@ export class RestStagingDO extends DurableObject {
 			enhanced.push(out);
 		}
 
-		// Truncation support for enhanced queries
-		let totalMatching: number | undefined;
-		let truncated: boolean | undefined;
-		if (body.count_total) {
-			try {
-				const countSql = `SELECT COUNT(*) as c FROM (${stripLimit(body.sql)})`;
-				const countResult = this.sql.exec(countSql).one();
-				totalMatching = Number(
-					(countResult as { c: number })?.c ?? enhanced.length,
-				);
-				truncated = totalMatching > enhanced.length;
-			} catch {
-				truncated = undefined;
-				totalMatching = undefined;
-			}
-		}
-
 		return this.jsonResponse({
 			success: true,
 			results: enhanced,
 			row_count: enhanced.length,
-			...(truncated !== undefined ? { truncated } : {}),
-			...(totalMatching !== undefined ? { total_matching: totalMatching } : {}),
+			...(body.count_total
+				? countTotal((s) => this.sql.exec(s), body.sql, enhanced.length)
+				: {}),
+			// Spread last: an explicit pull truncation outranks the COUNT heuristic.
+			...pullSignals(pull),
 		});
 	}
 

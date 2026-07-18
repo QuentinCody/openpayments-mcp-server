@@ -14,6 +14,7 @@ import { inferUpstreamTotal } from "../completeness";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import type { SchemaHints } from "../staging/schema-inference";
 import { effectiveStagingThreshold } from "../staging/single-record";
+import { clampLimit } from "../staging/sql-guard";
 import {
 	queryDataFromDo,
 	type StageOptions,
@@ -25,6 +26,7 @@ import {
 	buildKnownEndpointIndex,
 	preflightUnknownEndpoint,
 } from "./api-proxy-drift";
+import { boundedErrorData, TRANSPORT_LIMIT } from "./passthrough-limits";
 import { buildStagedEnvelope, extractStagedColumns } from "./staging-envelope";
 
 // `extractStagedColumns` is re-exported so the long-standing
@@ -56,14 +58,23 @@ export function validatePath(path: string): void {
 /**
  * Interpolate path parameters: /lookup/id/{id} with {id: "ENSG..."} => /lookup/id/ENSG...
  * Returns the interpolated path and remaining (non-path) params.
+ *
+ * A token may repeat: WikiPathways' asset URLs look like
+ * `/pathways/{pwId}/{pwId}.json`. Read the value from the ORIGINAL `params` and
+ * only consume it from the `queryParams` copy — reading the copy meant the
+ * second `{pwId}` saw a key the first had just deleted and threw
+ * "Missing required path parameter: pwId" for a param that WAS supplied.
  */
 export function interpolatePath(
 	path: string,
 	params: Record<string, unknown>,
 ): { path: string; queryParams: Record<string, unknown> } {
 	const queryParams = { ...params };
-	const interpolated = path.replace(/\{(\w+)\}/g, (_match, key) => {
-		const value = queryParams[key];
+	// `[^{}]+` not `\w+`: a token may contain non-word chars (`{gene-id}`), which
+	// `\w+` left unsubstituted. `Object.hasOwn` not a bare lookup: `{toString}`
+	// would otherwise resolve to Object.prototype.toString instead of "missing".
+	const interpolated = path.replace(/\{([^{}]+)\}/g, (_match, key) => {
+		const value = Object.hasOwn(params, key) ? params[key] : undefined;
 		if (value === undefined || value === null) {
 			throw new Error(`Missing required path parameter: ${key}`);
 		}
@@ -162,6 +173,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 				// Interpolate path params and extract remaining as query params
 				const { path, queryParams } = interpolatePath(rawPath, rawParams);
 				interpolatedPath = path;
+				validatePath(path); // #2 — re-check post-interpolation: a param can inject .. traversal
 
 				// T1.1 — pre-flight path check. When the path is almost certainly a
 				// hallucination (no known endpoint matches it, but a sibling under the
@@ -195,10 +207,17 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 					body,
 				});
 
-				// Check if response should be auto-staged. T10.1 — a SINGLE record
-				// (one entity, not a list) gets a raised threshold so it stays inline
-				// instead of forcing a stage→get_schema→query round-trip to read a field.
-				const responseBytes = JSON.stringify(result.data).length;
+				// A resolved non-2xx is a FAILURE (the catch only fires on THROW) — an
+				// adapter that RETURNS {status:502,data} else surfaces it as data with a
+				// citation, the systemic clingen-class silent failure (doc 09/11).
+				if (typeof result.status === "number" && result.status >= 400) {
+					const dh = buildDriftHint(method, path, result.status, knownEndpoints);
+					return { __api_error: true, incomplete: true, status: result.status, message: `Upstream returned HTTP ${result.status}`, data: boundedErrorData(result.data), ...(dh ? { drift_hint: dh } : {}) };
+				}
+
+				// T10.1 — a SINGLE record gets a raised staging threshold so it stays
+				// inline. undefined data (a 204 no-content) sizes to 0, not a throw (#7).
+				const responseBytes = result.data === undefined ? 0 : JSON.stringify(result.data).length;
 				if (
 					doNamespace &&
 					stagingPrefix &&
@@ -232,29 +251,19 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						originalData: result.data,
 					});
 				}
+				// #3 — an UNSTAGED inline body over the transport limit is silently dropped; fail loud.
+				if (responseBytes > TRANSPORT_LIMIT) {
+					return { __api_error: true, incomplete: true, status: 413, code: "RESPONSE_TOO_LARGE", message: `Response too large (${responseBytes} > ${TRANSPORT_LIMIT}); narrow the query (fewer fields/rows) or use a paged endpoint.` };
+				}
 
 				return result.data;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				const status = (err as { status?: number }).status || 500;
-				const driftHint = buildDriftHint(
-					method,
-					interpolatedPath,
-					status,
-					knownEndpoints,
-				);
-				return {
-					__api_error: true,
-					// T9.6 — a failed fetch (429/timeout/5xx/…) means the evidence for
-					// whatever this call was retrieving is INCOMPLETE; flag it so the
-					// model surfaces the gap rather than presenting a partial answer as
-					// complete.
-					incomplete: true,
-					status,
-					message,
-					data: (err as { data?: unknown }).data,
-					...(driftHint ? { drift_hint: driftHint } : {}),
-				};
+				const driftHint = buildDriftHint(method, interpolatedPath, status, knownEndpoints);
+				// incomplete: a failed fetch (429/timeout/5xx/…) means the evidence for
+				// this call is INCOMPLETE — flag it so a partial answer is not read as whole.
+				return { __api_error: true, incomplete: true, status, message, data: boundedErrorData((err as { data?: unknown }).data), ...(driftHint ? { drift_hint: driftHint } : {}) };
 			}
 		},
 	};
@@ -370,6 +379,9 @@ export interface QueryProxyToolOptions {
  * the per-server DO via queryDataFromDo. (Inlines the /ws/query POST rather than
  * importing queryWorkspaceFromDo to keep this module's import graph flat.)
  */
+/** Page size the in-isolate query proxy requests (bounded by clampLimit). */
+const PROXY_QUERY_LIMIT = 1000;
+
 async function runProxyQuery(
 	doNamespace: unknown,
 	workspaceNamespace: unknown,
@@ -385,12 +397,15 @@ async function runProxyQuery(
 	total_matching?: number;
 }> {
 	const workspace = (ctx as ToolContext | undefined)?.workspace;
+	// doc 03 §1 — the in-isolate proxy's page size, clamped to the hard ceiling
+	// like every other caller rather than trusted as a bare constant.
+	const limit = clampLimit(PROXY_QUERY_LIMIT);
 	if (!workspace || !workspaceNamespace) {
 		return queryDataFromDo(
 			doNamespace as DurableObjectNamespace,
 			dataAccessId,
 			sql,
-			1000,
+			limit,
 		);
 	}
 	const ns = workspaceNamespace as DurableObjectNamespace;
@@ -399,7 +414,7 @@ async function runProxyQuery(
 		new Request("http://do.internal/ws/query", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ sql, limit: 1000 }),
+			body: JSON.stringify({ sql, limit }),
 		}),
 	);
 	const r = (await resp.json()) as {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphqlFetchFn } from "../codemode/graphql-introspection";
 import type { ToolContext, ToolEntry } from "../registry/types";
-import { createGraphqlProxyTool } from "./graphql-proxy";
+import { createGraphqlProxyTool, inspectGraphqlErrors } from "./graphql-proxy";
 
 function makeTool(
 	gqlFetch: GraphqlFetchFn,
@@ -99,6 +99,89 @@ function largeGqlData() {
 		},
 	};
 }
+
+describe("inspectGraphqlErrors", () => {
+	it("returns null when there are no GraphQL errors", () => {
+		expect(inspectGraphqlErrors({ data: { gene: { id: 1 } } })).toBeNull();
+	});
+
+	it("returns null for an empty errors array", () => {
+		// An empty `errors: []` is not a failure — GraphQL only signals rejection
+		// with at least one entry. Treating it as one would fail clean responses.
+		expect(inspectGraphqlErrors({ data: { gene: { id: 1 } }, errors: [] })).toBeNull();
+		expect(inspectGraphqlErrors({ errors: [] })).toBeNull();
+	});
+
+	it("reports partial:false for errors WITHOUT data — an upstream failure", () => {
+		const info = inspectGraphqlErrors({
+			errors: [{ message: "Field 'bogus' doesn't exist" }, { message: "second" }],
+		});
+		expect(info).toEqual({
+			messages: ["Field 'bogus' doesn't exist", "second"],
+			partial: false,
+		});
+	});
+
+	it("reports partial:false when data is explicitly null (errors-only)", () => {
+		// The live zincbind failure shape: {"zincsite":null} lives INSIDE data;
+		// a top-level `data: null` alongside errors carries no result at all.
+		const info = inspectGraphqlErrors({
+			data: null,
+			errors: [{ message: "Cannot query field" }],
+		});
+		expect(info?.partial).toBe(false);
+	});
+
+	it("reports partial:true for errors ALONGSIDE data", () => {
+		const info = inspectGraphqlErrors({
+			data: { zincsite: null },
+			errors: [{ message: "Deprecated field" }],
+		});
+		expect(info).toEqual({ messages: ["Deprecated field"], partial: true });
+	});
+
+	it("stringifies malformed error entries rather than dropping them", () => {
+		const info = inspectGraphqlErrors({ errors: ["plain string", { code: 500 }] });
+		expect(info?.messages).toEqual(["plain string", "[object Object]"]);
+		expect(info?.partial).toBe(false);
+	});
+
+	it("classifies the REAL zincbind rejection as a failure (captured live 2026-07-16)", () => {
+		// Verbatim body from https://api.zincbind.net for a query naming a bad field.
+		// This is the shape that used to be handed back as `success: true` with a
+		// `_meta.citation` stamped on it — the tool could not fail. Pinned here so a
+		// passthrough can never go green on it again.
+		const live = {
+			errors: [
+				{
+					message: 'Cannot query field "bogusField" on type "ZincSiteType".',
+					locations: [{ line: 1, column: 31 }],
+				},
+			],
+		};
+		const info = inspectGraphqlErrors(live);
+		expect(info?.partial).toBe(false);
+		expect(info?.messages).toEqual([
+			'Cannot query field "bogusField" on type "ZincSiteType".',
+		]);
+	});
+
+	it("leaves the REAL zincbind success untouched (captured live 2026-07-16)", () => {
+		const live = {
+			data: { zincsites: { edges: [{ node: { id: "1QJY-9", family: "H5" } }] } },
+		};
+		expect(inspectGraphqlErrors(live)).toBeNull();
+	});
+
+	it("returns null for non-object / empty bodies", () => {
+		expect(inspectGraphqlErrors(null)).toBeNull();
+		expect(inspectGraphqlErrors(undefined)).toBeNull();
+		expect(inspectGraphqlErrors("errors")).toBeNull();
+		expect(inspectGraphqlErrors({})).toBeNull();
+		// A non-array `errors` is not the GraphQL error contract.
+		expect(inspectGraphqlErrors({ errors: { message: "nope" } })).toBeNull();
+	});
+});
 
 describe("createGraphqlProxyTool — workspace-aware staging (ADR-006 Phase 0)", () => {
 	const bigFetch: GraphqlFetchFn = async () => ({ data: largeGqlData() });
@@ -391,5 +474,56 @@ describe("createGraphqlProxyTool — staged columns in envelope (T3.3)", () => {
 		)) as Record<string, unknown>;
 		expect(res.__staged).toBe(true);
 		expect(res.columns).toEqual({ genes: ["id", "name"] });
+	});
+});
+
+describe("createGraphqlProxyTool — passthrough transport-size guards (doc 11)", () => {
+	it("does NOT treat an empty errors[] with no data as an error (#10)", async () => {
+		const tool = makeTool(async () => ({ errors: [] }));
+		const result = await tool.handler({ query: "{ x }" }, stubCtx);
+		expect(result).not.toHaveProperty("__gql_error");
+		expect(result).toEqual({});
+	});
+
+	it("does NOT attach __errors for an empty errors[] alongside data (#10)", async () => {
+		const tool = makeTool(async () => ({ data: { gene: { id: 1 } }, errors: [] }));
+		const result = (await tool.handler(
+			{ query: "{ gene { id } }" },
+			stubCtx,
+		)) as Record<string, unknown>;
+		expect(result).toEqual({ gene: { id: 1 } });
+		expect(result).not.toHaveProperty("__errors");
+	});
+
+	it("fails loud on an oversized inline success with no staging DO (#5)", async () => {
+		const tool = makeTool(async () => ({ data: { blob: "x".repeat(120_000) } }));
+		const result = (await tool.handler({ query: "{ blob }" }, stubCtx)) as Record<
+			string,
+			unknown
+		>;
+		expect(result.__gql_error).toBe(true);
+		expect(result.code).toBe("RESPONSE_TOO_LARGE");
+		expect(JSON.stringify(result).length).toBeLessThan(100_000);
+	});
+
+	it("sizes the full data+errors envelope, not data alone (#6)", async () => {
+		// data (~45KB) and errors (~80KB) each fit, but combined they exceed 100KB.
+		const data = {
+			rows: Array.from({ length: 400 }, () => ({ v: "z".repeat(100) })),
+		};
+		const errors = Array.from({ length: 700 }, () => ({
+			message: "e".repeat(100),
+		}));
+		const tool = makeTool(async () => ({ data, errors }));
+		const result = (await tool.handler({ query: "{ rows }" }, stubCtx)) as Record<
+			string,
+			unknown
+		>;
+		expect(result.__gql_error).toBe(true);
+		expect(result.code).toBe("RESPONSE_TOO_LARGE");
+		expect(result.incomplete).toBe(true);
+		// The error object itself must survive transport, and note the suppressed errors.
+		expect(JSON.stringify(result).length).toBeLessThan(100_000);
+		expect(String(result.message)).toContain("partial error");
 	});
 });

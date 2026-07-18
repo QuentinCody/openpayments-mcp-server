@@ -22,6 +22,7 @@ import {
 import type { Completeness } from "../completeness";
 import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import { enrichStagedQueryError } from "./query-error-hint";
+import { clampLimit } from "./sql-guard";
 import { getSchemaFromDo, queryDataFromDo } from "./utils";
 import {
 	type DurableObjectNamespace,
@@ -76,6 +77,10 @@ function resolveWorkspaceRoute(
 
 /** Map a query error message to its CodeMode error code (per-server path). */
 function queryErrorCode(msg: string, err: unknown): string {
+	// The DO stamps a code on cost/guard rejections (doc 03) — trust it over the
+	// message text.
+	const code = (err as { code?: unknown })?.code;
+	if (code === "QUERY_COST_LIMIT" || code === "WRITE_SQL_BLOCKED") return code;
 	if (msg.includes("not allowed")) return "INVALID_SQL";
 	if (msg.includes("not found") || msg.includes("not available"))
 		return "DATA_ACCESS_ERROR";
@@ -85,10 +90,19 @@ function queryErrorCode(msg: string, err: unknown): string {
 
 /** Build the canonical completeness verdict from per-server query truncation signals. */
 function queryCompleteness(
-	result: { truncated?: boolean; total_matching?: number; row_count: number },
+	result: {
+		truncated?: boolean;
+		total_matching?: number;
+		count_capped?: boolean;
+		truncation?: { reason: string; detail: string };
+		row_count: number;
+	},
 	limit: number,
 ): Completeness | undefined {
 	if (result.truncated === true) {
+		const total = result.count_capped
+			? `at least ${result.total_matching}`
+			: (result.total_matching ?? "more");
 		return {
 			complete: false,
 			...(result.total_matching != null
@@ -96,8 +110,15 @@ function queryCompleteness(
 				: {}),
 			returned: result.row_count,
 			truncation: {
-				reason: "row_limit",
-				detail: `Query matched ${result.total_matching ?? "more"} row(s) but only ${result.row_count} were returned (LIMIT ${limit}).`,
+				// The DO reports WHY it stopped (row ceiling vs byte ceiling); fall
+				// back to the LIMIT explanation when it did not truncate the pull.
+				reason:
+					result.truncation?.reason === "size_limit"
+						? "size_limit"
+						: "row_limit",
+				detail:
+					result.truncation?.detail ??
+					`Query matched ${total} row(s) but only ${result.row_count} were returned (LIMIT ${limit}).`,
 				remedy:
 					"Raise the limit param, add WHERE filters, or aggregate in SQL to see the full picture.",
 			},
@@ -123,7 +144,7 @@ async function workspaceQuery(
 ): Promise<HandlerResponse> {
 	try {
 		const sql = String(args.sql || "");
-		const limit = Number(args.limit) || 100;
+		const limit = clampLimit(Number(args.limit) || 100);
 		if (!sql) throw new Error("sql is required");
 		const result = await queryWorkspaceFromDo(
 			route.namespace,
@@ -162,7 +183,7 @@ async function perServerQuery(
 	try {
 		const dataAccessId = String(args.data_access_id || "");
 		const sql = String(args.sql || "");
-		const limit = Number(args.limit) || 100;
+		const limit = clampLimit(Number(args.limit) || 100);
 		if (!dataAccessId) throw new Error("data_access_id is required");
 		if (!sql) throw new Error("sql is required");
 

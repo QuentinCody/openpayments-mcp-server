@@ -42,6 +42,7 @@ import { registerGraphqlSearchTool } from "./graphql-schema-discovery";
 import { buildGraphqlSchemaSource } from "./graphql-schema-source";
 import { introspectionToSummary } from "./graphql-to-typescript";
 import { createCodeModeError, ErrorCodes } from "./response";
+import { registerVerifyCitationOnce } from "./verify-citation-tool";
 
 // ---------------------------------------------------------------------------
 // Options & result types
@@ -84,6 +85,9 @@ export interface GraphqlExecuteToolOptions {
 	 *  surface with `preamble` `//` lines (they appear in the tool description as
 	 *  SERVER NOTES). See docs/adding-mcp-servers.md "Hybrid GraphQL + REST". */
 	restApiFetch?: ApiFetchFn;
+	/** Optional static ApiCatalog. When the upstream disables introspection,
+	 *  `<prefix>_search` searches this instead of returning the unavailable note. */
+	catalog?: import("./catalog").ApiCatalog;
 }
 
 export interface GraphqlExecuteToolResult {
@@ -469,7 +473,12 @@ export function createGraphqlExecuteTool(
 				apiName: options.apiName ?? prefix,
 				gqlFetch,
 				cache,
+				catalog: options.catalog,
 			});
+
+			// Sibling provenance tool: results carry `_meta.citation` integrity
+			// anchors, so the server must also expose the means to re-check them.
+			registerVerifyCitationOnce(server);
 		},
 	};
 }

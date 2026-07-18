@@ -52,6 +52,9 @@ export {
 export { generateTypes } from "./codemode/types";
 export {
 	createVerifyCitationTool,
+	type DriftSummary,
+	registerVerifyCitationOnce,
+	structuralDrift,
 	type VerifyCitationSchema,
 	type VerifyCitationToolResult,
 } from "./codemode/verify-citation-tool";
@@ -89,12 +92,28 @@ export {
 	buildPassthroughCitation,
 	type PassthroughCitationArgs,
 } from "./provenance/passthrough-citation";
+export {
+	buildJwks,
+	CITATION_SIG_ALG,
+	type CitationJwk,
+	type CitationSigner,
+	citationSigningInput,
+	exportCitationPublicJwk,
+	generateCitationKeypair,
+	importCitationPrivateKey,
+	importCitationPublicKey,
+	type Jwks,
+	signCitation,
+	type SignatureVerdict,
+	verifyCitationSignature,
+} from "./provenance/signing";
 
 // Provenance / citation (verifiable per-result source attribution)
 export {
 	type BuildCitationInput,
 	buildCitation,
 	type Citation,
+	type CitationSignature,
 	canonicalJson,
 	type SourceDescriptor,
 	sha256Hex,
@@ -212,7 +231,9 @@ export {
 } from "./tools/direct-query";
 export {
 	createGraphqlProxyTool,
+	type GraphqlErrorInfo,
 	type GraphqlProxyToolOptions,
+	inspectGraphqlErrors,
 } from "./tools/graphql-proxy";
 // Tool definitions
 export { sqlTools } from "./tools/sql";

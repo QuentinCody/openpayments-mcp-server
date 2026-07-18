@@ -107,10 +107,72 @@ export interface StagedEnvelopeInput {
 }
 
 /**
+ * Container keys a caller reaches for when it thinks it holds the raw upstream
+ * payload. On a staged envelope every one of them is absent, so the idiomatic
+ * `r.resultList?.result ?? []` / `r.data || r.results || []` quietly collapses to
+ * an EMPTY LIST — and an agent then reports "no results" for a query whose
+ * upstream returned plenty. Observed live 2026-07-15: a Europe PMC
+ * `resultType=core` search auto-staged, `resultList` read `undefined`, and the
+ * run concluded zero hits.
+ *
+ * This is the inverse of {@link guardEmptyResult}: that guards a genuinely-empty
+ * UPSTREAM; this guards an empty read of OUR OWN envelope.
+ */
+const STAGED_PAYLOAD_KEYS = [
+	"resultList", "results", "result", "data", "items", "hits", "records",
+	"rows", "response", "collection", "content", "_embedded", "docs", "entries",
+] as const;
+
+/**
+ * Thrown when code reads a payload container off a staged envelope. This is
+ * never a legitimate empty: the upstream returned data and it is in SQLite.
+ */
+export class StagedPayloadAccessError extends Error {
+	readonly code = "STAGED_PAYLOAD_ACCESS";
+	constructor(prop: string, dataAccessId: string, totalRows: number) {
+		super(
+			`This response was AUTO-STAGED (${totalRows} rows) — "${prop}" does not exist on the staging ` +
+				`envelope. Reading it yields undefined, which silently reads as "no results". THIS IS NOT AN ` +
+				`EMPTY RESULT: the upstream returned data and it is in SQLite. Either (a) query it in-band — ` +
+				`api.query("${dataAccessId}", "SELECT * FROM <table> LIMIT 10") — or (b) return this envelope ` +
+				`so the caller can use the server's *_query_data tool, or (c) re-request with a smaller ` +
+				`page/limit param so the response never stages. Envelope keys: __staged, data_access_id, ` +
+				`total_rows, columns, schema, tables_created, message.`,
+		);
+		this.name = "StagedPayloadAccessError";
+	}
+}
+
+/**
+ * Install throwing accessors for payload containers absent from the envelope.
+ * Non-enumerable on purpose: JSON.stringify, spread, and Object.keys stay
+ * unaffected, so serialization across the isolate boundary is unchanged — only a
+ * direct read of a would-be-undefined payload key trips.
+ */
+function installStagedTripwire(response: Record<string, unknown>): void {
+	const id = String(response.data_access_id ?? "");
+	const rows = Number(response.total_rows ?? 0);
+	for (const key of STAGED_PAYLOAD_KEYS) {
+		if (key in response) continue; // a real scalar sibling was preserved — leave it
+		Object.defineProperty(response, key, {
+			enumerable: false,
+			configurable: true,
+			get() {
+				throw new StagedPayloadAccessError(key, id, rows);
+			},
+		});
+	}
+}
+
+/**
  * Build the standard auto-stage response envelope, shared by the REST and GraphQL
  * proxies. Carries `columns` (T3.3), an `INCOMPLETE` note when the staged set is
  * under-counted (completeness), a `filter_warning` when the upstream filter
  * silently over-matched (T1.3), and the preserved scalar siblings of the payload.
+ *
+ * The envelope also carries a tripwire ({@link installStagedTripwire}) so that
+ * mistaking it for the raw payload raises {@link StagedPayloadAccessError}
+ * instead of silently reading as an empty result.
  */
 export function buildStagedEnvelope(
 	input: StagedEnvelopeInput,
@@ -140,5 +202,6 @@ export function buildStagedEnvelope(
 		message: `Response auto-staged (${(responseBytes / 1024).toFixed(1)}KB → ${tableDetail}). Columns are in the "columns" field. Use api.query("${staged.dataAccessId}", sql) in-band, or return this object for the caller to use the query_data tool.${incompleteNote}${filterNote}`,
 	};
 	preserveEnvelopeScalars(originalData, response);
+	installStagedTripwire(response);
 	return response;
 }

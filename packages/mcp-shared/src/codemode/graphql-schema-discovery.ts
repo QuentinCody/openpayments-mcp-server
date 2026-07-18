@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import type { ApiCatalog } from "./catalog";
 import {
 	fetchIntrospection,
 	type GraphqlFetchFn,
@@ -19,6 +20,7 @@ import {
 } from "./graphql-introspection";
 import { searchTrimmedIntrospection } from "./graphql-search";
 import { createCodeModeError, ErrorCodes } from "./response";
+import { formatEndpoint, searchEndpoints } from "./search-tool";
 
 /**
  * Message surfaced (as `schema.note` inside the isolate and as the `_search`
@@ -67,6 +69,38 @@ export async function ensureIntrospectionCached(
 }
 
 /**
+ * Render a static ApiCatalog as `_search` results — the fallback used when live
+ * introspection is unavailable (e.g. an upstream with `introspection: false`).
+ * Reuses the REST search scorer/formatter (searchEndpoints/formatEndpoint) so
+ * GraphQL and REST discovery behave identically. Empty/`*` query browses
+ * featured (then all) endpoints.
+ */
+function catalogSearchResponse(catalog: ApiCatalog, query: string, maxResults: number, apiName: string) {
+	const eps = catalog.endpoints ?? [];
+	const q = query.trim();
+	const browse = q === "" || q === "*";
+	const featured = eps.filter((e) => e.featured);
+	const pool = browse ? (featured.length ? featured : eps) : searchEndpoints(eps, q, maxResults);
+	const matches = pool.slice(0, maxResults);
+	const heading = `${catalog.name} — ${matches.length} of ${eps.length} endpoints${browse ? "" : ` matching "${query}"`}:`;
+	const text = matches.length
+		? [heading, "", ...matches.map(formatEndpoint)].join("\n")
+		: `No ${catalog.name} endpoints matched "${query}". Try broader keywords, or an empty query ("") to browse.`;
+	return {
+		content: [{ type: "text", text }],
+		structuredContent: { success: true, query, schema: apiName, schema_available: false, source: "catalog" },
+	};
+}
+
+/** The original "introspection disabled, no catalog" response — points at _execute. */
+function unavailableResponse(query: string, apiName: string) {
+	return {
+		content: [{ type: "text", text: SCHEMA_DISCOVERY_UNAVAILABLE }],
+		structuredContent: { success: true, query, schema: apiName, schema_available: false },
+	};
+}
+
+/**
  * Register the `<prefix>_search` schema-discovery tool (#3). Shares the execute
  * tool's lazy introspection cache (no second introspection fetch), letting a model
  * find REAL query roots / fields before writing a `_execute` query — closing the
@@ -81,9 +115,12 @@ export function registerGraphqlSearchTool(
 		apiName: string;
 		gqlFetch: GraphqlFetchFn;
 		cache: IntrospectionCache;
+		/** Optional static catalog. When introspection is unavailable upstream,
+		 *  `_search` searches this instead of returning the dead-end note. */
+		catalog?: ApiCatalog;
 	},
 ): void {
-	const { prefix, apiName, gqlFetch, cache } = opts;
+	const { prefix, apiName, gqlFetch, cache, catalog } = opts;
 	server.tool(
 		`${prefix}_search`,
 		`Search the ${apiName} GraphQL schema for the query roots, types, and fields matching your keywords — so you write a ${prefix}_execute query with REAL field names instead of guessing. Call this FIRST when you don't already know the schema. Returns top-level entry points plus matching Type.field signatures with their arguments and return types.`,
@@ -107,15 +144,10 @@ export function registerGraphqlSearchTool(
 				if (!cache.introspection) {
 					// Upstream disables introspection — no schema to search. Point the
 					// caller at the execute tool (gql.query still works).
-					return {
-						content: [{ type: "text", text: SCHEMA_DISCOVERY_UNAVAILABLE }],
-						structuredContent: {
-							success: true,
-							query: input.query ?? "",
-							schema: apiName,
-							schema_available: false,
-						},
-					};
+					const q0 = input.query ?? "";
+					return catalog
+						? catalogSearchResponse(catalog, q0, input.max_results ?? 12, apiName)
+						: unavailableResponse(q0, apiName);
 				}
 				const text = searchTrimmedIntrospection(
 					cache.introspection,

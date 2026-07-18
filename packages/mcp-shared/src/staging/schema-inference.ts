@@ -707,36 +707,8 @@ export {
 	type TableProfile,
 } from "./column-profiles";
 
-/**
- * Convert a value for SQL insertion.
- * - Arrays of scalars → pipe-delimited string
- * - Objects/remaining arrays → JSON.stringify
- * - null/undefined → null
- * - Scalars → as-is
- */
-function sqlValue(v: unknown): unknown {
-	if (v === null || v === undefined) return null;
-	if (Array.isArray(v)) {
-		if (v.length === 0) return null;
-		// Arrays containing objects → JSON.stringify to preserve structure
-		// (prevents data loss from String({}) → "[object Object]")
-		if (v.some((item) => item !== null && typeof item === "object")) {
-			return JSON.stringify(v);
-		}
-		// Scalar array → pipe-delimited
-		return v.map((item) => String(item)).join(" | ");
-	}
-	if (typeof v === "object") return JSON.stringify(v);
-	return v;
-}
-
-// ---------------------------------------------------------------------------
-// SQL identifier quoting — escape embedded double-quotes per SQL standard
-// ---------------------------------------------------------------------------
-
-function quoteIdent(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
-}
+// SQL value/identifier emission lives in ./sql-emit (mid-file import; ESM hoists it).
+import { dedupeColumnsByNameCI, quoteIdent, sqlValue } from "./sql-emit";
 
 // ---------------------------------------------------------------------------
 // Table creation helper (shared by parent and child table materialization)
@@ -747,7 +719,9 @@ function createTableAndIndexes(
 	sql: { exec: (query: string, ...bindings: unknown[]) => unknown },
 ): void {
 	const hasIdColumn = table.columns.some((c) => c.name === "id");
-	const colDefs = table.columns
+	// Dedupe case-insensitively: SQLite treats `id` and `ID` as ONE column, so
+	// emitting both threw "duplicate column name" and lost the whole table (rs).
+	const colDefs = dedupeColumnsByNameCI(table.columns)
 		.map((c) => `${quoteIdent(c.name)} ${c.type}`)
 		.join(", ");
 	const tbl = quoteIdent(table.name);
@@ -833,7 +807,7 @@ export function materializeSchema(
 		// Child tables of this table
 		const myChildTables = childTablesByParent.get(table.name) ?? [];
 
-		const colNames = table.columns.map((c) => c.name);
+		const colNames = dedupeColumnsByNameCI(table.columns).map((c) => c.name);
 		const placeholders = colNames.map(() => "?").join(", ");
 		const insertSql = `INSERT INTO ${quoteIdent(table.name)} (${colNames.map((n) => quoteIdent(n)).join(", ")}) VALUES (${placeholders})`;
 

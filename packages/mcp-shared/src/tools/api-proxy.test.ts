@@ -99,6 +99,24 @@ describe("path helpers", () => {
 		expect(queryParams).toEqual({ expand: "1" });
 	});
 
+	it("interpolatePath fills a REPEATED path token", () => {
+		// WikiPathways' asset URLs repeat the token: /pathways/{pwId}/{pwId}.json.
+		// The param was consumed on the first match, so the second read saw
+		// undefined and threw "Missing required path parameter: pwId" for a param
+		// that WAS supplied.
+		const { path, queryParams } = interpolatePath("/pathways/{pwId}/{pwId}.json", {
+			pwId: "WP554",
+		});
+		expect(path).toBe("/pathways/WP554/WP554.json");
+		expect(queryParams).toEqual({});
+	});
+
+	it("interpolatePath still throws when a path param is genuinely absent", () => {
+		expect(() => interpolatePath("/gene/{id}", {})).toThrow(
+			"Missing required path parameter: id",
+		);
+	});
+
 	it("isRecord narrows plain objects only", () => {
 		expect(isRecord({})).toBe(true);
 		expect(isRecord([])).toBe(false);

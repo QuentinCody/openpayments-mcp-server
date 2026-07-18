@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ToolEntry } from "../registry/types";
 import { executeSql, isBlocked, isReadOnly } from "./sql-helpers";
+import { runBoundedWrite } from "./sql-write-guard";
 
 const sqlParam = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
@@ -40,7 +41,7 @@ export const sqlTools: ToolEntry[] = [
 			query: z
 				.string()
 				.describe(
-					"SQL DDL/DML statement to execute (CREATE TABLE, INSERT, UPDATE, DELETE, etc). ATTACH, DETACH, and LOAD_EXTENSION are blocked.",
+					"SQL DDL/DML statement to execute (CREATE TABLE, INSERT, UPDATE, DELETE, etc). ATTACH, DETACH, and LOAD_EXTENSION are blocked. A WITH RECURSIVE statement must carry a LIMIT.",
 				),
 			params: z
 				.array(sqlParam)
@@ -57,7 +58,10 @@ export const sqlTools: ToolEntry[] = [
 					"ATTACH, DETACH, and LOAD_EXTENSION statements are not allowed.",
 				);
 			}
-			const result = executeSql(ctx.sql, query, params);
+			// Write-by-design, but bounded (hardening doc 02 §3): unbounded
+			// recursive CTEs, and any write once the DO is at its byte ceiling,
+			// are rejected. Legitimate small writes are unaffected.
+			const result = runBoundedWrite(ctx, query, params);
 			return { success: true, result };
 		},
 	},
@@ -105,7 +109,8 @@ export const sqlTools: ToolEntry[] = [
 					continue;
 				}
 				try {
-					const result = executeSql(ctx.sql, query, params);
+					// Same bounds as sql_exec — see hardening doc 02 §3.
+					const result = runBoundedWrite(ctx, query, params);
 					results.push({ index: i, success: true, result });
 				} catch (e: unknown) {
 					const error = e instanceof Error ? e.message : String(e);

@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { MAX_RESULT_BYTES, MAX_RESULT_ROWS } from "../staging/sql-guard";
 import {
 	clearWorkspace,
 	prefixSchema,
@@ -234,12 +235,130 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		expect(result.sql).toContain("LIMIT 1");
 	});
 
+	// `assertReadOnlySql` deliberately ALLOWS `PRAGMA table_info(<t>)` (T3.4), but
+	// applyDefaultLimit then appended `LIMIT 100` to it — and PRAGMA takes no
+	// LIMIT, so SQLite threw "near LIMIT: syntax error". The one describe the
+	// guard lets through was the one statement that could never run.
+	// Runs against real SQLite, so it reproduces the actual parser error.
+	it("runs a PRAGMA table_info describe without appending a LIMIT", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+
+		const result = queryWorkspace(sql, {
+			sql: "PRAGMA table_info(chembl__targets)",
+		});
+
+		expect(result.sql).not.toMatch(/limit/i);
+		expect(result.rows.length).toBeGreaterThan(0);
+		expect(result.rows.map((r) => r.name)).toContain("symbol");
+	});
+
+	it("never flags a describe as truncated, even past the default page size", () => {
+		const sql = makeSql();
+		// 120 columns > the default limit of 100: the row-count heuristic would
+		// otherwise read a complete describe as a truncated page.
+		const cols = Array.from({ length: 120 }, (_, i) => `c${i}`);
+		sql.exec(`CREATE TABLE wide__t (${cols.map((c) => `${c} TEXT`).join(", ")})`);
+
+		const result = queryWorkspace(sql, { sql: "PRAGMA table_info(wide__t)" });
+
+		expect(result.row_count).toBe(120);
+		expect(result.truncated).toBe(false);
+	});
+
 	it("rejects a write disguised as a query", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
 		expect(() =>
 			queryWorkspace(sql, { sql: "DROP TABLE chembl__targets" }),
 		).toThrow();
+	});
+
+	// Hardening doc 03 §1/§5 — the caller `limit` was taken verbatim with no
+	// ceiling, so `limit: 10_000_000` emitted `LIMIT 10000000`.
+	it("clamps an absurd caller limit to the hard ceiling", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets",
+			limit: 10_000_000,
+		});
+
+		expect(result.sql).toBe(
+			`SELECT symbol FROM chembl__targets LIMIT ${MAX_RESULT_ROWS}`,
+		);
+		expect(result.row_count).toBeLessThanOrEqual(MAX_RESULT_ROWS);
+	});
+
+	it("rewrites an in-SQL LIMIT above the ceiling down to it", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets LIMIT 999999",
+		});
+
+		expect(result.sql).toBe(
+			`SELECT symbol FROM chembl__targets LIMIT ${MAX_RESULT_ROWS}`,
+		);
+	});
+
+	it("bounds the response bytes and says why (doc 03 §5)", () => {
+		const sql = makeSql();
+		// ~2 KB per row x 200 rows = ~400 KB, far past the ~96 KB ceiling.
+		sql.exec("CREATE TABLE big__t (blob TEXT)");
+		for (let i = 0; i < 200; i++) {
+			sql.exec("INSERT INTO big__t (blob) VALUES (?)", "x".repeat(2000));
+		}
+
+		const result = queryWorkspace(sql, { sql: "SELECT blob FROM big__t" });
+
+		expect(result.truncated).toBe(true);
+		expect(result.truncation?.reason).toBe("size_limit");
+		expect(result.row_count).toBeLessThan(200);
+		expect(JSON.stringify(result.rows).length).toBeLessThanOrEqual(
+			MAX_RESULT_BYTES,
+		);
+	});
+
+	it("leaves a small result free of any cost signal", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets LIMIT 5",
+		});
+
+		expect(result.truncation).toBeUndefined();
+		expect(result.truncated).toBe(false);
+	});
+
+	// Documents the REAL interaction of the two doc-03 ceilings, which is not
+	// what the doc assumes. To ever reach MAX_RESULT_ROWS (10,000) a row must
+	// serialize under 96 KB / 10,000 = 9.8 bytes. Even a minimal {"id":12345} is
+	// 12 bytes, so the BYTE cap always binds first and the row cap is effectively
+	// unreachable on this path. Both outcomes are explicit, which is what matters.
+	it("byte ceiling binds before the row ceiling, and says so", () => {
+		const sql = makeSql();
+		sql.exec("CREATE TABLE many__t (id INTEGER)");
+		sql.exec(
+			"INSERT INTO many__t(id) WITH RECURSIVE c(x) AS " +
+				"(SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 10001) SELECT x FROM c",
+		);
+
+		const result = queryWorkspace(sql, {
+			sql: "SELECT id FROM many__t",
+			limit: 10_000_000,
+		});
+
+		// Never silently: the caller is told the result was cut and why.
+		expect(result.truncated).toBe(true);
+		expect(result.truncation?.reason).toBe("size_limit");
+		expect(result.row_count).toBeLessThan(MAX_RESULT_ROWS);
+		expect(JSON.stringify(result.rows).length).toBeLessThanOrEqual(
+			MAX_RESULT_BYTES,
+		);
 	});
 });
 

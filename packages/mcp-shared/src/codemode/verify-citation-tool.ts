@@ -22,12 +22,27 @@
  *        { expected_hash: citation.result_hash, data: <fresh result> }.
  *      Disagreements are settled by replay, never by plausibility.
  *
- * Registered under two names (`verify_citation` + `mcp_verify_citation`) to match
- * the repo's dual-registration convention for discoverability across clients.
+ * Registered under the single name `verify_citation`. Unlike the per-server
+ * data tools, this is the SAME stateless tool on every server, so the repo's
+ * `mcp_`-prefixed alias would add a redundant copy with no disambiguation value
+ * (and, fleet-wide, doubles this tool's entry count in raw multi-server clients)
+ * — so it is deliberately NOT dual-registered.
  */
 
 import { z } from "zod";
-import { type VerifyResult, verifyResultHash } from "../provenance/provenance";
+import {
+	canonicalJson,
+	type Citation,
+	sha256Hex,
+	type VerifyResult,
+	verifyResultHash,
+} from "../provenance/provenance";
+import {
+	type CitationJwk,
+	importCitationPublicKey,
+	type SignatureVerdict,
+	verifyCitationSignature,
+} from "../provenance/signing";
 import {
 	createCodeModeError,
 	createCodeModeResponse,
@@ -40,6 +55,9 @@ export interface VerifyCitationSchema {
 	data: z.ZodOptional<z.ZodUnknown>;
 	query_hash: z.ZodOptional<z.ZodString>;
 	query: z.ZodOptional<z.ZodUnknown>;
+	baseline: z.ZodOptional<z.ZodUnknown>;
+	citation: z.ZodOptional<z.ZodUnknown>;
+	public_jwk: z.ZodOptional<z.ZodUnknown>;
 }
 
 export interface VerifyCitationToolResult {
@@ -49,12 +67,11 @@ export interface VerifyCitationToolResult {
 	description: string;
 	/** Zod input schema (raw shape passed to `server.tool`). */
 	schema: VerifyCitationSchema;
-	/** Register the tool (and its `mcp_` alias) on an MCP server. */
+	/** Register the `verify_citation` tool on an MCP server. */
 	register: (server: { tool: (...args: unknown[]) => void }) => void;
 }
 
 const TOOL_NAME = "verify_citation";
-const ALIAS_NAME = "mcp_verify_citation";
 
 const DESCRIPTION =
 	"Re-check a citation's integrity anchors. Result integrity: pass " +
@@ -64,14 +81,23 @@ const DESCRIPTION =
 	"citations the query is the raw code STRING. To adjudicate a disagreement (e.g. another " +
 	"agent's result looks wrong), verify query identity, re-run that exact code via " +
 	"<prefix>_execute, then verify the fresh result against the cited result_hash — replay, " +
-	"don't judge by plausibility. Returns { verified, expected_hash?, actual_hash?, query_check?, " +
-	"replay_hint? }. A mismatch is a normal negative verdict (verified:false), not a tool error.";
+	"don't judge by plausibility. Drift detail: add `baseline` (the originally-cited result) to " +
+	"get a structural diff of what changed vs the fresh `data`, plus whether the baseline itself " +
+	"hashed to the cited result_hash. Signature / ATTESTATION: pass { citation: <the full " +
+	"Citation object>, public_jwk: <the issuing server's public JWK from its " +
+	"/.well-known/jwks.json> } to verify the citation's Ed25519 signature offline — proof the " +
+	"SERVER vouched for it, not merely that bytes reproduce a hash. Returns { verified, " +
+	"expected_hash?, actual_hash?, query_check?, drift?, signature_check?, replay_hint? }. A " +
+	"mismatch is a normal negative verdict (verified:false), not a tool error.";
 
 interface VerifyCitationInput {
 	expected_hash?: string;
 	data?: unknown;
 	query_hash?: string;
 	query?: unknown;
+	baseline?: unknown;
+	citation?: unknown;
+	public_jwk?: unknown;
 }
 
 interface CitationChecks {
@@ -97,6 +123,141 @@ async function runChecks(input: VerifyCitationInput): Promise<CitationChecks> {
 	return checks;
 }
 
+/**
+ * Verify a citation's embedded Ed25519 signature against a caller-supplied
+ * public JWK (obtained from the issuing server's JWKS). Returns undefined when
+ * the attestation mode was not requested; a "malformed" verdict when the key or
+ * signature block is unusable.
+ */
+async function runSignatureCheck(
+	input: VerifyCitationInput,
+): Promise<SignatureVerdict | undefined> {
+	if (input.citation === undefined || input.public_jwk === undefined) {
+		return undefined;
+	}
+	try {
+		const key = await importCitationPublicKey(input.public_jwk as CitationJwk);
+		return await verifyCitationSignature(input.citation as Citation, key);
+	} catch {
+		return { verified: false, reason: "malformed" };
+	}
+}
+
+/** Bounded structural diff of two JSON values — see {@link structuralDrift}. */
+export interface DriftSummary {
+	/** True when any leaf path was added, removed, or changed. */
+	changed: boolean;
+	/** Leaf paths present in `data` but not `baseline` (capped). */
+	added: string[];
+	/** Leaf paths present in `baseline` but not `data` (capped). */
+	removed: string[];
+	/** Leaf paths present in both whose canonical value differs (capped). */
+	changed_paths: string[];
+	/** True when any list was capped — the diff is partial, not the verdict. */
+	truncated: boolean;
+}
+
+/** Max paths reported per bucket. The verdict is the hash; this is just detail. */
+const DRIFT_PATH_CAP = 25;
+
+/**
+ * Flatten a JSON value to `path -> canonical-leaf-string`. Paths are advisory
+ * (a dotted/indexed address for humans); a key literally containing "." can
+ * collide, which only blurs the diff DISPLAY, never the hash verdict.
+ */
+function flattenLeaves(
+	value: unknown,
+	prefix: string,
+	out: Map<string, string>,
+): void {
+	if (value === null || typeof value !== "object") {
+		out.set(prefix || "$", canonicalJson(value));
+		return;
+	}
+	if (Array.isArray(value)) {
+		if (value.length === 0) {
+			out.set(prefix || "$", "[]");
+			return;
+		}
+		value.forEach((v, i) => {
+			flattenLeaves(v, `${prefix}[${i}]`, out);
+		});
+		return;
+	}
+	const entries = Object.entries(value as Record<string, unknown>).filter(
+		([, v]) => v !== undefined,
+	);
+	if (entries.length === 0) {
+		out.set(prefix || "$", "{}");
+		return;
+	}
+	for (const [k, v] of entries) {
+		flattenLeaves(v, prefix ? `${prefix}.${k}` : k, out);
+	}
+}
+
+/**
+ * Bounded, deterministic structural diff between a `baseline` and `data` JSON
+ * value, over the SAME canonicalization used to hash citations. Turns a bare
+ * hash mismatch into "what changed" — the drift-vs-tamper distinction. Paths
+ * are advisory; the load-bearing verdict is always the hash comparison.
+ */
+export function structuralDrift(baseline: unknown, data: unknown): DriftSummary {
+	const a = new Map<string, string>();
+	const b = new Map<string, string>();
+	flattenLeaves(baseline, "", a);
+	flattenLeaves(data, "", b);
+	const added: string[] = [];
+	const removed: string[] = [];
+	const changed_paths: string[] = [];
+	for (const [p, v] of a) {
+		if (!b.has(p)) removed.push(p);
+		else if (b.get(p) !== v) changed_paths.push(p);
+	}
+	for (const p of b.keys()) if (!a.has(p)) added.push(p);
+	added.sort();
+	removed.sort();
+	changed_paths.sort();
+	const truncated =
+		added.length > DRIFT_PATH_CAP ||
+		removed.length > DRIFT_PATH_CAP ||
+		changed_paths.length > DRIFT_PATH_CAP;
+	return {
+		changed:
+			added.length > 0 || removed.length > 0 || changed_paths.length > 0,
+		added: added.slice(0, DRIFT_PATH_CAP),
+		removed: removed.slice(0, DRIFT_PATH_CAP),
+		changed_paths: changed_paths.slice(0, DRIFT_PATH_CAP),
+		truncated,
+	};
+}
+
+/** A drift report anchored to a hash: the diff plus the baseline's integrity. */
+interface DriftReport extends DriftSummary {
+	/** sha256(canonicalJson(baseline)) — so the compared original is re-checkable. */
+	baseline_hash: string;
+	/** When `expected_hash` was supplied: did the baseline hash to it? */
+	baseline_matches_expected?: boolean;
+}
+
+/**
+ * Compute drift only when both a `baseline` and `data` are present. Anchors the
+ * baseline with its own hash and (if a cited hash was given) whether the claimed
+ * original was authentic — the anti-fabrication half of replay adjudication.
+ */
+async function computeDrift(
+	input: VerifyCitationInput,
+): Promise<DriftReport | undefined> {
+	if (input.baseline === undefined || input.data === undefined) return undefined;
+	const summary = structuralDrift(input.baseline, input.data);
+	const baseline_hash = await sha256Hex(canonicalJson(input.baseline));
+	const report: DriftReport = { ...summary, baseline_hash };
+	if (isNonEmptyString(input.expected_hash)) {
+		report.baseline_matches_expected = baseline_hash === input.expected_hash;
+	}
+	return report;
+}
+
 function describeCheck(label: string, check: VerifyResult | undefined): string {
 	if (!check) return "";
 	return check.verified
@@ -104,12 +265,35 @@ function describeCheck(label: string, check: VerifyResult | undefined): string {
 		: ` ${label} MISMATCH: expected sha256:${check.expected_hash.slice(0, 12)}, got sha256:${check.actual_hash.slice(0, 12)}.`;
 }
 
-function replayHintFor(checks: CitationChecks): string | undefined {
-	return checks.query_check?.verified && !checks.result_check
-		? "Query identity confirmed — to finish adjudication, re-run this exact code via the " +
-				"server's <prefix>_execute tool, then call verify_citation again with " +
-				"{ expected_hash: <cited result_hash>, data: <fresh result> }."
-		: undefined;
+function describeDrift(drift: DriftReport | undefined): string {
+	if (!drift) return "";
+	if (!drift.changed) return " No drift vs baseline.";
+	const parts = [
+		drift.changed_paths.length ? `${drift.changed_paths.length} changed` : "",
+		drift.added.length ? `${drift.added.length} added` : "",
+		drift.removed.length ? `${drift.removed.length} removed` : "",
+	].filter(Boolean);
+	return ` Drift vs baseline: ${parts.join(", ")}${drift.truncated ? " (partial)" : ""}.`;
+}
+
+function replayHintFor(
+	checks: CitationChecks,
+	hasBaseline: boolean,
+): string | undefined {
+	if (checks.query_check?.verified && !checks.result_check) {
+		return (
+			"Query identity confirmed — to finish adjudication, re-run this exact code via the " +
+			"server's <prefix>_execute tool, then call verify_citation again with " +
+			"{ expected_hash: <cited result_hash>, data: <fresh result> }."
+		);
+	}
+	if (checks.result_check && !checks.result_check.verified && !hasBaseline) {
+		return (
+			"Result mismatch — this is drift or a bad citation. To see WHAT changed, pass the " +
+			"originally-cited result as `baseline` alongside the fresh `data`."
+		);
+	}
+	return undefined;
 }
 
 /**
@@ -117,7 +301,19 @@ function replayHintFor(checks: CitationChecks): string | undefined {
  * ran, its `expected_hash`/`actual_hash` stay at the TOP level (the original
  * single-pair contract). Query-identity adds `query_check` + a `replay_hint`.
  */
-function buildPayload(checks: CitationChecks): {
+function describeSignature(verdict: SignatureVerdict | undefined): string {
+	if (!verdict) return "";
+	if (verdict.verified) {
+		return ` Signature verified${verdict.key_id ? ` (kid ${verdict.key_id})` : ""}.`;
+	}
+	return ` Signature NOT verified (${verdict.reason ?? "failed"}).`;
+}
+
+function buildPayload(
+	checks: CitationChecks,
+	drift: DriftReport | undefined,
+	signature_check: SignatureVerdict | undefined,
+): {
 	payload: Record<string, unknown>;
 	verified: boolean;
 	textSummary: string;
@@ -125,30 +321,34 @@ function buildPayload(checks: CitationChecks): {
 	const present = [checks.result_check, checks.query_check].filter(
 		(c): c is VerifyResult => c !== undefined,
 	);
-	const verified = present.every((c) => c.verified);
-	const replay_hint = replayHintFor(checks);
+	const coreVerified = present.every((c) => c.verified);
+	// A requested signature check folds into the overall verdict: if you asked
+	// for attestation and it failed, the citation is NOT verified.
+	const verified = signature_check
+		? coreVerified && signature_check.verified
+		: coreVerified;
+	const replay_hint = replayHintFor(checks, drift !== undefined);
 	const payload: Record<string, unknown> = { verified };
 	if (checks.result_check) {
 		payload.expected_hash = checks.result_check.expected_hash;
 		payload.actual_hash = checks.result_check.actual_hash;
 	}
 	if (checks.query_check) payload.query_check = checks.query_check;
+	if (drift) payload.drift = drift;
+	if (signature_check) payload.signature_check = signature_check;
 	if (replay_hint) payload.replay_hint = replay_hint;
 	const textSummary =
 		(verified ? "Verified." : "NOT verified.") +
 		describeCheck("Result integrity", checks.result_check) +
-		describeCheck("Query identity", checks.query_check);
+		describeCheck("Query identity", checks.query_check) +
+		describeDrift(drift) +
+		describeSignature(signature_check);
 	return { payload, verified, textSummary };
 }
 
-/**
- * Create a registerable `verify_citation` tool.
- *
- * Input: any of `{ expected_hash + data }` (result integrity) and/or
- * `{ query_hash + query }` (query identity / replay). At least one pair.
- */
-export function createVerifyCitationTool(): VerifyCitationToolResult {
-	const schema: VerifyCitationSchema = {
+/** Build the (stateless) input schema. */
+function buildSchema(): VerifyCitationSchema {
+	return {
 		expected_hash: z
 			.string()
 			.optional()
@@ -177,32 +377,102 @@ export function createVerifyCitationTool(): VerifyCitationToolResult {
 				"The exact query to re-hash: for <prefix>_execute citations this is the raw " +
 					"code STRING that was executed; for other tools, the args value.",
 			),
+		baseline: z
+			.unknown()
+			.optional()
+			.describe(
+				"Optional drift analysis: a previously-seen (originally-cited) result to diff " +
+					"`data` against. For replay, pass the FRESH re-fetched result as `data` and the " +
+					"originally-cited result as `baseline`; the response gains a `drift` summary " +
+					"(added/removed/changed paths), the baseline's hash, and whether it matched " +
+					"`expected_hash`.",
+			),
+		citation: z
+			.unknown()
+			.optional()
+			.describe(
+				"Attestation mode: the full Citation object (from a result's _meta.citation) " +
+					"whose Ed25519 signature should be verified. Pair with `public_jwk`.",
+			),
+		public_jwk: z
+			.unknown()
+			.optional()
+			.describe(
+				"Attestation mode: the issuing server's public JWK (one entry from its " +
+					"/.well-known/jwks.json, matching the citation signature's key_id) to verify " +
+					"the signature against — offline, no trust in the transport.",
+			),
 	};
+}
 
-	async function handle(input: VerifyCitationInput) {
-		const checks = await runChecks(input);
-		if (!checks.result_check && !checks.query_check) {
-			return createCodeModeError(
-				ErrorCodes.INVALID_ARGUMENTS,
-				"Provide at least one verification pair: { expected_hash, data } for result " +
-					"integrity, or { query_hash, query } for query identity / replay.",
-			);
-		}
-		const { payload, textSummary } = buildPayload(checks);
-		return createCodeModeResponse(payload, { textSummary });
+async function handle(input: VerifyCitationInput) {
+	const checks = await runChecks(input);
+	const signature_check = await runSignatureCheck(input);
+	if (!checks.result_check && !checks.query_check && !signature_check) {
+		return createCodeModeError(
+			ErrorCodes.INVALID_ARGUMENTS,
+			"Provide at least one of: { expected_hash, data } (result integrity), " +
+				"{ query_hash, query } (query identity / replay), or { citation, public_jwk } " +
+				"(signature verification).",
+		);
 	}
+	const drift = await computeDrift(input);
+	const { payload, textSummary } = buildPayload(checks, drift, signature_check);
+	return createCodeModeResponse(payload, { textSummary });
+}
 
+/**
+ * Servers that already carry `verify_citation`.
+ *
+ * The MCP SDK throws `Tool <name> is already registered` on a duplicate name.
+ * Every Code Mode execute factory now registers this tool automatically, so a
+ * server that ALSO registers it by hand (ensembl was the pilot) must be a no-op
+ * rather than a boot crash. Keyed by server identity — `McpServer` instances
+ * are per-session, so finished sessions drop out of the WeakSet.
+ */
+const REGISTERED = new WeakSet<object>();
+
+/**
+ * Register `verify_citation` (+ its `mcp_` alias) on a server exactly once.
+ *
+ * This is the fleet-wide entry point: the REST / GraphQL / SPARQL execute
+ * factories all call it, so any server exposing Code Mode can re-check the
+ * `_meta.citation` anchors it emits. Emitting a `result_hash` a caller has no
+ * way to verify is worse than emitting none — it invites trust it hasn't
+ * earned.
+ *
+ * @returns true when this call performed the registration, false when the
+ *   server already had the tool.
+ */
+export function registerVerifyCitationOnce(server: {
+	tool: (...args: unknown[]) => void;
+}): boolean {
+	if (REGISTERED.has(server)) return false;
+	REGISTERED.add(server);
+	const schema = buildSchema();
+	// Return handle()'s promise directly (no async wrapper) — the MCP SDK
+	// awaits the handler, so the promise is consumed, not floating.
+	const toolHandler = (input: VerifyCitationInput) => handle(input);
+	server.tool(TOOL_NAME, DESCRIPTION, schema, toolHandler);
+	return true;
+}
+
+/**
+ * Create a registerable `verify_citation` tool.
+ *
+ * Input: any of `{ expected_hash + data }` (result integrity) and/or
+ * `{ query_hash + query }` (query identity / replay). At least one pair.
+ *
+ * `register()` delegates to {@link registerVerifyCitationOnce}, so calling it
+ * on a server the execute factory already covered is safe.
+ */
+export function createVerifyCitationTool(): VerifyCitationToolResult {
 	return {
 		name: TOOL_NAME,
 		description: DESCRIPTION,
-		schema,
+		schema: buildSchema(),
 		register(server: { tool: (...args: unknown[]) => void }) {
-			// Return handle()'s promise directly (no async wrapper) — the MCP SDK
-			// awaits the handler, so the promise is consumed, not floating.
-			const toolHandler = (input: VerifyCitationInput) => handle(input);
-			for (const name of [TOOL_NAME, ALIAS_NAME]) {
-				server.tool(name, DESCRIPTION, schema, toolHandler);
-			}
+			registerVerifyCitationOnce(server);
 		},
 	};
 }

@@ -17,6 +17,16 @@ export type SqlTaggedTemplate = <
 export interface ToolContext {
 	sql: SqlTaggedTemplate;
 	/**
+	 * Raw Cloudflare `SqlStorage` for the agent's own DO (hardening doc 02 §3).
+	 * Optional and only wired by servers that expose the write tools: it lets
+	 * `sql_exec` read the exact `databaseSize` (O(1)) for the DO-size ceiling
+	 * and a cursor's `rowsWritten` for the per-statement rows cap — neither of
+	 * which the tagged-template `sql` above can see. When absent, the write
+	 * guard falls back to `PRAGMA page_count` x `page_size` and skips the rows
+	 * cap.
+	 */
+	sqlStorage?: SqlStorage;
+	/**
 	 * Application-scope identifier for the current request — the key used
 	 * to bookkeep staged datasets in the `__registry__` DO so
 	 * `<prefix>_get_schema` (without a data_access_id) can enumerate
@@ -24,7 +34,7 @@ export interface ToolContext {
 	 *
 	 * Historically populated from the MCP transport sessionId; the
 	 * execute tools now resolve it via `getRequestScope(extra)`, which
-	 * prefers `_meta.app.chatId` and the `mcp-chat-id` header before
+	 * prefers `_meta["dev.quentincody.bio/chatId"]` and the `mcp-chat-id` header before
 	 * falling back to the transport session. The field name is kept
 	 * for back-compat with all downstream proxy tools (api-proxy,
 	 * stage-proxy, graphql-proxy, sparql-proxy) that already read

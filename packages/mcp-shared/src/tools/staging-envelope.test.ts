@@ -5,6 +5,7 @@ import {
 	buildStagedTableSummary,
 	extractStagedColumns,
 	preserveEnvelopeScalars,
+	StagedPayloadAccessError,
 } from "./staging-envelope";
 
 describe("preserveEnvelopeScalars", () => {
@@ -122,5 +123,69 @@ describe("buildStagedEnvelope", () => {
 			"filter_may_not_have_applied",
 		);
 		expect(String(env.message)).toContain("filter may not have applied");
+	});
+});
+
+describe("staged-envelope tripwire (silent-empty guard)", () => {
+	const staged = {
+		dataAccessId: "epmc_abc",
+		schema: { tables: { data: { columns: [{ name: "id" }] } } },
+		tablesCreated: ["data"],
+		totalRows: 58,
+		_staging: { table_row_counts: { data: 58 } },
+	} as unknown as StageResult;
+
+	const envelope = () =>
+		buildStagedEnvelope({ staged, responseBytes: 120_000, originalData: {} });
+
+	it("throws instead of silently reading empty — the live Europe PMC failure", () => {
+		// Observed 2026-07-15: a resultType=core search auto-staged, so this exact
+		// idiom collapsed to [] and the run reported zero hits for a query whose
+		// upstream had returned 58.
+		const r = envelope();
+		expect(() => (r as { resultList?: { result?: unknown[] } }).resultList?.result ?? []).toThrow(
+			StagedPayloadAccessError,
+		);
+		expect(() => (r as { data?: unknown }).data || (r as { results?: unknown }).results || []).toThrow(
+			/AUTO-STAGED \(58 rows\)/,
+		);
+	});
+
+	it("names the recovery path in the error", () => {
+		let msg = "";
+		try {
+			void (envelope() as { hits?: unknown }).hits;
+		} catch (e) {
+			msg = (e as Error).message;
+		}
+		expect(msg).toContain('api.query("epmc_abc"');
+		expect(msg).toContain("THIS IS NOT AN EMPTY RESULT");
+	});
+
+	it("leaves serialization across the isolate boundary untouched", () => {
+		const r = envelope();
+		// Non-enumerable: JSON.stringify / spread / Object.keys must not trip.
+		const round = JSON.parse(JSON.stringify(r));
+		expect(round.__staged).toBe(true);
+		expect(round.total_rows).toBe(58);
+		expect(round.resultList).toBeUndefined();
+		expect(() => ({ ...r })).not.toThrow();
+		expect(Object.keys(r)).not.toContain("results");
+	});
+
+	it("still exposes the real envelope fields", () => {
+		const r = envelope();
+		expect(r.__staged).toBe(true);
+		expect(r.data_access_id).toBe("epmc_abc");
+		expect(r.total_rows).toBe(58);
+	});
+
+	it("never shadows a genuinely preserved scalar sibling", () => {
+		const r = buildStagedEnvelope({
+			staged,
+			responseBytes: 120_000,
+			originalData: { data: "a real scalar" },
+		});
+		expect(r.data).toBe("a real scalar"); // preserved — tripwire must skip it
 	});
 });

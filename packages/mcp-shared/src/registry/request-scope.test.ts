@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getRequestScope, type MaybeExtra } from "./request-scope";
+import { CHAT_SCOPE_META_KEY, getRequestScope, type MaybeExtra } from "./request-scope";
 
 describe("getRequestScope", () => {
 	it("returns undefined for undefined input", () => {
@@ -18,11 +18,27 @@ describe("getRequestScope", () => {
 		expect(getRequestScope("")).toBeUndefined();
 	});
 
-	it("reads _meta.app.chatId when present", () => {
+	it("uses a reverse-DNS prefixed _meta key, not a bare generic name", () => {
+		expect(CHAT_SCOPE_META_KEY).toBe("dev.quentincody.bio/chatId");
+		// The MCP spec reserves prefixes whose SECOND label is `mcp` or
+		// `modelcontextprotocol`. Ours must not collide with that reservation.
+		const secondLabel = CHAT_SCOPE_META_KEY.split("/")[0].split(".")[1];
+		expect(["mcp", "modelcontextprotocol"]).not.toContain(secondLabel);
+	});
+
+	it("reads the _meta chat-scope key when present", () => {
 		const extra: MaybeExtra = {
-			_meta: { app: { chatId: "chat-1" } },
+			_meta: { [CHAT_SCOPE_META_KEY]: "chat-1" },
 		};
 		expect(getRequestScope(extra)).toBe("chat-1");
+	});
+
+	it("ignores the legacy bare _meta.app.chatId shape", () => {
+		const extra = {
+			_meta: { app: { chatId: "legacy" } },
+			sessionId: "session-fallback",
+		} as unknown as MaybeExtra;
+		expect(getRequestScope(extra)).toBe("session-fallback");
 	});
 
 	it("reads requestInfo.headers['mcp-chat-id'] when no _meta", () => {
@@ -69,7 +85,7 @@ describe("getRequestScope", () => {
 		const extra: MaybeExtra = {
 			sessionId: "session-low",
 			requestInfo: { headers: { "mcp-chat-id": "header-mid" } },
-			_meta: { app: { chatId: "meta-high" } },
+			_meta: { [CHAT_SCOPE_META_KEY]: "meta-high" },
 		};
 		expect(getRequestScope(extra)).toBe("meta-high");
 	});
@@ -82,9 +98,9 @@ describe("getRequestScope", () => {
 		expect(getRequestScope(extra)).toBe("header-mid");
 	});
 
-	it("skips empty _meta.app.chatId and falls through to header", () => {
+	it("skips an empty _meta chat-scope key and falls through to header", () => {
 		const extra: MaybeExtra = {
-			_meta: { app: { chatId: "" } },
+			_meta: { [CHAT_SCOPE_META_KEY]: "" },
 			requestInfo: { headers: { "mcp-chat-id": "header-fallback" } },
 		};
 		expect(getRequestScope(extra)).toBe("header-fallback");
@@ -100,7 +116,7 @@ describe("getRequestScope", () => {
 
 	it("returns undefined when extra is present but all channels are empty", () => {
 		const extra: MaybeExtra = {
-			_meta: { app: { chatId: "" } },
+			_meta: { [CHAT_SCOPE_META_KEY]: "" },
 			requestInfo: { headers: { "mcp-chat-id": "" } },
 			sessionId: "",
 		};
@@ -111,15 +127,15 @@ describe("getRequestScope", () => {
 		expect(getRequestScope({})).toBeUndefined();
 	});
 
-	it("ignores non-string _meta.app.chatId values", () => {
+	it("ignores non-string _meta chat-scope values", () => {
 		const extra = {
-			_meta: { app: { chatId: 123 as unknown as string } },
+			_meta: { [CHAT_SCOPE_META_KEY]: 123 as unknown as string },
 			sessionId: "session-fallback",
 		} as MaybeExtra;
 		expect(getRequestScope(extra)).toBe("session-fallback");
 	});
 
-	it("ignores _meta with no app block", () => {
+	it("ignores _meta with no chat-scope key", () => {
 		const extra: MaybeExtra = {
 			_meta: { otherKey: "value" },
 			sessionId: "session-fallback",

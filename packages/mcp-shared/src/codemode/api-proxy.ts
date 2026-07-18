@@ -26,13 +26,21 @@ export function buildApiProxySource(): string {
 // __stagedResults is declared in the evaluate() scope (module prefix) so it's
 // accessible both inside this IIFE and in the module suffix return statement.
 
-/** Wrap a staged response — warn on data array access instead of throwing. */
+/** Wrap a staged response — THROW on payload access; a warning is not enough. */
 function __wrapStaged(raw) {
   __stagedResults.push(raw);
   var msg = raw.message || "Response was auto-staged.";
-  var hint = " Return this object and use the query_data tool with data_access_id=\\"" +
-    raw.data_access_id + "\\" to query it with SQL.";
-  var TRAP_KEYS = ["results", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges"];
+  var hint = " THIS IS NOT AN EMPTY RESULT: the upstream returned data and it is in SQLite." +
+    " Query it in-band with api.query('" + raw.data_access_id + "', 'SELECT * FROM <table> LIMIT 10')," +
+    " or return this object and use the query_data tool with data_access_id='" + raw.data_access_id + "'," +
+    " or re-request with a smaller page/limit param so the response never stages.";
+  // These keys previously omitted "result"/"resultList" and merely console.warn'd,
+  // returning undefined — so the idiomatic \`r.resultList?.result ?? []\` collapsed
+  // to [] and the caller reported "no results" for a query whose upstream returned
+  // plenty. Observed live 2026-07-15 against Europe PMC (58 hits read as 0) and
+  // reproduced against deployed entrez 2026-07-16. A console.warn lands in isolate
+  // logs the model never reads; only a throw is load-bearing.
+  var TRAP_KEYS = ["results", "result", "resultList", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges", "response", "collection", "content", "docs", "_embedded"];
   // T6.3 — a staged result is an object, NOT an array. Calling an array method
   // on it (e.g. openalexPapers.slice(...)) threw a cryptic "slice is not a
   // function". Return a thrower that explains the staged-data shape instead.
@@ -41,8 +49,7 @@ function __wrapStaged(raw) {
     get: function(target, prop) {
       if (typeof prop === "string" && !(prop in target)) {
         if (TRAP_KEYS.indexOf(prop) !== -1) {
-          console.warn("[staging] Accessed \\"" + prop + "\\" on staged response — this array was replaced by SQLite tables. " + hint);
-          return undefined;
+          throw new Error("This response was AUTO-STAGED (" + (raw.total_rows != null ? raw.total_rows + " rows" : "large payload") + ") — '" + prop + "' does not exist on the staging envelope. Reading it yields undefined, which silently reads as 'no results'." + hint + " Envelope keys: __staged, data_access_id, total_rows, columns, schema, tables_created, message.");
         }
         if (ARRAY_METHODS.indexOf(prop) !== -1) {
           return function() {
