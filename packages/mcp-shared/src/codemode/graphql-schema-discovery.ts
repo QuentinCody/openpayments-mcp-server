@@ -160,6 +160,12 @@ export function registerGraphqlSearchTool(
 						success: true,
 						query: input.query ?? "",
 						schema: apiName,
+						// #3: the matched query roots + Type.field signatures used to
+						// live ONLY in the text block, so a caller consuming
+						// structuredContent got an empty {success,query,schema} stub and
+						// had to fall back to raw __type introspection. Surface the same
+						// schema-search result here so structuredContent is self-sufficient.
+						schema_matches: text,
 					},
 				};
 			} catch (err) {

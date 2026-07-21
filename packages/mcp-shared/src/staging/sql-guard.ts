@@ -105,8 +105,15 @@ export function assertReadOnlySql(sql: string): string {
 	}
 	for (const keyword of DANGEROUS_KEYWORDS) {
 		// Word-boundary regex avoids false positives on column names like
-		// "created_at" matching CREATE or "updated_at" matching UPDATE.
-		const regex = new RegExp(`\\b${keyword}\\b`);
+		// "created_at" matching CREATE or "updated_at" matching UPDATE. The
+		// `(?!\s*\()` lookahead additionally lets a scalar FUNCTION call of the
+		// same name through: `REPLACE(col, ',', '')` is SQLite's string function,
+		// not the `REPLACE INTO` write statement. No dangerous SQLite statement is
+		// ever spelled `KEYWORD(` — they are `REPLACE INTO`, `DROP TABLE`,
+		// `DELETE FROM`, `PRAGMA name`, … (keyword + space + identifier) — so this
+		// relaxes only the scalar-function case and opens no write bypass. The
+		// single-statement (above) and SELECT/WITH-start (below) checks still hold.
+		const regex = new RegExp(`\\b${keyword}\\b(?!\\s*\\()`);
 		if (regex.test(upperCode)) {
 			throw new Error(
 				`SQL command '${keyword}' is not allowed. Only SELECT queries are permitted.`,

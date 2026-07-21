@@ -48,6 +48,23 @@ describe("assertReadOnlySql", () => {
 		expect(assertReadOnlySql(sql)).toBe(sql);
 	});
 
+	it("accepts a scalar REPLACE() function call (not the REPLACE INTO write)", () => {
+		// REPLACE() is SQLite's string function. The guard must not confuse it with
+		// the REPLACE INTO write statement — a `KEYWORD(` form is never a statement.
+		const sql = "SELECT REPLACE(note, ',', '') AS clean FROM t";
+		expect(assertReadOnlySql(sql)).toBe(sql);
+		// whitespace before the paren is still a function call, not a statement
+		expect(assertReadOnlySql("SELECT REPLACE (a, b, c) FROM t")).toBe(
+			"SELECT REPLACE (a, b, c) FROM t",
+		);
+	});
+
+	it("SECURITY: still rejects the REPLACE INTO write statement (keyword + space + identifier)", () => {
+		expect(() => assertReadOnlySql("REPLACE INTO t VALUES (1)")).toThrow(/REPLACE/);
+		// a chained REPLACE INTO after a SELECT is caught by single-statement too
+		expect(() => assertReadOnlySql("SELECT 1; REPLACE INTO t VALUES (1)")).toThrow();
+	});
+
 	it("rejects multiple statements", () => {
 		expect(() => assertReadOnlySql("SELECT 1; SELECT 2")).toThrow(
 			/single SQL statement/,
@@ -287,6 +304,22 @@ describe("assertRecursiveHasLimit (rs1 #2)", () => {
 				"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT x FROM c LIMIT 100",
 			),
 		).not.toThrow();
+	});
+
+	it("bails safely on a malformed CTE whose `AS (` never closes (matchParenEnd fallback)", () => {
+		// Unbalanced paren => matchParenEnd returns -1 => extraction stops without
+		// hanging or throwing; the (unparseable) query is simply left alone.
+		expect(() => assertRecursiveHasLimit("WITH c AS (SELECT 1 FROM c")).not.toThrow();
+	});
+
+	it("walks multiple comma-separated CTEs (comma-advance in the extractor)", () => {
+		// First CTE is non-recursive; the second is recursive with no LIMIT =>
+		// unbounded => throws. Reaching the 2nd CTE exercises the comma advance.
+		expect(() =>
+			assertRecursiveHasLimit(
+				"WITH a AS (SELECT 1), b(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM b) SELECT COUNT(*) FROM b",
+			),
+		).toThrow(/recursive CTE is unbounded/i);
 	});
 });
 

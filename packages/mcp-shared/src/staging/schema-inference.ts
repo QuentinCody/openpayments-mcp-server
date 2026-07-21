@@ -718,16 +718,19 @@ function createTableAndIndexes(
 	table: InferredTable,
 	sql: { exec: (query: string, ...bindings: unknown[]) => unknown },
 ): void {
-	const hasIdColumn = table.columns.some((c) => c.name === "id");
 	// Dedupe case-insensitively: SQLite treats `id` and `ID` as ONE column, so
 	// emitting both threw "duplicate column name" and lost the whole table (rs).
 	const colDefs = dedupeColumnsByNameCI(table.columns)
 		.map((c) => `${quoteIdent(c.name)} ${c.type}`)
 		.join(", ");
 	const tbl = quoteIdent(table.name);
-	const createSql = hasIdColumn
-		? `CREATE TABLE IF NOT EXISTS ${tbl} (_rowid INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`
-		: `CREATE TABLE IF NOT EXISTS ${tbl} (id INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`;
+	// Always name the synthetic autoincrement PK `_rowid` so a child table's
+	// `parent_id` FK uniformly joins to `p._rowid` across the whole fleet (#6).
+	// Previously the PK was named `id` when the row data had NO natural `id`
+	// field and `_rowid` when it did — so the correct join column silently
+	// differed per dataset (CIViC joined on `_rowid`, RCSB on `id`), a
+	// wrong-join hazard. Any natural `id` in the data is kept as an ordinary col.
+	const createSql = `CREATE TABLE IF NOT EXISTS ${tbl} (_rowid INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? `, ${colDefs}` : ""})`;
 	sql.exec(createSql);
 
 	for (const idx of table.indexes) {

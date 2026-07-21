@@ -144,15 +144,17 @@ describe("buildRelationshipJoins", () => {
 		);
 		expect(out.parent_table).toBe("parent");
 	});
-	it("uses p.id when the parent has no data id column", () => {
+	it("uses p._rowid even when the parent has no data id column (#6: uniform join)", () => {
+		// The synthetic PK is always named `_rowid`, so the join no longer depends
+		// on whether the parent data happened to carry a natural `id` column.
 		const schema = schemaOf([{ name: "parent", columns: [{ name: "label" }] }]);
 		expect(buildRelationshipJoins([rel({})], schema)[0].join_sql).toContain(
-			"= p.id",
+			"= p._rowid",
 		);
 	});
-	it("defaults to p.id when the parent table is absent from the schema", () => {
+	it("defaults to p._rowid when the parent table is absent from the schema (#6)", () => {
 		expect(buildRelationshipJoins([rel({})], undefined)[0].join_sql).toContain(
-			"= p.id",
+			"= p._rowid",
 		);
 		expect(buildRelationshipJoins([], undefined)).toEqual([]);
 	});

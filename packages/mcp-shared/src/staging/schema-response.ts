@@ -96,22 +96,18 @@ export interface RelationshipWithJoin extends TableRelationship {
 	join_sql: string;
 }
 
-/** Attach a sample JOIN SQL string to each relationship, resolving the parent key column. */
+/** Attach a sample JOIN SQL string to each relationship (child.parent_id → parent._rowid). */
 export function buildRelationshipJoins(
 	relationships: TableRelationship[],
-	inferredSchema: InferredSchema | undefined,
+	_inferredSchema: InferredSchema | undefined,
 ): RelationshipWithJoin[] {
 	return relationships.map((rel) => {
-		// Parent PK is _rowid when the parent carries its own data "id" column, else "id".
-		const parentTable = inferredSchema?.tables.find(
-			(t) => t.name === rel.parent_table,
-		);
-		const parentHasDataId =
-			parentTable?.columns.some((c) => c.name === "id") ?? false;
-		const parentKeyCol = parentHasDataId ? "_rowid" : "id";
+		// The synthetic parent PK is uniformly named `_rowid` (schema-inference
+		// always emits it), so a child's `parent_id` always joins to `p._rowid`.
+		// (#6 — was conditionally `id` vs `_rowid`, silently diverging per dataset.)
 		return {
 			...rel,
-			join_sql: `SELECT p.*, c.* FROM "${rel.parent_table}" p JOIN "${rel.child_table}" c ON c.parent_id = p.${parentKeyCol}`,
+			join_sql: `SELECT p.*, c.* FROM "${rel.parent_table}" p JOIN "${rel.child_table}" c ON c.parent_id = p._rowid`,
 		};
 	});
 }
