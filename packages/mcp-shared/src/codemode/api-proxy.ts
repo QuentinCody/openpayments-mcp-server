@@ -40,7 +40,7 @@ function __wrapStaged(raw) {
   // plenty. Observed live 2026-07-15 against Europe PMC (58 hits read as 0) and
   // reproduced against deployed entrez 2026-07-16. A console.warn lands in isolate
   // logs the model never reads; only a throw is load-bearing.
-  var TRAP_KEYS = ["results", "result", "resultList", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges", "response", "collection", "content", "docs", "_embedded"];
+  var TRAP_KEYS = ["results", "result", "resultList", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges", "response", "collection", "content", "docs", "_embedded", "studies"];
   // T6.3 — a staged result is an object, NOT an array. Calling an array method
   // on it (e.g. openalexPapers.slice(...)) threw a cryptic "slice is not a
   // function". Return a thrower that explains the staged-data shape instead.

@@ -272,6 +272,13 @@ function runTier1(
 		tier: 1,
 		tablesCreated: result.tablesCreated,
 		totalRows: result.totalRows,
+		// #8: expose the Tier-1 artifacts so the consolidated staging path can
+		// persist the schema and surface relationships / per-table row counts.
+		inferredSchema: schema,
+		tableRowCounts: result.tableRowCounts,
+		inputRows: result.inputRows,
+		failedRows: result.failedRows,
+		materializationWarnings: result.warnings,
 	};
 }
 

@@ -28,6 +28,7 @@ const COLLECTION_KEYS = [
 	"docs",
 	"nodes",
 	"edges",
+	"studies", // CT.gov /studies payload is { totalCount, studies:[...] } (#5)
 ];
 
 /** Below this (and under the ~100KB transport limit), a single record stays inline. */

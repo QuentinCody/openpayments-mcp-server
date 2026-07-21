@@ -27,6 +27,9 @@ export function preserveEnvelopeScalars(
 	// After the typeof guard, Object.entries is safe on the narrowed `object` type.
 	for (const [key, value] of Object.entries(original)) {
 		if (key in staging) continue; // don't clobber staging metadata fields
+		// #5: an array value (even []) is a payload container, not a scalar —
+		// preserving it would shadow the staged-payload tripwire for that key.
+		if (Array.isArray(value)) continue;
 		try {
 			const serialized = JSON.stringify(value);
 			if (
@@ -120,7 +123,7 @@ export interface StagedEnvelopeInput {
  */
 const STAGED_PAYLOAD_KEYS = [
 	"resultList", "results", "result", "data", "items", "hits", "records",
-	"rows", "response", "collection", "content", "_embedded", "docs", "entries",
+	"rows", "response", "collection", "content", "_embedded", "docs", "entries", "studies",
 ] as const;
 
 /**

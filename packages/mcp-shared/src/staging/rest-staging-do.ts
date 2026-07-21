@@ -437,12 +437,34 @@ export class RestStagingDO extends DurableObject {
 				stageData(data, this.sql, context, stagingHints, domainConfig),
 			);
 
+			// #8: reach parity with the legacy path. The consolidated engine used to
+			// drop the inferred schema, so get_schema had no relationships/join_sql/
+			// column-hints and the /process response carried no relationships or
+			// per-table row counts - forcing clients to sqlite_master-spelunk before
+			// every analytical query. Persist the schema and surface both inline.
+			let relationships: TableRelationship[] = [];
+			if (result.inferredSchema) {
+				this.persistInferredSchema(result.inferredSchema);
+				this.persistColumnProfiles(result.inferredSchema);
+				relationships = this.extractRelationships(result.inferredSchema);
+				this.updateProvenanceRowCounts(
+					result.inputRows ?? result.totalRows,
+					result.totalRows,
+					result.failedRows ?? 0,
+					result.materializationWarnings ?? [],
+				);
+			}
+
 			return this.jsonResponse({
 				success: result.success,
 				tier: result.tier,
 				table_count: result.tablesCreated.length,
 				total_rows: result.totalRows,
 				tables_created: result.tablesCreated,
+				...(result.tableRowCounts
+					? { table_row_counts: result.tableRowCounts }
+					: {}),
+				...(relationships.length > 0 ? { relationships } : {}),
 				...(result.error ? { error: result.error } : {}),
 			});
 		}

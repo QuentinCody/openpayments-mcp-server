@@ -113,3 +113,27 @@ describe("stageData — T5.3 never hard-fail to zero", () => {
 		expect(payloadInserts).toHaveLength(1);
 	});
 });
+
+describe("stageData — Tier-1 metadata parity (#8)", () => {
+	const noopSql = {
+		exec: () => ({ toArray: () => [], one: () => undefined }),
+	} as unknown as SqlExec;
+
+	it("surfaces the inferred schema + per-table row counts for a flat array", () => {
+		const result = stageData(
+			{ items: [{ a: 1, b: "x" }, { a: 2, b: "y" }] },
+			noopSql,
+		);
+		expect(result.success).toBe(true);
+		expect(result.tier).toBe(1);
+		expect(result.inferredSchema?.tables.length ?? 0).toBeGreaterThan(0);
+		expect(result.tableRowCounts).toBeDefined();
+		expect(result.inputRows).toBe(2);
+	});
+
+	it("omits Tier-1 artifacts on the raw-JSON fallback (no arrays)", () => {
+		const result = stageData({ scalar: "no arrays" }, noopSql);
+		expect(result.inferredSchema).toBeUndefined();
+		expect(result.tableRowCounts).toBeUndefined();
+	});
+});

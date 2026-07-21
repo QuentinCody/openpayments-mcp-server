@@ -6,6 +6,11 @@
  *   Tier 2 (Full Normalization) — entity discovery, junction tables, FK resolution.
  */
 
+import type {
+	InferredSchema,
+	MaterializationWarning,
+} from "./schema-inference";
+
 // ---------------------------------------------------------------------------
 // Table schema (used by both Tier 1 and Tier 2, matches per-server `TableSchema`)
 // ---------------------------------------------------------------------------
@@ -65,6 +70,17 @@ export interface StagingResult {
 	tablesCreated: string[];
 	totalRows: number;
 	error?: string;
+	/**
+	 * Tier-1 artifacts (#8) so the consolidated staging path can persist the
+	 * inferred schema and surface relationships / per-table row counts, reaching
+	 * parity with the legacy path. Absent for Tier 2 and the raw-JSON fallback
+	 * (which have no InferredSchema).
+	 */
+	inferredSchema?: InferredSchema;
+	tableRowCounts?: Record<string, number>;
+	inputRows?: number;
+	failedRows?: number;
+	materializationWarnings?: MaterializationWarning[];
 }
 
 // ---------------------------------------------------------------------------
