@@ -30,7 +30,6 @@ import {
 import { createFsProxyHandlers } from "../tools/fs-proxy";
 import { createPaginateProxyTool } from "../tools/paginate-proxy";
 import { buildApiProxySource } from "./api-proxy";
-import { registerVerifyCitationOnce } from "./verify-citation-tool";
 import type { ApiCatalog, ApiFetchFn } from "./catalog";
 import { buildCatalogSearchSource } from "./catalog-search";
 import { catalogToTypeScript, specToTypeScript } from "./catalog-to-typescript";
@@ -556,10 +555,6 @@ export function createExecuteTool(
 					}
 				},
 			);
-
-			// Sibling provenance tool: results carry `_meta.citation` integrity
-			// anchors, so the server must also expose the means to re-check them.
-			registerVerifyCitationOnce(server);
 		},
 	};
 }

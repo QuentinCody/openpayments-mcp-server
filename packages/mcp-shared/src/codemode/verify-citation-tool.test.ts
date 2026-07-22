@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildCitation,
-	canonicalJson,
 	type Citation,
+	canonicalJson,
 	sha256Hex,
 } from "../provenance/provenance";
 import {
@@ -46,7 +46,7 @@ function captureRegistrations(): {
 }
 
 describe("createVerifyCitationTool", () => {
-	it("registers a `verify_citation` tool with code-mode schema", () => {
+	it("registers both verifier aliases with the code-mode schema", () => {
 		const tool = createVerifyCitationTool();
 		expect(tool.name).toBe("verify_citation");
 		expect(tool.schema.expected_hash).toBeDefined();
@@ -55,6 +55,7 @@ describe("createVerifyCitationTool", () => {
 		const { register, handlers } = captureRegistrations();
 		tool.register(register);
 		expect(handlers.has("verify_citation")).toBe(true);
+		expect(handlers.has("mcp_verify_citation")).toBe(true);
 	});
 
 	it("returns verified:true when the data reproduces the expected hash", async () => {
@@ -120,16 +121,16 @@ describe("createVerifyCitationTool", () => {
 		expect(res.content[0].text).toMatch(/expected_hash/i);
 	});
 
-	it("registers ONLY verify_citation — no mcp_ alias (single registration)", () => {
-		// verify_citation is the same stateless tool on every server, so the
-		// mcp_ alias would only double its entry count fleet-wide. Deliberately
-		// single-registered, unlike the per-server data tools.
+	it("honors the fleet dual-registration contract when explicitly enabled", () => {
 		const tool = createVerifyCitationTool();
 		const { register, handlers } = captureRegistrations();
 		tool.register(register);
 		expect(handlers.has("verify_citation")).toBe(true);
-		expect(handlers.has("mcp_verify_citation")).toBe(false);
-		expect([...handlers.keys()]).toEqual(["verify_citation"]);
+		expect(handlers.has("mcp_verify_citation")).toBe(true);
+		expect([...handlers.keys()]).toEqual([
+			"mcp_verify_citation",
+			"verify_citation",
+		]);
 	});
 
 	it("verifies query identity and emits a replay_hint (replay protocol)", async () => {
@@ -227,10 +228,9 @@ describe("createVerifyCitationTool", () => {
 });
 
 /**
- * The Code Mode execute factories now register `verify_citation` on every
- * server. The MCP SDK throws `Tool <name> is already registered` on a duplicate
- * name, so a server that also registers it by hand (ensembl was the pilot) must
- * be a no-op rather than a crash on boot.
+ * The optional compatibility tool remains idempotent for setup composition.
+ * The MCP SDK throws `Tool <name> is already registered` on a duplicate name,
+ * so repeated setup must be a no-op rather than a crash on boot.
  */
 describe("registerVerifyCitationOnce", () => {
 	/** Fake server that throws on duplicate names, exactly like the MCP SDK. */
@@ -253,17 +253,17 @@ describe("registerVerifyCitationOnce", () => {
 		};
 	}
 
-	it("registers the tool under the single canonical name on first call", () => {
+	it("registers both aliases on first call", () => {
 		const { server, names } = strictServer();
 		expect(registerVerifyCitationOnce(server)).toBe(true);
-		expect(names).toEqual(["verify_citation"]);
+		expect(names).toEqual(["mcp_verify_citation", "verify_citation"]);
 	});
 
 	it("is a no-op on a second call for the same server", () => {
 		const { server, names } = strictServer();
 		registerVerifyCitationOnce(server);
 		expect(registerVerifyCitationOnce(server)).toBe(false);
-		expect(names).toHaveLength(1);
+		expect(names).toHaveLength(2);
 	});
 
 	it("registers independently on a different server instance", () => {
@@ -271,16 +271,14 @@ describe("registerVerifyCitationOnce", () => {
 		const b = strictServer();
 		registerVerifyCitationOnce(a.server);
 		expect(registerVerifyCitationOnce(b.server)).toBe(true);
-		expect(b.names).toHaveLength(1);
+		expect(b.names).toHaveLength(2);
 	});
 
 	it("makes a hand-written createVerifyCitationTool().register() idempotent", () => {
-		// ensembl's existing 3-line registration must survive the factory also
-		// registering the tool — no `already registered` throw.
 		const { server, names } = strictServer();
 		registerVerifyCitationOnce(server);
 		expect(() => createVerifyCitationTool().register(server)).not.toThrow();
-		expect(names).toHaveLength(1);
+		expect(names).toHaveLength(2);
 	});
 
 	it("still installs a working handler through the once-guard", async () => {
@@ -445,7 +443,6 @@ describe("verify_citation drift / replay adjudication", () => {
 	});
 });
 
-
 describe("verify_citation signature / attestation mode", () => {
 	const SIGNED_AT = "2026-07-10T00:00:00.000Z";
 
@@ -460,7 +457,11 @@ describe("verify_citation signature / attestation mode", () => {
 			retrievedAt: SIGNED_AT,
 			recordCount: 1,
 		});
-		const signed = await signCitation(cite, { keyId: "k1", privateKey }, SIGNED_AT);
+		const signed = await signCitation(
+			cite,
+			{ keyId: "k1", privateKey },
+			SIGNED_AT,
+		);
 		const public_jwk = await exportCitationPublicJwk(publicKey, "k1");
 		return { signed, public_jwk };
 	}
@@ -525,7 +526,10 @@ describe("verify_citation signature / attestation mode", () => {
 
 	it("does not throw on a malformed public_jwk", async () => {
 		const { signed } = await signedCitation();
-		const res = await callVerify({ citation: signed, public_jwk: { bogus: true } });
+		const res = await callVerify({
+			citation: signed,
+			public_jwk: { bogus: true },
+		});
 		const out = res.structuredContent?.data as {
 			verified: boolean;
 			signature_check: { reason?: string };

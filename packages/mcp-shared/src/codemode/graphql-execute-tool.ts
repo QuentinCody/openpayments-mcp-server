@@ -28,7 +28,11 @@ import { createFsProxyHandlers } from "../tools/fs-proxy";
 import { createGraphqlProxyTool } from "../tools/graphql-proxy";
 import { buildRestApiOverrideSource } from "./api-proxy";
 import type { ApiFetchFn } from "./catalog";
-import { DynamicWorkerExecutor, type ExecutorFns, type WorkerLoaderBinding } from "./execute-tool";
+import {
+	DynamicWorkerExecutor,
+	type ExecutorFns,
+	type WorkerLoaderBinding,
+} from "./execute-tool";
 import { buildFsProxySource } from "./fs-proxy";
 import { buildGraphqlExecuteDescription } from "./graphql-execute-description";
 import { handleExecutorResult } from "./graphql-execute-result";
@@ -42,7 +46,6 @@ import { registerGraphqlSearchTool } from "./graphql-schema-discovery";
 import { buildGraphqlSchemaSource } from "./graphql-schema-source";
 import { introspectionToSummary } from "./graphql-to-typescript";
 import { createCodeModeError, ErrorCodes } from "./response";
-import { registerVerifyCitationOnce } from "./verify-citation-tool";
 
 // ---------------------------------------------------------------------------
 // Options & result types
@@ -475,10 +478,6 @@ export function createGraphqlExecuteTool(
 				cache,
 				catalog: options.catalog,
 			});
-
-			// Sibling provenance tool: results carry `_meta.citation` integrity
-			// anchors, so the server must also expose the means to re-check them.
-			registerVerifyCitationOnce(server);
 		},
 	};
 }

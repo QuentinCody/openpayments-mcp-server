@@ -22,17 +22,17 @@
  *        { expected_hash: citation.result_hash, data: <fresh result> }.
  *      Disagreements are settled by replay, never by plausibility.
  *
- * Registered under the single name `verify_citation`. Unlike the per-server
- * data tools, this is the SAME stateless tool on every server, so the repo's
- * `mcp_`-prefixed alias would add a redundant copy with no disambiguation value
- * (and, fleet-wide, doubles this tool's entry count in raw multi-server clients)
- * — so it is deliberately NOT dual-registered.
+ * This is an opt-in compatibility surface for consumers that cannot run the
+ * shared verification primitives locally. Bio MCP servers no longer advertise
+ * it automatically; the portal verifies citations deterministically as each
+ * result arrives. If explicitly registered elsewhere, both fleet-required tool
+ * aliases are installed.
  */
 
 import { z } from "zod";
 import {
-	canonicalJson,
 	type Citation,
+	canonicalJson,
 	sha256Hex,
 	type VerifyResult,
 	verifyResultHash,
@@ -202,7 +202,10 @@ function flattenLeaves(
  * hash mismatch into "what changed" — the drift-vs-tamper distinction. Paths
  * are advisory; the load-bearing verdict is always the hash comparison.
  */
-export function structuralDrift(baseline: unknown, data: unknown): DriftSummary {
+export function structuralDrift(
+	baseline: unknown,
+	data: unknown,
+): DriftSummary {
 	const a = new Map<string, string>();
 	const b = new Map<string, string>();
 	flattenLeaves(baseline, "", a);
@@ -223,8 +226,7 @@ export function structuralDrift(baseline: unknown, data: unknown): DriftSummary 
 		removed.length > DRIFT_PATH_CAP ||
 		changed_paths.length > DRIFT_PATH_CAP;
 	return {
-		changed:
-			added.length > 0 || removed.length > 0 || changed_paths.length > 0,
+		changed: added.length > 0 || removed.length > 0 || changed_paths.length > 0,
 		added: added.slice(0, DRIFT_PATH_CAP),
 		removed: removed.slice(0, DRIFT_PATH_CAP),
 		changed_paths: changed_paths.slice(0, DRIFT_PATH_CAP),
@@ -248,7 +250,8 @@ interface DriftReport extends DriftSummary {
 async function computeDrift(
 	input: VerifyCitationInput,
 ): Promise<DriftReport | undefined> {
-	if (input.baseline === undefined || input.data === undefined) return undefined;
+	if (input.baseline === undefined || input.data === undefined)
+		return undefined;
 	const summary = structuralDrift(input.baseline, input.data);
 	const baseline_hash = await sha256Hex(canonicalJson(input.baseline));
 	const report: DriftReport = { ...summary, baseline_hash };
@@ -422,24 +425,22 @@ async function handle(input: VerifyCitationInput) {
 }
 
 /**
- * Servers that already carry `verify_citation`.
+ * Servers that explicitly opt into the compatibility verifier.
  *
  * The MCP SDK throws `Tool <name> is already registered` on a duplicate name.
- * Every Code Mode execute factory now registers this tool automatically, so a
- * server that ALSO registers it by hand (ensembl was the pilot) must be a no-op
- * rather than a boot crash. Keyed by server identity — `McpServer` instances
- * are per-session, so finished sessions drop out of the WeakSet.
+ * Registration is idempotent for callers that compose setup functions. Keyed
+ * by server identity — `McpServer` instances are per-session, so finished
+ * sessions drop out of the WeakSet.
  */
 const REGISTERED = new WeakSet<object>();
 
 /**
  * Register `verify_citation` (+ its `mcp_` alias) on a server exactly once.
  *
- * This is the fleet-wide entry point: the REST / GraphQL / SPARQL execute
- * factories all call it, so any server exposing Code Mode can re-check the
- * `_meta.citation` anchors it emits. Emitting a `result_hash` a caller has no
- * way to verify is worse than emitting none — it invites trust it hasn't
- * earned.
+ * Normal Bio MCP servers do not register this tool. Consumers should verify
+ * `_meta.citation` deterministically as they receive results; this optional MCP
+ * surface remains for third-party clients that cannot run the shared verifier
+ * locally. Both aliases are required by the fleet registration contract.
  *
  * @returns true when this call performed the registration, false when the
  *   server already had the tool.
@@ -453,6 +454,7 @@ export function registerVerifyCitationOnce(server: {
 	// Return handle()'s promise directly (no async wrapper) — the MCP SDK
 	// awaits the handler, so the promise is consumed, not floating.
 	const toolHandler = (input: VerifyCitationInput) => handle(input);
+	server.tool(`mcp_${TOOL_NAME}`, DESCRIPTION, schema, toolHandler);
 	server.tool(TOOL_NAME, DESCRIPTION, schema, toolHandler);
 	return true;
 }
@@ -463,8 +465,8 @@ export function registerVerifyCitationOnce(server: {
  * Input: any of `{ expected_hash + data }` (result integrity) and/or
  * `{ query_hash + query }` (query identity / replay). At least one pair.
  *
- * `register()` delegates to {@link registerVerifyCitationOnce}, so calling it
- * on a server the execute factory already covered is safe.
+ * `register()` delegates to {@link registerVerifyCitationOnce}, so repeated
+ * setup calls on the same server are safe.
  */
 export function createVerifyCitationTool(): VerifyCitationToolResult {
 	return {

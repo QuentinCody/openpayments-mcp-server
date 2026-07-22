@@ -44,7 +44,6 @@ import {
 	type SparqlFetchFn,
 } from "./sparql-introspection";
 import { buildSparqlProxySource } from "./sparql-proxy";
-import { registerVerifyCitationOnce } from "./verify-citation-tool";
 
 export interface SparqlExecuteToolOptions {
 	/** Tool name prefix (e.g., "bgee" → "bgee_execute") */
@@ -467,10 +466,6 @@ export function createSparqlExecuteTool(
 					}
 				},
 			);
-
-			// Sibling provenance tool: results carry `_meta.citation` integrity
-			// anchors, so the server must also expose the means to re-check them.
-			registerVerifyCitationOnce(server);
 		},
 	};
 }
