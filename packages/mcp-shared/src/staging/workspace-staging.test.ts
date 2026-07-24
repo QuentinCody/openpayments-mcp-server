@@ -62,6 +62,8 @@ describe("stageIntoWorkspace", () => {
 					data_access_id: "chembl_abc",
 					tables: ["chembl__targets"],
 					row_count: 7,
+					evidence_table: "chembl__evidence",
+					payload_hash: "sha256:abc",
 				}),
 		});
 		const result = await stageIntoWorkspace(
@@ -77,6 +79,8 @@ describe("stageIntoWorkspace", () => {
 		expect(result.tablesCreated).toEqual(["chembl__targets"]);
 		expect(result.totalRows).toBe(7);
 		expect(result.schema).toBeNull();
+		expect(result._staging.evidence_table).toBe("chembl__evidence");
+		expect(result._staging.payload_hash).toBe("sha256:abc");
 		expect(result._staging).toMatchObject({
 			data_access_id: "chembl_abc",
 			tables: ["chembl__targets"],
@@ -147,7 +151,7 @@ describe("queryWorkspaceFromDo", () => {
 					rows: [{ a: 1 }],
 					row_count: 1,
 					sql: (body as { sql: string }).sql,
-					truncated: true,
+					complete_view: true,
 				}),
 		});
 		const result = await queryWorkspaceFromDo(
@@ -158,7 +162,7 @@ describe("queryWorkspaceFromDo", () => {
 		);
 		expect(result.rows).toEqual([{ a: 1 }]);
 		expect(result.row_count).toBe(1);
-		expect(result.truncated).toBe(true);
+		expect(result.complete_view).toBe(true);
 		expect(result.data_access_id).toBe("ws:W");
 		const q = calls.find((c) => c.path === "/ws/query");
 		expect(q?.id).toBe("ws:W");
@@ -175,7 +179,7 @@ describe("queryWorkspaceFromDo", () => {
 		const result = await queryWorkspaceFromDo(ns, "W", "SELECT 1");
 		expect(result.row_count).toBe(2);
 		expect(result.sql).toBe("SELECT 1");
-		expect(result.truncated).toBeUndefined();
+		expect(result.complete_view).toBe(true);
 	});
 
 	it("throws when the workspace query fails", async () => {

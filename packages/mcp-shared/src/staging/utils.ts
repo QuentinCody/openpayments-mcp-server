@@ -10,6 +10,7 @@ import {
 } from "../completeness";
 import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import { parseJsonResponse } from "./do-response";
+import { preservePayloadInDo } from "./lossless-stage";
 import type { SchemaHints } from "./schema-inference";
 import {
 	applyDefaultLimit,
@@ -215,9 +216,16 @@ export async function stageToDoAndRespond(
 	// so default-off behavior stays byte-for-byte unchanged.
 	const ws = options?.workspace;
 	if (ws) {
+		// Unique dataset per stage. The WorkspaceDO's `stageDataset` is
+		// replace-on-rewrite (it DROPs every table previously recorded under the
+		// dataset name and pins the evidence payload to id=1), while callers pass a
+		// FIXED per-server name (`buildStageOptions` → `dataset: stagingPrefix`).
+		// Reusing it meant a server's second staged result in one session silently
+		// destroyed its first and dangled that handle. `dataAccessId` is already
+		// unique and prefix-carrying, so attribution survives and staging is additive.
 		return stageIntoWorkspace(
 			data,
-			ws,
+			{ namespace: ws.namespace, id: ws.id, dataset: dataAccessId },
 			payloadBytes,
 			resolvedToolPrefix,
 			dataAccessId,
@@ -229,6 +237,11 @@ export async function stageToDoAndRespond(
 
 	const doId = doNamespace.idFromName(dataAccessId);
 	const doInstance = doNamespace.get(doId);
+	const preservedPayload = await preservePayloadInDo(
+		data,
+		doInstance,
+		provenance,
+	);
 
 	const processReq = new Request(`${DO_FETCH_ORIGIN}/process`, {
 		method: "POST",
@@ -326,6 +339,8 @@ export async function stageToDoAndRespond(
 			toolPrefix: resolvedToolPrefix,
 			relationships: processResult.relationships,
 			completeness,
+			evidenceTable: preservedPayload.evidenceTable,
+			payloadHash: preservedPayload.payloadHash,
 		}),
 	};
 }
@@ -431,11 +446,16 @@ export async function queryDataFromDo(
 		}
 		throw err;
 	}
+	if (result.truncated === true) {
+		throw new Error(
+			"LOSSLESS_QUERY_REJECTED_PARTIAL: the data service attempted to return a partial result. " +
+				"No partial rows were accepted; use an explicit bounded SQL view or aggregate/filter the query.",
+		);
+	}
 
 	return {
 		rows: result.results ?? [],
 		row_count: result.row_count ?? result.results?.length ?? 0,
-		...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
 		...(result.total_matching !== undefined
 			? { total_matching: result.total_matching }
 			: {}),

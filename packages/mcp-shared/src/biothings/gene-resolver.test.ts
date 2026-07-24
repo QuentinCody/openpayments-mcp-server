@@ -22,4 +22,12 @@ describe("createMyGeneResolver (smoke)", () => {
 		const resolver = createMyGeneResolver({ fetch: fakeFetch });
 		expect(typeof resolver).toBe("function");
 	});
+
+	it("preserves the complete upstream error body", async () => {
+		const tail = "TAIL_OF_DIAGNOSTIC_EVIDENCE";
+		const fakeFetch: typeof fetch = async () =>
+			new Response(`${"x".repeat(300)}${tail}`, { status: 503 });
+		const resolver = createMyGeneResolver({ fetch: fakeFetch });
+		await expect(resolver(["BRCA1"])).rejects.toThrow(tail);
+	});
 });

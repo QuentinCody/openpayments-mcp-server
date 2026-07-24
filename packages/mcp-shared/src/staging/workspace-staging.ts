@@ -12,7 +12,7 @@
  *   POST /ws/stage  {dataset, data, schema_hints?, source_tool?}
  *     → {success, dataset, data_access_id, tables:string[], schema, row_count}
  *   POST /ws/query  {sql, limit?}
- *     → {success, rows, row_count, sql, truncated}
+ *     → {success, rows, row_count, sql, complete_view:true}
  *   GET  /ws/schema[?dataset=]
  *     → {success, dataset_count, datasets}
  */
@@ -57,6 +57,8 @@ interface WorkspaceStageResponse {
 	/** Materialization result from the DO: `complete:false` when some fetched
 	 * rows failed to insert. Mirrors `stageDataset`'s `DatasetHandle.completeness`. */
 	completeness?: { complete: boolean; failed_rows?: number };
+	evidence_table?: string;
+	payload_hash?: string;
 }
 
 /** Shape returned by the WorkspaceDO `/ws/query` route. */
@@ -66,7 +68,7 @@ interface WorkspaceQueryResponse {
 	rows?: unknown[];
 	row_count?: number;
 	sql?: string;
-	truncated?: boolean;
+	complete_view?: true;
 }
 
 /** Shape returned by the WorkspaceDO `/ws/schema` route. */
@@ -144,6 +146,8 @@ export async function stageIntoWorkspace(
 			toolPrefix,
 			relationships: undefined,
 			completeness: workspaceCompleteness(upstreamTotal, wsResult),
+			evidenceTable: wsResult.evidence_table,
+			payloadHash: wsResult.payload_hash,
 		}),
 	};
 }
@@ -161,7 +165,7 @@ export async function queryWorkspaceFromDo(
 ): Promise<{
 	rows: unknown[];
 	row_count: number;
-	truncated?: boolean;
+	complete_view: true;
 	sql: string;
 	data_access_id: string;
 	executed_at: string;
@@ -188,7 +192,7 @@ export async function queryWorkspaceFromDo(
 	return {
 		rows: result.rows ?? [],
 		row_count: result.row_count ?? result.rows?.length ?? 0,
-		...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+		complete_view: true,
 		sql: result.sql ?? sql,
 		data_access_id: `ws:${workspaceId}`,
 		executed_at: new Date().toISOString(),

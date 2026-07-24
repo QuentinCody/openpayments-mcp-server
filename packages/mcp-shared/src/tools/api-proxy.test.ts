@@ -334,6 +334,43 @@ describe("createApiProxyTool", () => {
 		expect(res.incomplete).toBe(true); // T9.6 — failed fetch = incomplete evidence
 		expect(res.drift_hint).toBeDefined();
 	});
+
+	it("stages a large non-2xx body intact instead of trimming its evidence", async () => {
+		const server = makeServerDo();
+		const body = { diagnostics: "x".repeat(120_000) };
+		const tool = createApiProxyTool({
+			apiFetch: async () => ({ status: 502, data: body }),
+			doNamespace: server.ns,
+			stagingPrefix: "test",
+		});
+		const res = (await tool.handler(
+			{ method: "GET", path: "/failure" },
+			baseCtx,
+		)) as Record<string, unknown>;
+		expect(res).toMatchObject({ __api_error: true, status: 502 });
+		expect(res.data).toMatchObject({ __staged: true });
+		expect(JSON.stringify(res)).not.toContain("__truncated");
+		expect(server.calls).toContain("/process");
+	});
+
+	it("fails loud without returning a partial large error body when staging is unavailable", async () => {
+		const tool = createApiProxyTool({
+			apiFetch: async () => ({
+				status: 503,
+				data: { diagnostics: "x".repeat(120_000) },
+			}),
+		});
+		const res = (await tool.handler(
+			{ method: "GET", path: "/failure" },
+			baseCtx,
+		)) as Record<string, unknown>;
+		expect(res.data).toMatchObject({
+			__lossless_error: true,
+			code: "LOSSLESS_STAGING_REQUIRED",
+			evidence_returned: false,
+		});
+		expect(res.data).not.toHaveProperty("__truncated");
+	});
 });
 
 describe("extractStagedColumns (T3.3)", () => {

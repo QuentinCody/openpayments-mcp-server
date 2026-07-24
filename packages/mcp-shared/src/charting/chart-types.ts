@@ -41,7 +41,7 @@ export interface ChartSpec {
 	data: Record<string, unknown>[];
 	/** Sort categories by first series value */
 	sort?: "asc" | "desc" | "none";
-	/** Max categories to display (remainder truncated) */
+	/** Legacy display hint. Renderers preserve all categories. */
 	maxCategories?: number;
 	/** Number formatting hint */
 	numberFormat?: "integer" | "percent" | "currency" | "scientific";

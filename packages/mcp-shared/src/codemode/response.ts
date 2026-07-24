@@ -95,7 +95,7 @@ export function createCodeModeResponse<T>(
 		if (jsonStr.length <= maxPreviewChars) {
 			text = jsonStr;
 		} else {
-			text = `${jsonStr.slice(0, maxPreviewChars)}\n... [truncated for display]`;
+			text = `Full structured result is available in structuredContent (${new TextEncoder().encode(jsonStr).byteLength} bytes).`;
 		}
 	}
 

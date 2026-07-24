@@ -61,7 +61,7 @@ describe("createChartResponse", () => {
 		expect(result.structuredContent._chart.data).toHaveLength(0);
 	});
 
-	it("truncates data exceeding MAX_CHART_DATA_ROWS", () => {
+	it("preserves every chart row in structured and rendered output", () => {
 		const bigData = Array.from({ length: 300 }, (_, i) => ({
 			label: `Item ${i}`,
 			count: i,
@@ -69,15 +69,11 @@ describe("createChartResponse", () => {
 		const result = createChartResponse(
 			makeOpts({ chart: { ...makeOpts().chart, data: bigData } }),
 		);
-		expect(result.structuredContent._chart.data.length).toBeLessThanOrEqual(
-			200,
-		);
+		expect(result.structuredContent._chart.data).toHaveLength(300);
 		expect(
 			(result.structuredContent.data as { truncated?: boolean }).truncated,
-		).toBe(true);
-		expect((result.content[0] as { text: string }).text).toContain(
-			"Showing 200 of 300",
-		);
+		).toBeUndefined();
+		expect((result.content[0] as { text: string }).text).toContain("Item 299");
 	});
 
 	it("prepends textPreamble when provided", () => {

@@ -67,17 +67,22 @@ export function isOversized(value: unknown): boolean {
 }
 
 /**
- * Bound an error's `data` field for inline transport. A large upstream error
- * body (>100 KB) would itself be dropped — taking the whole `__api_error` with
- * it and hiding the failure. Replace it with a short note when oversized;
- * `undefined` and small bodies pass through untouched.
+ * Prepare an error's `data` field for inline transport. Oversized evidence is
+ * never shortened or represented as a partial payload. Callers with staging
+ * should stage the original value before using this fallback; callers without
+ * staging receive a loud, machine-readable refusal.
  */
 export function boundedErrorData(data: unknown): unknown {
 	if (data === undefined) return undefined;
 	const bytes = jsonByteSize(data);
 	if (bytes <= TRANSPORT_LIMIT) return data;
 	return {
-		__truncated: true,
-		note: `error body omitted (${bytes} bytes, over the ${TRANSPORT_LIMIT}-byte inline limit)`,
+		__lossless_error: true,
+		code: "LOSSLESS_STAGING_REQUIRED",
+		evidence_returned: false,
+		observed_bytes: bytes,
+		message:
+			`The upstream error evidence is ${bytes} bytes, over the ${TRANSPORT_LIMIT}-byte inline limit. ` +
+			"No partial evidence was returned; configure staging to retrieve the exact body.",
 	};
 }

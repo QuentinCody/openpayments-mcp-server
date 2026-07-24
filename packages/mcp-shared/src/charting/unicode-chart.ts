@@ -7,7 +7,6 @@
 
 import type { ChartSpec } from "./chart-types.js";
 
-const MAX_ROWS = 30;
 const BAR_WIDTH = 40;
 const LABEL_WIDTH = 25;
 const BLOCK = "\u2588";
@@ -20,7 +19,7 @@ export function renderUnicodeChart(spec: ChartSpec): string {
 	const dataKey = spec.series[0]?.dataKey;
 	if (!dataKey) return `${spec.title}\n\n(No series defined)`;
 
-	let rows = spec.data.slice(0, spec.maxCategories ?? MAX_ROWS);
+	let rows = spec.data;
 
 	if (spec.sort === "desc") {
 		rows = [...rows].sort((a, b) => toNum(b[dataKey]) - toNum(a[dataKey]));
@@ -59,7 +58,7 @@ function renderHorizontalBar(
 	const lines: string[] = [spec.title, ""];
 
 	for (const row of rows) {
-		const label = truncStr(String(row[spec.xKey] ?? ""), LABEL_WIDTH).padEnd(
+		const label = String(row[spec.xKey] ?? "").padEnd(
 			LABEL_WIDTH,
 		);
 		const val = toNum(row[dataKey]);
@@ -94,7 +93,7 @@ function renderPieAsText(
 	for (const row of rows) {
 		const val = toNum(row[dataKey]);
 		const pct = total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
-		const label = truncStr(String(row[spec.xKey] ?? ""), LABEL_WIDTH).padEnd(
+		const label = String(row[spec.xKey] ?? "").padEnd(
 			LABEL_WIDTH,
 		);
 		lines.push(
@@ -163,7 +162,7 @@ function renderScatter(
 	lines.push(`  ${"─".repeat(LABEL_WIDTH + yLabel.length + 2)}`);
 
 	for (const row of rows) {
-		const label = truncStr(String(row[spec.xKey] ?? ""), LABEL_WIDTH).padEnd(
+		const label = String(row[spec.xKey] ?? "").padEnd(
 			LABEL_WIDTH,
 		);
 		const val = fmtVal(toNum(row[dataKey]), spec.numberFormat);
@@ -187,10 +186,6 @@ function toNum(v: unknown): number {
 	if (typeof v === "number") return v;
 	const n = Number(v);
 	return Number.isFinite(n) ? n : 0;
-}
-
-function truncStr(s: string, max: number): string {
-	return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
 }
 
 function fmtVal(val: number, fmt?: string): string {

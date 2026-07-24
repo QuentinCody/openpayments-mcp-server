@@ -26,7 +26,11 @@ import {
 	buildKnownEndpointIndex,
 	preflightUnknownEndpoint,
 } from "./api-proxy-drift";
-import { boundedErrorData, TRANSPORT_LIMIT } from "./passthrough-limits";
+import {
+	boundedErrorData,
+	jsonByteSize,
+	TRANSPORT_LIMIT,
+} from "./passthrough-limits";
 import { buildStagedEnvelope, extractStagedColumns } from "./staging-envelope";
 
 // `extractStagedColumns` is re-exported so the long-standing
@@ -114,6 +118,42 @@ export function buildStageOptions(
 		};
 	}
 	return { upstreamTotal };
+}
+
+async function preserveApiErrorData(
+	data: unknown,
+	options: {
+		doNamespace?: unknown;
+		stagingPrefix?: string;
+		stagingThreshold?: number;
+		workspaceNamespace?: unknown;
+		ctx?: ToolContext;
+	},
+): Promise<unknown> {
+	if (data === undefined) return undefined;
+	const responseBytes = jsonByteSize(data);
+	if (
+		options.doNamespace &&
+		options.stagingPrefix &&
+		shouldStage(responseBytes, options.stagingThreshold)
+	) {
+		const staged = await stageToDoAndRespond(
+			data,
+			options.doNamespace as Parameters<typeof stageToDoAndRespond>[1],
+			options.stagingPrefix,
+			undefined,
+			undefined,
+			options.stagingPrefix,
+			options.ctx?.sessionId,
+			buildStageOptions(
+				options.ctx,
+				options.workspaceNamespace,
+				options.stagingPrefix,
+			),
+		);
+		return buildStagedEnvelope({ staged, responseBytes, originalData: data });
+	}
+	return boundedErrorData(data);
 }
 
 export interface ApiProxyToolOptions {
@@ -212,7 +252,14 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 				// citation, the systemic clingen-class silent failure (doc 09/11).
 				if (typeof result.status === "number" && result.status >= 400) {
 					const dh = buildDriftHint(method, path, result.status, knownEndpoints);
-					return { __api_error: true, incomplete: true, status: result.status, message: `Upstream returned HTTP ${result.status}`, data: boundedErrorData(result.data), ...(dh ? { drift_hint: dh } : {}) };
+					const errorData = await preserveApiErrorData(result.data, {
+						doNamespace,
+						stagingPrefix,
+						stagingThreshold,
+						workspaceNamespace,
+						ctx,
+					});
+					return { __api_error: true, incomplete: true, status: result.status, message: `Upstream returned HTTP ${result.status}`, data: errorData, ...(dh ? { drift_hint: dh } : {}) };
 				}
 
 				// T10.1 — a SINGLE record gets a raised staging threshold so it stays
@@ -263,7 +310,11 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 				const driftHint = buildDriftHint(method, interpolatedPath, status, knownEndpoints);
 				// incomplete: a failed fetch (429/timeout/5xx/…) means the evidence for
 				// this call is INCOMPLETE — flag it so a partial answer is not read as whole.
-				return { __api_error: true, incomplete: true, status, message, data: boundedErrorData((err as { data?: unknown }).data), ...(driftHint ? { drift_hint: driftHint } : {}) };
+				const errorData = await preserveApiErrorData(
+					(err as { data?: unknown }).data,
+					{ doNamespace, stagingPrefix, stagingThreshold, workspaceNamespace, ctx },
+				);
+				return { __api_error: true, incomplete: true, status, message, data: errorData, ...(driftHint ? { drift_hint: driftHint } : {}) };
 			}
 		},
 	};

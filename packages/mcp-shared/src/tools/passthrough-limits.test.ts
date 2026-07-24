@@ -73,11 +73,15 @@ describe("boundedErrorData", () => {
 		expect(boundedErrorData(small)).toBe(small);
 	});
 
-	it("replaces an oversized body with a short note", () => {
+	it("fails loud for an oversized body without representing a partial payload", () => {
 		const big = { blob: "x".repeat(TRANSPORT_LIMIT + 10) };
-		const bounded = boundedErrorData(big) as { __truncated?: boolean; note?: string };
-		expect(bounded.__truncated).toBe(true);
-		expect(bounded.note).toMatch(/error body omitted/);
+		const bounded = boundedErrorData(big) as Record<string, unknown>;
+		expect(bounded).toMatchObject({
+			__lossless_error: true,
+			code: "LOSSLESS_STAGING_REQUIRED",
+			evidence_returned: false,
+		});
+		expect(bounded).not.toHaveProperty("__truncated");
 		expect(isOversized(bounded)).toBe(false);
 	});
 });

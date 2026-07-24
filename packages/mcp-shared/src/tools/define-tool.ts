@@ -19,8 +19,8 @@
  *   2. **Dual registration.** Registers under BOTH `mcp_<server>_<tool>` and
  *      `<server>_<tool>` from the single `name` you pass.
  *   3. **100KB transport guard.** MCP Streamable-HTTP silently drops responses
- *      over 100KB; the wrapper size-checks `structuredContent` and drops the
- *      heavy `data` payload (keeping `_meta` + citation) before it can be lost.
+ *      over 100KB. Oversized results must already be durably staged; the
+ *      wrapper returns a hash-addressed reference or fails loudly.
  *   4. **Verifiable provenance.** When a `source` descriptor is given, every
  *      successful result carries a `_meta.citation` (source + query/result
  *      hashes + timestamp) via the shared provenance helper.
@@ -41,15 +41,13 @@ import type {
 	ServerRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
+import { MCP_INLINE_LIMIT_BYTES, serializedBytes } from "../agentic/lossless";
 import type {
 	ErrorResponse,
 	ResponseMeta,
 	SuccessResponse,
 } from "../codemode/response";
 import { buildCitation, type SourceDescriptor } from "../provenance/provenance";
-
-/** MCP Streamable-HTTP silently drops responses larger than this. */
-const MAX_STRUCTURED_CONTENT_BYTES = 100_000;
 
 /** A single text content block — the fleet's human/agent-readable summary. */
 export interface ToolContent {
@@ -132,7 +130,7 @@ export interface DefineToolConfig<Shape extends z.ZodRawShape, Data = unknown> {
 
 /** Options for {@link toolOk}. */
 export interface ToolOkOptions {
-	/** Override the text-content summary (default: truncated JSON preview). */
+	/** Override the text-content summary (default: full JSON when compact). */
 	text?: string;
 	/** `_meta` to attach (citation is added automatically when a source is set). */
 	meta?: ResponseMeta;
@@ -153,7 +151,7 @@ function previewJson(value: unknown, maxChars: number): string {
 	if (json === undefined) return "undefined";
 	return json.length <= maxChars
 		? json
-		: `${json.slice(0, maxChars)}\n... [truncated for display]`;
+		: `Full structured result is available in structuredContent (${new TextEncoder().encode(json).byteLength} bytes).`;
 }
 
 /**
@@ -226,6 +224,64 @@ function resolveDataAccessId(
 	return undefined;
 }
 
+function stagedEvidenceReference(
+	structured: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+	if (structured.success !== true) return undefined;
+	const meta = (structured._meta as ResponseMeta | undefined) ?? {};
+	const staging = meta._staging as Record<string, unknown> | undefined;
+	const citation = meta.citation;
+	const handle =
+		typeof staging?.data_access_id === "string"
+			? staging.data_access_id
+			: resolveDataAccessId(structured.data, meta);
+	if (!handle || !citation?.result_hash) return undefined;
+	return {
+		lossless: true,
+		storage: "server_staging",
+		handle,
+		content_hash: citation.result_hash,
+		byte_length: serializedBytes(structured.data),
+		query_tool: staging?.query_tool,
+		schema_tool: staging?.schema_tool,
+		complete: true,
+	};
+}
+
+type TransportDecision =
+	| { ok: true; value: Record<string, unknown> }
+	| { ok: false; error: ToolErr };
+
+function enforceLosslessTransport(
+	structured: Record<string, unknown>,
+	toolName: string,
+): TransportDecision {
+	if (serializedBytes(structured) <= MCP_INLINE_LIMIT_BYTES) {
+		return { ok: true, value: structured };
+	}
+	const reference = stagedEvidenceReference(structured);
+	if (!reference) {
+		return {
+			ok: false,
+			error: toolErr(
+				"LOSSLESS_STAGING_REQUIRED",
+				`${toolName} produced an oversized result without a durable, hash-addressed staging handle. No partial result was returned.`,
+			),
+		};
+	}
+	const compact = { ...structured, data: reference };
+	if (serializedBytes(compact) <= MCP_INLINE_LIMIT_BYTES) {
+		return { ok: true, value: compact };
+	}
+	return {
+		ok: false,
+		error: toolErr(
+			"TRANSPORT_METADATA_TOO_LARGE",
+			`${toolName} metadata exceeds the MCP transport limit after lossless staging. No partial result was returned.`,
+		),
+	};
+}
+
 /**
  * The minimal surface of `McpServer` we call. Declared structurally so the
  * SDK's zod-v4 generic machinery on `registerTool` can't fight our strict,
@@ -280,41 +336,37 @@ export function defineTool<Shape extends z.ZodRawShape, Data = unknown>(
 		if (!isError && config.source && structured.success === true) {
 			const data = structured.data;
 			const meta = structured._meta as ResponseMeta | undefined;
+			const dataAccessId = resolveDataAccessId(data, meta);
 			const citation = await buildCitation({
 				source: config.source,
 				server: config.source.id,
 				tool: bare,
 				query: args,
+				queryScope: "tool_arguments",
 				result: data,
+				resultScope: dataAccessId
+					? "staged:full_result"
+					: "structured_content:data",
 				retrievedAt: new Date().toISOString(),
 				recordCount: resolveRecordCount(data, meta),
-				dataAccessId: resolveDataAccessId(data, meta),
+				dataAccessId,
 			});
 			structured._meta = { ...(meta ?? {}), citation };
 		}
 
-		// (3) 100KB Streamable-HTTP transport guard.
-		if (JSON.stringify(structured).length > MAX_STRUCTURED_CONTENT_BYTES) {
-			if (structured.success === true) {
-				const meta = (structured._meta as ResponseMeta | undefined) ?? {};
-				structured.data = undefined;
-				structured._meta = {
-					...meta,
-					truncated: true,
-					truncated_reason:
-						"structuredContent exceeded the 100KB MCP Streamable-HTTP limit; `data` omitted to avoid a silent drop. Stage/query the dataset or narrow the request. The citation's result_hash still attests the full result.",
-				};
-			} else if (structured.error && typeof structured.error === "object") {
-				structured.error = {
-					...(structured.error as Record<string, unknown>),
-					details: undefined,
-				};
-			}
+		// (3) Reference the complete staged payload, or return a loud error.
+		const transport = enforceLosslessTransport(structured, bare);
+		if (!transport.ok) {
+			return {
+				content: transport.error.content,
+				structuredContent: transport.error.structuredContent,
+				isError: true,
+			};
 		}
 
 		return {
 			content: result.content,
-			structuredContent: structured,
+			structuredContent: transport.value,
 			...(isError ? { isError: true } : {}),
 		} as CallToolResult;
 	};

@@ -22,10 +22,11 @@ describe("createCodeModeResponse", () => {
 		expect(result.content[0].text).toBe("hello");
 	});
 
-	it("truncates long JSON in text content", () => {
+	it("summarizes long JSON without embedding a partial preview", () => {
 		const bigData = { text: "a".repeat(500) };
 		const result = createCodeModeResponse(bigData, { maxPreviewChars: 50 });
-		expect(result.content[0].text).toContain("[truncated");
+		expect(result.content[0].text).toContain("Full structured result");
+		expect(result.content[0].text).not.toContain("a".repeat(50));
 	});
 
 	it("includes _meta when provided", () => {

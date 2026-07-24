@@ -94,9 +94,6 @@ function sortOpt(sort, axis) {
 }
 
 function buildMarks(spec, chartData) {
-  if (spec.maxCategories && chartData.length > spec.maxCategories) {
-    chartData = chartData.slice(0, spec.maxCategories);
-  }
   const {type, xKey, series, sort} = spec;
   const m = [];
 

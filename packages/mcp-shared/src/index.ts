@@ -1,5 +1,32 @@
 // Unified tool registry
 
+// Agentic validation, replay, and lossless-evidence contracts
+export {
+	classifyExternalAccessFailure,
+	evaluateValidation,
+	requiredTier,
+	type AgenticRunManifest,
+	type AnalysisConsequence,
+	type ContextDimension,
+	type EvidenceDisposition,
+	type HypothesisRecord,
+	type ReplayToolCall,
+	type ValidationDecision,
+	type ValidationEvidence,
+	type ValidationRecord,
+	type ValidationTier,
+} from "./agentic/contracts";
+export {
+	assertInlineTransportSafe,
+	buildLosslessReference,
+	isLosslessEvidenceReference,
+	LOSSLESS_STAGE_THRESHOLD_BYTES,
+	MCP_INLINE_LIMIT_BYTES,
+	serializedBytes,
+	type LosslessEvidenceReference,
+	type LosslessStorage,
+} from "./agentic/lossless";
+
 export type {
 	ChartResponseOptions,
 	ChartResponseResult,
@@ -111,15 +138,38 @@ export {
 // Provenance / citation (verifiable per-result source attribution)
 export {
 	type BuildCitationInput,
-	buildCitation,
+	BUILD_GIT_SHA,
+	buildHealthPayload,
+	buildHealthResponse,
+	CANONICALIZATION_PROFILE,
 	type Citation,
+	type CitationMetricCounters,
+	type CitationTrustStore,
+	type CitationVerification,
 	type CitationSignature,
+	CITATION_VERSION,
 	canonicalJson,
+	FLEET_CONTRACT_VERSION,
+	hashCanonicalJson,
+	HASH_ALGORITHM,
+	missingCitationMetrics,
+	parseCitation,
+	type QueryScope,
+	resolveQueryScope,
+	resolveResultScope,
+	type ResultScope,
 	type SourceDescriptor,
 	sha256Hex,
+	type SignatureCheckStatus,
 	type VerifyResult,
 	verifyCitation,
+	verifyCitationEnvelope,
 	verifyResultHash,
+} from "@bio-mcp/provenance-core";
+export {
+	buildCitation,
+	clearCitationSigningConfiguration,
+	configureCitationSigning,
 } from "./provenance/provenance";
 export { type ToolDefinition, ToolRegistry } from "./registry/registry";
 export { getRequestScope, type MaybeExtra } from "./registry/request-scope";

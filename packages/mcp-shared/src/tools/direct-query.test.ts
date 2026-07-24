@@ -120,7 +120,7 @@ describe("__query handler", () => {
 		).toEqual({
 			rows: [{ id: 1, session_token: "[REDACTED]" }],
 			count: 1,
-			truncated: false,
+			complete_view: true,
 		});
 	});
 
@@ -139,16 +139,17 @@ describe("__query handler", () => {
 		});
 	});
 
-	it("flags truncation past 500 rows", async () => {
+	it("rejects the whole result past 500 rows instead of returning partial evidence", async () => {
 		const rows = Array.from({ length: 501 }, (_, i) => ({ i }));
 		const result = (await tool("__query").handler(
 			{ sql: "SELECT * FROM t" } as never,
 			makeCtx(rows),
-		)) as {
-			count: number;
-			truncated: boolean;
-		};
-		expect(result).toMatchObject({ count: 500, truncated: true });
+		)) as Record<string, unknown>;
+		expect(result).toMatchObject({
+			error_code: "LOSSLESS_QUERY_BOUND_REQUIRED",
+			returned_rows: 0,
+		});
+		expect(result).not.toHaveProperty("rows");
 	});
 
 	it("rejects oversized results", async () => {
@@ -206,7 +207,7 @@ describe("__query_batch handler", () => {
 		});
 	});
 
-	it("captures execution errors and truncation per query", async () => {
+	it("captures execution errors and rejects an over-bound query without partial rows", async () => {
 		const failResult = (await tool("__query_batch").handler(
 			{ queries: [{ sql: "SELECT * FROM t" }] } as never,
 			makeCtx([], /SELECT/),
@@ -217,7 +218,26 @@ describe("__query_batch handler", () => {
 		const truncResult = (await tool("__query_batch").handler(
 			{ queries: [{ sql: "SELECT * FROM t" }] } as never,
 			makeCtx(rows),
-		)) as { results: unknown[][] };
-		expect(truncResult.results[0]).toHaveLength(500);
+		)) as { results: Array<Record<string, unknown>> };
+		expect(truncResult.results[0]).toMatchObject({
+			error_code: "LOSSLESS_QUERY_BOUND_REQUIRED",
+			returned_rows: 0,
+		});
+		expect(truncResult.results[0]).not.toHaveProperty("rows");
+	});
+
+	it("rejects an oversized batch member without returning partial evidence", async () => {
+		const rows = Array.from({ length: 500 }, () => ({
+			blob: "x".repeat(2500),
+		}));
+		const result = (await tool("__query_batch").handler(
+			{ queries: [{ sql: "SELECT * FROM t" }] } as never,
+			makeCtx(rows),
+		)) as { results: Array<Record<string, unknown>> };
+		expect(result.results[0]).toMatchObject({
+			error_code: "QUERY_TOO_LARGE",
+			returned_rows: 0,
+		});
+		expect(result.results[0]).not.toHaveProperty("rows");
 	});
 });

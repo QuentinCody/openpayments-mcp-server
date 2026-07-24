@@ -45,16 +45,17 @@ describe("ToolRegistry.add / lookup", () => {
 });
 
 describe("ToolRegistry.registerAll", () => {
-	it("registers non-hidden tools and wraps successful results as MCP text content", async () => {
+	it("dual-registers non-hidden tools with both response fields", async () => {
 		const reg = new ToolRegistry(CTX);
 		reg.add(entry({ name: "visible", handler: async () => ({ n: 5 }) }));
 		reg.add(entry({ name: "secret", hidden: true }));
 		const { server, registered } = makeServer();
 		reg.registerAll(server);
 
-		expect(registered.map((r) => r.name)).toEqual(["visible"]); // hidden skipped
+		expect(registered.map((r) => r.name)).toEqual(["mcp_visible", "visible"]); // hidden skipped
 		expect(await registered[0].handler({})).toEqual({
 			content: [{ type: "text", text: JSON.stringify({ n: 5 }) }],
+			structuredContent: { success: true, data: { n: 5 } },
 		});
 	});
 
@@ -65,6 +66,7 @@ describe("ToolRegistry.registerAll", () => {
 		reg.registerAll(server);
 		expect(await registered[0].handler({})).toEqual({
 			content: [{ type: "text", text: "undefined" }],
+			structuredContent: { success: true },
 		});
 	});
 
@@ -83,6 +85,10 @@ describe("ToolRegistry.registerAll", () => {
 		expect(await registered[0].handler({})).toEqual({
 			isError: true,
 			content: [{ type: "text", text: JSON.stringify({ error: "nope" }) }],
+			structuredContent: {
+				success: false,
+				error: { code: "TOOL_EXECUTION_ERROR", message: "nope" },
+			},
 		});
 	});
 
@@ -103,7 +109,27 @@ describe("ToolRegistry.registerAll", () => {
 			content: [
 				{ type: "text", text: JSON.stringify({ error: "raw failure" }) },
 			],
+			structuredContent: { success: false },
 		});
+	});
+
+	it("stores an oversized result losslessly and returns a hash-addressed reference", async () => {
+		const calls: Array<{ sql: string; params: unknown[] }> = [];
+		const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+			calls.push({ sql: strings.join("?"), params: values });
+			return [];
+		}) as ToolContext["sql"];
+		const reg = new ToolRegistry({ sql });
+		reg.add(entry({ name: "large", handler: async () => ({ blob: "x".repeat(120_000) }) }));
+		const { server, registered } = makeServer();
+		reg.registerAll(server);
+		const result = (await registered[0].handler({})) as {
+			structuredContent: { data: Record<string, unknown> };
+		};
+		expect(result.structuredContent.data.lossless).toBe(true);
+		expect(result.structuredContent.data.payload_hash).toMatch(/^sha256:/);
+		expect(result.structuredContent.data.complete).toBe(true);
+		expect(calls.some((call) => call.sql.includes("__lossless_tool_result_chunks"))).toBe(true);
 	});
 });
 

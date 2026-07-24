@@ -1,6 +1,84 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { serializedBytes } from "../agentic/lossless";
+import { canonicalJson, sha256Hex } from "../provenance/provenance";
 import type { ToolContext, ToolEntry } from "./types";
+
+const MCP_STRUCTURED_LIMIT_BYTES = 100_000;
+const RESULT_CHUNK_CHARS = 16_000;
+
+function toolNames(name: string): [string, string] {
+	const canonical = name.startsWith("mcp_") ? name.slice(4) : name;
+	return [`mcp_${canonical}`, canonical];
+}
+
+async function storeLosslessToolResult(
+	ctx: ToolContext,
+	toolName: string,
+	result: unknown,
+): Promise<Record<string, unknown>> {
+	const canonical = canonicalJson(result);
+	const resultId = `result_${crypto.randomUUID()}`;
+	const payloadHash = `sha256:${await sha256Hex(canonical)}`;
+	ctx.sql`
+		CREATE TABLE IF NOT EXISTS __lossless_tool_result_chunks (
+			result_id TEXT NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			chunk_text TEXT NOT NULL,
+			PRIMARY KEY (result_id, chunk_index)
+		)
+	`;
+	let chunkCount = 0;
+	for (let offset = 0; offset < canonical.length; offset += RESULT_CHUNK_CHARS) {
+		const chunk = canonical.slice(offset, offset + RESULT_CHUNK_CHARS);
+		ctx.sql`
+			INSERT INTO __lossless_tool_result_chunks (result_id, chunk_index, chunk_text)
+			VALUES (${resultId}, ${chunkCount}, ${chunk})
+		`;
+		chunkCount++;
+	}
+	return {
+		lossless: true,
+		storage: "orchestrator_sqlite",
+		result_id: resultId,
+		tool: toolName,
+		payload_hash: payloadHash,
+		payload_bytes: serializedBytes(result),
+		chunk_count: chunkCount,
+		chunk_table: "__lossless_tool_result_chunks",
+		retrieval_sql:
+			`SELECT chunk_index, chunk_text FROM __lossless_tool_result_chunks ` +
+			`WHERE result_id = '${resultId.replace(/'/g, "''")}' ORDER BY chunk_index`,
+		complete: true,
+	};
+}
+
+async function toolSuccess(
+	ctx: ToolContext,
+	toolName: string,
+	result: unknown,
+): Promise<Record<string, unknown>> {
+	const structured = {
+		success: true as const,
+		...(result === undefined ? {} : { data: result }),
+	};
+	if (serializedBytes(structured) <= MCP_STRUCTURED_LIMIT_BYTES) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: result === undefined ? "undefined" : JSON.stringify(result),
+				},
+			],
+			structuredContent: structured,
+		};
+	}
+	const reference = await storeLosslessToolResult(ctx, toolName, result);
+	return {
+		content: [{ type: "text", text: JSON.stringify(reference) }],
+		structuredContent: { success: true, data: reference },
+	};
+}
 
 /**
  * Tool definition shape for type generation (avoids hard dep on @cloudflare/codemode).
@@ -45,26 +123,24 @@ export class ToolRegistry {
 		for (const tool of this.tools) {
 			if (tool.hidden) continue;
 			const ctx = this.ctx;
-			server.tool(tool.name, tool.description, tool.schema, async (input) => {
-				try {
-					const result = await tool.handler(input, ctx);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									result === undefined ? "undefined" : JSON.stringify(result),
+			for (const registeredName of toolNames(tool.name)) {
+				server.tool(registeredName, tool.description, tool.schema, async (input) => {
+					try {
+						const result = await tool.handler(input, ctx);
+						return await toolSuccess(ctx, tool.name, result) as never;
+					} catch (e: unknown) {
+						const error = e instanceof Error ? e.message : String(e);
+						return {
+							isError: true,
+							content: [{ type: "text", text: JSON.stringify({ error }) }],
+							structuredContent: {
+								success: false,
+								error: { code: "TOOL_EXECUTION_ERROR", message: error },
 							},
-						],
-					};
-				} catch (e: unknown) {
-					const error = e instanceof Error ? e.message : String(e);
-					return {
-						isError: true,
-						content: [{ type: "text", text: JSON.stringify({ error }) }],
-					};
-				}
-			});
+						};
+					}
+				});
+			}
 		}
 	}
 

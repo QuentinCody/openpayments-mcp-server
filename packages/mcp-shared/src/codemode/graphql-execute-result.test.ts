@@ -59,6 +59,35 @@ describe("handleExecutorResult", () => {
 		expect(typeof sc._meta.citation.result_hash).toBe("string");
 	});
 
+	it("cites the preserved full payload for an auto-staged result", async () => {
+		const digest = "a".repeat(64);
+		const r = await handleExecutorResult(
+			{
+				result: {
+					__staged: true,
+					data_access_id: "rcsb_pdb_full_1",
+					tables_created: ["result_set"],
+					total_rows: 25,
+					_staging: { payload_hash: `sha256:${digest}` },
+					schema: { big: true },
+				},
+			},
+			{
+				source: { id: "rcsb_pdb", name: "RCSB PDB" },
+				server: "rcsb_pdb",
+				tool: "rcsb_pdb_execute",
+				query: "return gql.query('query { entries { id } }')",
+			},
+		);
+		const sc = r.structuredContent as Sc;
+		expect(sc._meta.citation).toMatchObject({
+			result_scope: "staged:full_result",
+			result_hash: digest,
+			data_access_id: "rcsb_pdb_full_1",
+		});
+		expect(sc._meta.payload_hash).toBe(`sha256:${digest}`);
+	});
+
 	it("recovers staging metadata when the error came from accessing a staged array", async () => {
 		const r = await handleExecutorResult({
 			error: "x.slice is not a function",

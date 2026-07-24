@@ -23,6 +23,10 @@ export interface StagingMetadata {
 	staged: true;
 	/** Unique ID to pass to query_data / get_schema tools */
 	data_access_id: string;
+	/** Table containing the complete serialized source payload. */
+	evidence_table?: string;
+	/** SHA-256 of the canonical complete payload. */
+	payload_hash?: string;
 	/** Tables created in SQLite */
 	tables: string[];
 	/** Primary table (usually the first / most important) */
@@ -70,10 +74,14 @@ export function buildStagingMetadata(opts: {
 	toolPrefix: string;
 	relationships?: TableRelationship[];
 	completeness?: Completeness;
+	evidenceTable?: string;
+	payloadHash?: string;
 }): StagingMetadata {
 	return {
 		staged: true,
 		data_access_id: opts.dataAccessId,
+		...(opts.evidenceTable ? { evidence_table: opts.evidenceTable } : {}),
+		...(opts.payloadHash ? { payload_hash: opts.payloadHash } : {}),
 		tables: opts.tables,
 		primary_table: opts.primaryTable ?? opts.tables[0],
 		total_rows: opts.totalRows,

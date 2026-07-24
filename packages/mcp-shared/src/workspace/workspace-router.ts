@@ -4,6 +4,7 @@
  * SQLite — the DO class is then a trivial wrapper that calls this with
  * `this.ctx.storage.sql` and falls back to the inherited RestStagingDO routes.
  */
+import { canonicalJson, sha256Hex } from "../provenance/provenance";
 import type { SchemaHints } from "../staging/schema-inference";
 import {
 	clearWorkspace,
@@ -52,12 +53,14 @@ export async function handleWorkspaceFetch(
 				schema_hints?: SchemaHints;
 				source_tool?: string;
 			};
+			const payloadHash = `sha256:${await sha256Hex(canonicalJson(body.data))}`;
 			const handle = runInTransaction(() =>
 				stageDataset(sql, {
 					dataset: body.dataset,
 					data: body.data,
 					schemaHints: body.schema_hints,
 					sourceTool: body.source_tool,
+					payloadHash,
 				}),
 			);
 			return json({ success: true, ...handle });

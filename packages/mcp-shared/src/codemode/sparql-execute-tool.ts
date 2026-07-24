@@ -15,11 +15,7 @@
  */
 
 import { z } from "zod";
-import {
-	buildCitation,
-	type Citation,
-	type SourceDescriptor,
-} from "../provenance/provenance";
+import type { SourceDescriptor } from "../provenance/provenance";
 import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext } from "../registry/types";
 import { createQueryProxyTool, createStageProxyTool } from "../tools/api-proxy";
@@ -30,10 +26,10 @@ import {
 	type ExecutorFns,
 	type WorkerLoaderBinding,
 } from "./execute-tool";
+import { handleRestExecutorResult } from "./execute-tool-result";
 import { buildFsProxySource } from "./fs-proxy";
 import {
 	createCodeModeError,
-	createCodeModeResponse,
 	ErrorCodes,
 } from "./response";
 import {
@@ -74,47 +70,6 @@ export interface SparqlExecuteToolOptions {
 	 *  verifiable `_meta.citation` (source + query/result hashes + timestamp) so a
 	 *  connected agent can attribute and re-verify each claim. Opt-in per server. */
 	source?: SourceDescriptor;
-}
-
-// ---------------------------------------------------------------------------
-// Provenance / citation context (shared with GraphQL/REST execute-tool pattern)
-// ---------------------------------------------------------------------------
-
-/** Provenance context threaded from the factory options into result handling. */
-interface CitationCtx {
-	source?: SourceDescriptor;
-	server: string;
-	tool: string;
-	query: unknown;
-}
-
-/** Records returned, for the citation: staged total_rows, else array length. */
-function countRecords(data: unknown, totalRows: unknown): number | undefined {
-	if (typeof totalRows === "number") return totalRows;
-	if (Array.isArray(data)) return data.length;
-	return undefined;
-}
-
-/** Build the optional `citation` meta when the server declared a source. */
-async function buildCitationMeta(
-	prov: CitationCtx | undefined,
-	data: unknown,
-	recordCount: number | undefined,
-	dataAccessId: string | undefined,
-	retrievedAt: string,
-): Promise<{ citation?: Citation }> {
-	if (!prov?.source) return {};
-	const citation = await buildCitation({
-		source: prov.source,
-		server: prov.server,
-		tool: prov.tool,
-		query: prov.query,
-		result: data,
-		retrievedAt,
-		recordCount,
-		dataAccessId,
-	});
-	return { citation };
 }
 
 export interface SparqlExecuteToolResult {
@@ -314,7 +269,7 @@ async function executeCode(
 		wrappedCode,
 		ctx.buildExecutorFns(sessionId),
 	);
-	return await handleExecutorResult(result, {
+	return await handleRestExecutorResult(result, {
 		source: ctx.options.source,
 		server: ctx.options.prefix,
 		tool: `${ctx.options.prefix}_execute`,
@@ -468,86 +423,4 @@ export function createSparqlExecuteTool(
 			);
 		},
 	};
-}
-
-async function handleExecutorResult(
-	result: {
-		result?: unknown;
-		error?: string;
-		logs?: string[];
-		__stagedResults?: Array<Record<string, unknown>>;
-	},
-	prov?: CitationCtx,
-) {
-	const retrievedAt = new Date().toISOString();
-
-	if (result.error) {
-		if (result.__stagedResults?.length) {
-			const staged = result.__stagedResults[result.__stagedResults.length - 1];
-			const logOutput = result.logs?.length
-				? result.logs.join("\n")
-				: undefined;
-			const { schema: _s, _staging: _st, ...slim } = staged;
-			const cite = await buildCitationMeta(
-				prov,
-				slim,
-				staged.total_rows as number | undefined,
-				staged.data_access_id as string | undefined,
-				retrievedAt,
-			);
-			return createCodeModeResponse(slim, {
-				meta: {
-					staged: true,
-					data_access_id: staged.data_access_id as string,
-					tables_created: staged.tables_created,
-					total_rows: staged.total_rows,
-					...cite,
-					...(logOutput ? { console_output: logOutput } : {}),
-					executed_at: retrievedAt,
-				},
-			});
-		}
-		const logOutput = result.logs?.length
-			? `\n\nConsole output:\n${result.logs.join("\n")}`
-			: "";
-		return createCodeModeError(
-			ErrorCodes.API_ERROR,
-			`${result.error}${logOutput}`,
-		);
-	}
-
-	const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-	const raw = result.result;
-	const isStaged =
-		raw !== null &&
-		typeof raw === "object" &&
-		!Array.isArray(raw) &&
-		"__staged" in raw &&
-		(raw as { __staged: unknown }).__staged === true;
-	let responseData: unknown = raw;
-	const stagingMeta: Record<string, unknown> = {};
-	if (isStaged) {
-		const resultObj: Record<string, unknown> = { ...(raw as object) };
-		stagingMeta.staged = true;
-		stagingMeta.data_access_id = resultObj.data_access_id;
-		stagingMeta.tables_created = resultObj.tables_created;
-		stagingMeta.total_rows = resultObj.total_rows;
-		const { schema: _s, _staging: _st, ...slim } = resultObj;
-		responseData = slim;
-	}
-	const cite = await buildCitationMeta(
-		prov,
-		responseData,
-		countRecords(responseData, stagingMeta.total_rows),
-		stagingMeta.data_access_id as string | undefined,
-		retrievedAt,
-	);
-	return createCodeModeResponse(responseData, {
-		meta: {
-			...stagingMeta,
-			...cite,
-			...(logOutput ? { console_output: logOutput } : {}),
-			executed_at: retrievedAt,
-		},
-	});
 }

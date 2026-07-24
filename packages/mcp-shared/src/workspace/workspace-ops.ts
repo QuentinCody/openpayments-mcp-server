@@ -120,6 +120,7 @@ export interface StageDatasetParams {
 	data: unknown;
 	schemaHints?: SchemaHints;
 	sourceTool?: string;
+	payloadHash?: string;
 }
 
 export interface DatasetHandle {
@@ -132,12 +133,44 @@ export interface DatasetHandle {
 	 * child/grandchild rows. The denominator for the upstream-pagination check
 	 * (row_count would over-count for nested payloads and mask a partial page). */
 	primary_row_count: number;
-	completeness: { complete: boolean; failed_rows?: number };
+	evidence_table: string;
+	payload_hash: string | undefined;
+	completeness: {
+		complete: boolean;
+		failed_rows?: number;
+		evidence_preserved: true;
+	};
 }
 
 function newDataAccessId(dataset: string): string {
 	// Runs in the DO / node runtime (not a workflow script), so Date/Math are OK.
 	return `${dataset}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`;
+}
+
+/** Store the exact serialized input independently of inferred tables. */
+function storeEvidencePayload(
+	sql: WorkspaceSql,
+	dataset: string,
+	data: unknown,
+	payloadHash: string | undefined,
+): string {
+	const table = `${dataset}__evidence`;
+	const payloadJson = JSON.stringify(data === undefined ? null : data);
+	sql.exec(
+		`CREATE TABLE IF NOT EXISTS "${table}" (
+			id INTEGER PRIMARY KEY,
+			payload_json TEXT NOT NULL,
+			payload_bytes INTEGER NOT NULL,
+			payload_hash TEXT
+		)`,
+	);
+	sql.exec(
+		`INSERT OR REPLACE INTO "${table}" (id, payload_json, payload_bytes, payload_hash) VALUES (1, ?, ?, ?)`,
+		payloadJson,
+		new TextEncoder().encode(payloadJson).byteLength,
+		payloadHash ?? null,
+	);
+	return table;
 }
 
 /** Drop a dataset's previously-staged tables and forget its manifest row. */
@@ -213,12 +246,19 @@ export function stageDataset(
 		rowCount = 1;
 		primaryRowCount = 1;
 	}
+	const evidenceTable = storeEvidencePayload(
+		sql,
+		dataset,
+		params.data,
+		params.payloadHash,
+	);
+	tables.push(evidenceTable);
 
 	const dataAccessId = newDataAccessId(dataset);
 	const completeness: DatasetHandle["completeness"] =
 		failedRows > 0
-			? { complete: false, failed_rows: failedRows }
-			: { complete: true };
+			? { complete: false, failed_rows: failedRows, evidence_preserved: true }
+			: { complete: true, evidence_preserved: true };
 
 	sql.exec(
 		`INSERT OR REPLACE INTO ${MANIFEST}
@@ -240,6 +280,8 @@ export function stageDataset(
 		schema,
 		row_count: rowCount,
 		primary_row_count: primaryRowCount,
+		evidence_table: evidenceTable,
+		payload_hash: params.payloadHash,
 		completeness,
 	};
 }
@@ -248,10 +290,8 @@ export interface QueryWorkspaceResult {
 	rows: Record<string, unknown>[];
 	row_count: number;
 	sql: string;
-	/** A full page came back and the caller set no LIMIT → there may be more rows. */
-	truncated: boolean;
-	/** Why the result was cut short, when a cost ceiling cut it (doc 03). */
-	truncation?: { reason: "size_limit"; detail: string };
+	/** True because this function never returns a partially materialized view. */
+	complete_view: true;
 }
 
 /**
@@ -263,31 +303,14 @@ export interface QueryWorkspaceResult {
  * time this runs; it bounds the RESPONSE, which is what the 100 KB transport
  * limit cares about.
  */
-function capResultBytes(rows: Record<string, unknown>[]): {
-	rows: Record<string, unknown>[];
-	truncation?: { reason: "size_limit"; detail: string };
-} {
-	// Measure the SERIALIZED ARRAY, not the sum of the rows: the `[]` and the `,`
-	// separators are ~1 byte/row, which at thousands of narrow rows is kilobytes
-	// — enough to push a "capped" response back over the 100 KB transport limit
-	// this cap exists to stay under.
-	let bytes = 2;
-	for (let i = 0; i < rows.length; i++) {
-		bytes += JSON.stringify(rows[i]).length + (i > 0 ? 1 : 0);
-		if (bytes > MAX_RESULT_BYTES) {
-			return {
-				rows: rows.slice(0, i),
-				truncation: {
-					reason: "size_limit",
-					detail:
-						`Result stopped at ${i} of ${rows.length} row(s): the next row would ` +
-						`exceed the ${MAX_RESULT_BYTES}-byte response ceiling. Select fewer ` +
-						"columns or add a LIMIT.",
-				},
-			};
-		}
-	}
-	return { rows };
+function assertResultFitsTransport(rows: Record<string, unknown>[]): void {
+	const bytes = new TextEncoder().encode(JSON.stringify(rows)).byteLength;
+	if (bytes <= MAX_RESULT_BYTES) return;
+	throw new Error(
+		`LOSSLESS_QUERY_RESULT_TOO_LARGE: complete result is ${bytes} bytes, above the ` +
+			`${MAX_RESULT_BYTES}-byte query response budget. No partial rows were returned. ` +
+			"Select fewer columns, aggregate in SQL, or use an explicit bounded query.",
+	);
 }
 
 /** The cross-dataset JOIN surface: read-only SQL across every staged table. */
@@ -304,27 +327,24 @@ export function queryWorkspace(
 	// `queryDataFromDo` in ../staging/utils.ts; `assertReadOnlySql` lets the
 	// describe through, so without this the allowed statement always throws.
 	const isDescribe = isReadOnlyDescribe(sanitized);
-	const finalSql = isDescribe ? sanitized : applyDefaultLimit(sanitized, limit);
+	const finalSql = isDescribe
+		? sanitized
+		: applyDefaultLimit(sanitized, callerSetLimit ? limit : limit + 1);
 	const all = sql.exec(finalSql).toArray();
-	const capped = capResultBytes(all);
-	const rows = capped.rows;
-
-	// Heuristic truncation: a full default page, with no caller LIMIT, means the
-	// result was capped — signal it so the agent paginates. (Deliberately no
-	// COUNT(*) wrapper: it errors on duplicate-column / complex SQL and the exact
-	// total isn't needed to decide whether to fetch more.)
-	// A describe is exempt: no LIMIT was applied, so its row count is the table's
-	// full column count — a >=100-column table would otherwise report truncated.
-	const truncated =
-		capped.truncation != null ||
-		(!isDescribe && !callerSetLimit && all.length >= limit);
+	if (!isDescribe && !callerSetLimit && all.length > limit) {
+		throw new Error(
+			`LOSSLESS_QUERY_BOUND_REQUIRED: more than ${limit} rows matched. ` +
+				"No partial rows were returned. Add an explicit SQL LIMIT for an intentional view, " +
+				"or aggregate/filter until the complete result fits.",
+		);
+	}
+	assertResultFitsTransport(all);
 
 	return {
-		rows,
-		row_count: rows.length,
+		rows: all,
+		row_count: all.length,
 		sql: finalSql,
-		truncated,
-		...(capped.truncation ? { truncation: capped.truncation } : {}),
+		complete_view: true,
 	};
 }
 

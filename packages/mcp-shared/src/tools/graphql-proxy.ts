@@ -145,16 +145,44 @@ async function tryAutoStage(
 function oversizedGqlError(
 	output: unknown,
 	staged: unknown,
-	errorCount: number,
 ): Record<string, unknown> | undefined {
 	if (staged || !isOversized(output)) return undefined;
-	const suppressed =
-		errorCount > 0 ? ` (${errorCount} partial error(s) suppressed.)` : "";
 	return {
 		__gql_error: true,
 		incomplete: true,
 		code: "RESPONSE_TOO_LARGE",
-		message: `GraphQL response exceeds the ${TRANSPORT_LIMIT}-byte inline limit and no staging DO is configured; narrow the query or select fewer fields.${suppressed}`,
+		evidence_returned: false,
+		message: `GraphQL response exceeds the ${TRANSPORT_LIMIT}-byte inline limit and no staging DO is configured. No partial response was returned; narrow the query or configure staging.`,
+	};
+}
+
+function attachGraphqlErrors(
+	data: unknown,
+	errors: Array<{ message: string }>,
+): unknown {
+	if (errors.length === 0) return data;
+	if (data && typeof data === "object" && !Array.isArray(data)) {
+		return { ...(data as Record<string, unknown>), __errors: errors };
+	}
+	return { data, __errors: errors };
+}
+
+async function preserveErrorsOnly(
+	errors: Array<{ message: string }>,
+	staging: StagingConfig,
+	ctx: ToolContext | undefined,
+): Promise<Record<string, unknown>> {
+	const messages = errors.map((error) => error.message).join("; ");
+	const output = { __gql_error: true, message: messages, errors };
+	const responseBytes = JSON.stringify(output).length;
+	const staged = await tryAutoStage(output, responseBytes, staging, ctx);
+	if (!staged) return oversizedGqlError(output, staged) ?? output;
+	return {
+		__gql_error: true,
+		incomplete: true,
+		code: "ERROR_EVIDENCE_STAGED",
+		message: messages,
+		evidence: staged,
 	};
 }
 
@@ -172,28 +200,20 @@ async function executeAndMaybeStage(
 	// An empty errors[] is NOT an error (#10): only a non-empty array signals one.
 	const errors = Array.isArray(response.errors) ? response.errors : [];
 
-	// GraphQL errors without data — return error
+	// GraphQL errors without data are evidence too. Stage the entire error
+	// envelope when needed; never shorten errors[] to fit transport.
 	if (errors.length > 0 && !response.data) {
-		const messages = errors.map((e) => e.message).join("; ");
-		return { __gql_error: true, message: messages, errors };
+		return preserveErrorsOnly(errors, staging, ctx);
 	}
 
-	// Always return response.data directly for consistent shape.
-	// If there are partial errors alongside data, attach them as a
-	// non-enumerable __errors property so they don't pollute staging
-	// but isolate code can still inspect them via result.__errors.
+	// A partial response retains its complete errors[] as an enumerable sibling
+	// so serialization, staging, and deterministic replay keep the same evidence.
 	const resultData = response.data ?? {};
-
-	const responseBytes = JSON.stringify(resultData).length;
-	const staged = await tryAutoStage(resultData, responseBytes, staging, ctx);
-	const output = staged ?? resultData;
-
-	// Attach partial errors if present (errors-only case is handled above)
-	if (errors.length > 0 && output && typeof output === "object") {
-		(output as Record<string, unknown>).__errors = errors;
-	}
-
-	const tooBig = oversizedGqlError(output, staged, errors.length);
+	const completeOutput = attachGraphqlErrors(resultData, errors);
+	const responseBytes = JSON.stringify(completeOutput).length;
+	const staged = await tryAutoStage(completeOutput, responseBytes, staging, ctx);
+	const output = staged ?? completeOutput;
+	const tooBig = oversizedGqlError(output, staged);
 	if (tooBig) return tooBig;
 
 	return output;

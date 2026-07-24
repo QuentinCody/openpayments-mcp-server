@@ -229,12 +229,12 @@ export function pullBoundedRows(
 		// Pull one row PAST the cap so "the cursor had more" is knowable.
 		if (rows.length >= maxRows) {
 			return {
-				rows,
-				truncated: true,
-				truncation: {
-					reason: "row_limit",
-					detail: `Result stopped at the ${maxRows}-row ceiling; more rows matched.`,
-				},
+				rows: [],
+				truncated: false,
+				cost_error:
+					`LOSSLESS_QUERY_RESULT_TOO_LARGE: complete result exceeds the ${maxRows}-row ` +
+					"query ceiling. No partial rows were returned. Add an explicit LIMIT for an " +
+					"intentional view, or aggregate/filter the query.",
 			};
 		}
 		// UTF-8 BYTES, not UTF-16 units: the transport limit is in bytes, and
@@ -244,14 +244,12 @@ export function pullBoundedRows(
 		const size = byteLength(JSON.stringify(step.value)) + (rows.length > 0 ? 1 : 0);
 		if (bytes + size > maxBytes) {
 			return {
-				rows,
-				truncated: true,
-				truncation: {
-					reason: "size_limit",
-					detail:
-						`Result stopped at ${rows.length} row(s): the next row would exceed the ` +
-						`${maxBytes}-byte response ceiling. Select fewer columns or add a LIMIT.`,
-				},
+				rows: [],
+				truncated: false,
+				cost_error:
+					`LOSSLESS_QUERY_RESULT_TOO_LARGE: complete result exceeds the ${maxBytes}-byte ` +
+					"query response ceiling. No partial rows were returned. Select fewer columns, " +
+					"aggregate in SQL, or use an explicit bounded query.",
 			};
 		}
 		rows.push(step.value);
@@ -264,18 +262,14 @@ export function pullSignals(pull: BoundedPull): {
 	truncated?: true;
 	truncation?: PullTruncation;
 } {
-	if (!pull.truncated) return {};
-	return {
-		truncated: true,
-		...(pull.truncation ? { truncation: pull.truncation } : {}),
-	};
+	void pull;
+	return {};
 }
 
 /** The minimal `SqlStorage.exec` surface the COUNT(*) wrapper needs. */
 type ExecOne = (sql: string) => { one(): Record<string, unknown> | undefined };
 
 export interface CountTotal {
-	truncated?: boolean;
 	total_matching?: number;
 	/** `total_matching` is a FLOOR, not an exact count — the scan hit the cap. */
 	count_capped?: boolean;
@@ -308,7 +302,6 @@ export function countTotal(
 		const totalMatching = capped ? maxScan : counted;
 		return {
 			total_matching: totalMatching,
-			truncated: totalMatching > rowCount,
 			...(capped ? { count_capped: true } : {}),
 		};
 	} catch {

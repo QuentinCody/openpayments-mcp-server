@@ -51,7 +51,7 @@ describe("createQueryDataHandler — per-server path (unchanged)", () => {
 		});
 	});
 
-	it("returns success with completeness on a good query", async () => {
+	it("rejects an upstream partial query response", async () => {
 		const { ns } = makeDo({
 			"/schema": okSchema,
 			"/query": () =>
@@ -67,8 +67,8 @@ describe("createQueryDataHandler — per-server path (unchanged)", () => {
 			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
 			{ DATA_DO: ns },
 		);
-		expect(res.structuredContent).toMatchObject({ success: true });
-		expect(JSON.stringify(res)).toContain("row_limit");
+		expect(res.structuredContent).toMatchObject({ success: false });
+		expect(JSON.stringify(res)).toContain("LOSSLESS_QUERY_REJECTED_PARTIAL");
 	});
 
 	it("maps blocked SQL to INVALID_SQL and validated errors to SQL_VALIDATION_ERROR", async () => {
@@ -122,7 +122,7 @@ describe("createQueryDataHandler — per-server path (unchanged)", () => {
 		).toBe("SQL_EXECUTION_ERROR");
 	});
 
-	it("emits a complete:true verdict when a query returns truncated:false", async () => {
+	it("returns a successful view when the service reports no partial result", async () => {
 		const { ns } = makeDo({
 			"/schema": okSchema,
 			"/query": () =>
@@ -138,7 +138,8 @@ describe("createQueryDataHandler — per-server path (unchanged)", () => {
 			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
 			{ DATA_DO: ns },
 		);
-		expect(JSON.stringify(res)).toContain('"complete":true');
+		expect(res.structuredContent).toMatchObject({ success: true });
+		expect(JSON.stringify(res)).not.toContain("completeness");
 	});
 
 	it("omits the completeness verdict when truncated is absent", async () => {

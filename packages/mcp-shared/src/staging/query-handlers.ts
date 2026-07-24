@@ -156,9 +156,7 @@ async function workspaceQuery(
 			meta: {
 				workspace: route.id,
 				row_count: result.row_count,
-				...(result.truncated !== undefined
-					? { truncated: result.truncated }
-					: {}),
+				complete_view: result.complete_view,
 				executed_at: result.executed_at,
 			},
 		});

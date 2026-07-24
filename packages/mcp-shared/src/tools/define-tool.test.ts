@@ -194,7 +194,7 @@ describe("defineTool", () => {
 		expect(sc.error.message).toContain("boom");
 	});
 
-	it("drops oversized structuredContent data past the 100KB limit but keeps the citation", async () => {
+	it("fails loudly for oversized evidence that was not staged", async () => {
 		const { server, calls } = fakeServer();
 		defineTool(server, {
 			name: "demo_big",
@@ -212,13 +212,77 @@ describe("defineTool", () => {
 		const res = await calls[0].cb({}, {});
 		const sc = res.structuredContent as {
 			success: boolean;
-			data: unknown;
-			_meta: { truncated?: boolean; citation?: { result_hash: string } };
+			error: { code: string };
 		};
-		expect(sc.success).toBe(true);
-		expect(sc.data).toBeUndefined();
-		expect(sc._meta.truncated).toBe(true);
-		expect(sc._meta.citation?.result_hash).toMatch(/^[0-9a-f]{64}$/);
+		expect(res.isError).toBe(true);
+		expect(sc.success).toBe(false);
+		expect(sc.error.code).toBe("LOSSLESS_STAGING_REQUIRED");
 		expect(JSON.stringify(res.structuredContent).length).toBeLessThan(100_000);
+	});
+
+	it("replaces staged oversized evidence with a hash-addressed reference", async () => {
+		const { server, calls } = fakeServer();
+		defineTool(server, {
+			name: "demo_staged_big",
+			description: "d",
+			inputSchema: {},
+			source: { id: "demo", name: "Demo Source" },
+			handler: () =>
+				toolOk(
+					{ rows: Array.from({ length: 20000 }, (_, i) => ({ i, s: "x".repeat(20) })) },
+					{
+						meta: {
+							data_access_id: "demo_1",
+							_staging: {
+								data_access_id: "demo_1",
+								query_tool: "demo_query_data",
+								schema_tool: "demo_get_schema",
+							},
+						},
+					},
+				),
+		});
+		const res = await calls[0].cb({}, {});
+		const sc = res.structuredContent as {
+			success: boolean;
+			data: { lossless: boolean; handle: string; content_hash: string };
+			_meta: { citation: { result_scope: string; result_hash: string } };
+		};
+		expect(res.isError).toBeUndefined();
+		expect(sc.data.lossless).toBe(true);
+		expect(sc.data.handle).toBe("demo_1");
+		expect(sc.data.content_hash).toMatch(/^[0-9a-f]{64}$/);
+		expect(sc._meta.citation.result_scope).toBe("staged:full_result");
+		expect(sc.data.content_hash).toBe(sc._meta.citation.result_hash);
+		expect(JSON.stringify(res.structuredContent).length).toBeLessThan(100_000);
+	});
+
+	it("fails loudly when staging metadata itself exceeds the transport limit", async () => {
+		const { server, calls } = fakeServer();
+		defineTool(server, {
+			name: "demo_metadata_big",
+			description: "d",
+			inputSchema: {},
+			source: { id: "demo", name: "Demo Source" },
+			handler: () =>
+				toolOk(
+					{ rows: ["x".repeat(110_000)] },
+					{
+						meta: {
+							data_access_id: "demo_2",
+							_staging: { data_access_id: "demo_2" },
+							diagnostic: "m".repeat(110_000),
+						},
+					},
+				),
+		});
+		const res = await calls[0].cb({}, {});
+		const sc = res.structuredContent as {
+			success: boolean;
+			error: { code: string };
+		};
+		expect(res.isError).toBe(true);
+		expect(sc.success).toBe(false);
+		expect(sc.error.code).toBe("TRANSPORT_METADATA_TOO_LARGE");
 	});
 });

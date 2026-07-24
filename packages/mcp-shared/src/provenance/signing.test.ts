@@ -19,6 +19,8 @@ async function sampleCitation(): Promise<Citation> {
 		source: { id: "ensembl", name: "Ensembl" },
 		server: "ensembl",
 		tool: "ensembl_execute",
+		queryScope: "tool_arguments" as const,
+		resultScope: "structured_content:data" as const,
 		query: "return await api.get('/lookup/id/ENSG00000095970');",
 		result: { gene: "TREM2", id: "ENSG00000095970", biotype: "protein_coding" },
 		retrievedAt: SIGNED_AT,

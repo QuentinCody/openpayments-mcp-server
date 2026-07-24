@@ -56,14 +56,14 @@ describe("renderUnicodeChart", () => {
 		expect(cIdx).toBeLessThan(bIdx);
 	});
 
-	it("truncates to maxCategories", () => {
+	it("does not discard rows when a legacy maxCategories value is present", () => {
 		const data = Array.from({ length: 50 }, (_, i) => ({
 			label: `Item ${i}`,
 			count: i + 1,
 		}));
 		const result = renderUnicodeChart(makeSpec({ data, maxCategories: 5 }));
 		const barLines = result.split("\n").filter((l) => l.includes("\u2588"));
-		expect(barLines.length).toBe(5);
+		expect(barLines.length).toBe(50);
 	});
 
 	it("renders horizontal-bar type", () => {
@@ -106,7 +106,7 @@ describe("renderUnicodeChart", () => {
 		expect(result).toContain("Source: FDA FAERS");
 	});
 
-	it("truncates long labels", () => {
+	it("preserves long labels", () => {
 		const result = renderUnicodeChart(
 			makeSpec({
 				data: [
@@ -117,7 +117,8 @@ describe("renderUnicodeChart", () => {
 				],
 			}),
 		);
-		expect(result).toContain("\u2026"); // ellipsis
+		expect(result).toContain("This is a very long label that should be truncated");
+		expect(result).not.toContain("\u2026");
 	});
 
 	it("handles non-numeric values gracefully", () => {

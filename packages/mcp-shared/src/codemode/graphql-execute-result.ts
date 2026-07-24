@@ -6,10 +6,10 @@
  */
 
 import {
-	buildCitation,
-	type Citation,
-	type SourceDescriptor,
-} from "../provenance/provenance";
+	buildCodeModeCitationMeta,
+	type CodeModeCitationContext,
+	stagedPayloadHash,
+} from "./citation-meta";
 import {
 	createCodeModeError,
 	createCodeModeResponse,
@@ -17,12 +17,7 @@ import {
 } from "./response";
 
 /** Provenance context threaded from the factory options into result handling. */
-export interface CitationCtx {
-	source?: SourceDescriptor;
-	server: string;
-	tool: string;
-	query: unknown;
-}
+export type CitationCtx = CodeModeCitationContext;
 
 /** The raw shape returned by DynamicWorkerExecutor.execute(). */
 interface ExecutorResult {
@@ -46,6 +41,7 @@ function slimStaged(obj: Record<string, unknown>): {
 	dataAccessId: string | undefined;
 	tablesCreated: unknown;
 	totalRows: unknown;
+	payloadHash: unknown;
 } {
 	const { schema: _s, _staging: _st, ...slim } = obj;
 	return {
@@ -53,29 +49,8 @@ function slimStaged(obj: Record<string, unknown>): {
 		dataAccessId: obj.data_access_id as string | undefined,
 		tablesCreated: obj.tables_created,
 		totalRows: obj.total_rows,
+		payloadHash: stagedPayloadHash(_st),
 	};
-}
-
-/** Build the optional `citation` meta when the server declared a source. */
-async function buildCitationMeta(
-	prov: CitationCtx | undefined,
-	data: unknown,
-	recordCount: number | undefined,
-	dataAccessId: string | undefined,
-	retrievedAt: string,
-): Promise<{ citation?: Citation }> {
-	if (!prov?.source) return {};
-	const citation = await buildCitation({
-		source: prov.source,
-		server: prov.server,
-		tool: prov.tool,
-		query: prov.query,
-		result: data,
-		retrievedAt,
-		recordCount,
-		dataAccessId,
-	});
-	return { citation };
 }
 
 /** The isolate reported an error. If it was a staged-array access, recover the
@@ -87,14 +62,16 @@ async function errorResult(
 ) {
 	if (result.__stagedResults?.length) {
 		const staged = result.__stagedResults[result.__stagedResults.length - 1];
-		const { slim, dataAccessId, tablesCreated, totalRows } = slimStaged(staged);
+		const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } =
+			slimStaged(staged);
 		const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-		const cite = await buildCitationMeta(
+		const cite = await buildCodeModeCitationMeta(
 			prov,
 			slim,
 			totalRows as number | undefined,
 			dataAccessId,
 			retrievedAt,
+			payloadHash,
 		);
 		return createCodeModeResponse(slim, {
 			meta: {
@@ -102,6 +79,7 @@ async function errorResult(
 				data_access_id: dataAccessId,
 				tables_created: tablesCreated,
 				total_rows: totalRows,
+				...(payloadHash ? { payload_hash: payloadHash } : {}),
 				...cite,
 				...(logOutput ? { console_output: logOutput } : {}),
 				executed_at: retrievedAt,
@@ -139,22 +117,24 @@ async function successResult(
 	const stagingMeta: Record<string, unknown> = {};
 
 	if (isStaged) {
-		const { slim, dataAccessId, tablesCreated, totalRows } = slimStaged(
+		const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } = slimStaged(
 			raw as Record<string, unknown>,
 		);
 		stagingMeta.staged = true;
 		stagingMeta.data_access_id = dataAccessId;
 		stagingMeta.tables_created = tablesCreated;
 		stagingMeta.total_rows = totalRows;
+		stagingMeta.payload_hash = payloadHash;
 		responseData = slim;
 	}
 
-	const cite = await buildCitationMeta(
+	const cite = await buildCodeModeCitationMeta(
 		prov,
 		responseData,
 		countRecords(responseData, stagingMeta.total_rows),
 		stagingMeta.data_access_id as string | undefined,
 		retrievedAt,
+		stagingMeta.payload_hash,
 	);
 
 	return createCodeModeResponse(responseData, {

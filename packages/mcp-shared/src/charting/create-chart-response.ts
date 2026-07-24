@@ -13,8 +13,6 @@ import { buildChartHtml } from "./chart-html-template.js";
 import type { ChartResponseOptions, ChartSpec } from "./chart-types.js";
 import { renderUnicodeChart } from "./unicode-chart.js";
 
-const MAX_CHART_DATA_ROWS = 200;
-
 export interface ChartTextContent {
 	type: "text";
 	text: string;
@@ -44,26 +42,18 @@ export function createChartResponse(
 		return emptyChartResponse(chart);
 	}
 
-	const truncated = chart.data.length > MAX_CHART_DATA_ROWS;
-	const chartData = truncated
-		? chart.data.slice(0, MAX_CHART_DATA_ROWS)
-		: chart.data;
-	const spec: ChartSpec = { ...chart, data: chartData };
+	const spec: ChartSpec = { ...chart, data: chart.data };
 
 	const unicodeChart = renderUnicodeChart(spec);
 	const textContent = textPreamble
 		? `${textPreamble}\n\n${unicodeChart}`
 		: unicodeChart;
-	const truncationNote = truncated
-		? `\n\n(Showing ${MAX_CHART_DATA_ROWS} of ${chart.data.length} data points)`
-		: "";
-
 	const htmlContent = buildChartHtml(spec);
 	const htmlBase64 = btoa(unescape(encodeURIComponent(htmlContent)));
 
 	return {
 		content: [
-			{ type: "text" as const, text: textContent + truncationNote },
+			{ type: "text" as const, text: textContent },
 			{
 				type: "resource" as const,
 				resource: {
@@ -79,10 +69,7 @@ export function createChartResponse(
 				chart_rendered: true,
 				title: spec.title,
 				type: spec.type,
-				data_points: chartData.length,
-				...(truncated
-					? { truncated: true, total_data_points: chart.data.length }
-					: {}),
+				data_points: chart.data.length,
 			},
 			_chart: spec,
 			_meta: { fetched_at: new Date().toISOString() },

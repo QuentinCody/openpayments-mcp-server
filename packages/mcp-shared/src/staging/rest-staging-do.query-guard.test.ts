@@ -171,7 +171,6 @@ describe.each(["/query", "/query-enhanced"])("RestStagingDO %s", (path) => {
 		expect(await res.json()).toMatchObject({
 			success: true,
 			total_matching: 2,
-			truncated: false,
 		});
 	});
 

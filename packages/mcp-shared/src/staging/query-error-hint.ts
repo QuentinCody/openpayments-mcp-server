@@ -64,18 +64,12 @@ export function renderStagedSchemaHint(raw: unknown): string {
 		const names = cols
 			.map(colName)
 			.filter((n): n is string => typeof n === "string");
-		lines.push(
-			`${name}(${names.slice(0, 30).join(", ")}${names.length > 30 ? ", …" : ""})`,
-		);
+		lines.push(`${name}(${names.join(", ")})`);
 	}
 	if (lines.length === 0) return "";
-	const shown = lines.slice(0, 25);
 	return (
 		"\n\nAvailable staged tables & columns — use these EXACT names:\n" +
-		shown.join("\n") +
-		(lines.length > 25
-			? `\n… and ${lines.length - 25} more (call the _get_schema tool).`
-			: "")
+		lines.join("\n")
 	);
 }
 

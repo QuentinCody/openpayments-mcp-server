@@ -19,6 +19,8 @@ export interface PassthroughCitationArgs {
 	query: unknown;
 	/** The result bytes being cited (inline result, or the staged data). */
 	result: unknown;
+	/** Override only when the caller puts the inline result at the response root. */
+	resultScope?: "structured_content:data" | "structured_content:root_without_meta";
 	recordCount?: number;
 	dataAccessId?: string;
 }
@@ -40,7 +42,11 @@ export async function buildPassthroughCitation(
 		server: args.server,
 		tool: args.tool,
 		query: args.query,
+		queryScope: "tool_arguments",
 		result: args.result,
+		resultScope: args.dataAccessId
+			? "staged:full_result"
+			: (args.resultScope ?? "structured_content:data"),
 		retrievedAt: new Date().toISOString(),
 		recordCount: args.recordCount,
 		dataAccessId: args.dataAccessId,

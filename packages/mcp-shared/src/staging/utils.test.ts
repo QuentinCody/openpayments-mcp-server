@@ -92,7 +92,7 @@ describe("stageToDoAndRespond", () => {
 		expect(result.schema).toEqual({ tables: { t1: { columns: [] } } });
 		expect(calls.some((c) => c.path === "/register")).toBe(true);
 		// schema_hints + context forwarded to /process
-		const processCall = calls.find((c) => c.path === "/process");
+		const processCall = calls.filter((c) => c.path === "/process").at(-1);
 		expect(processCall?.body).toMatchObject({
 			schema_hints: { indexes: ["id"] },
 			context: { toolName: "civic_search" },
@@ -130,9 +130,14 @@ describe("stageToDoAndRespond", () => {
 	});
 
 	it("throws when the DO process step fails", async () => {
+		let processCalls = 0;
 		const { ns } = makeDo({
-			"/process": () =>
-				json({ success: false, error: "schema inference failed" }),
+			"/process": () => {
+				processCalls++;
+				return processCalls === 1
+					? okProcess()
+					: json({ success: false, error: "schema inference failed" });
+			},
 		});
 		await expect(
 			stageToDoAndRespond({ rows: [] }, ns, "civic"),
@@ -207,6 +212,8 @@ describe("stageToDoAndRespond", () => {
 			},
 		);
 		expect(result._staging.completeness).toMatchObject({ complete: true });
+		expect(result._staging.evidence_table).toBe("payloads");
+		expect(result._staging.payload_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
 	});
 
 	it("routes to the WorkspaceDO when options.workspace is present (skips per-server /process)", async () => {
@@ -251,6 +258,58 @@ describe("stageToDoAndRespond", () => {
 		expect(perServerCalls.some((c) => c.path === "/process")).toBe(false);
 		expect(perServerCalls.some((c) => c.path === "/register")).toBe(false);
 	});
+
+	it("gives each workspace stage its own dataset so a second call cannot drop the first", async () => {
+		// WorkspaceDO `stageDataset` is replace-on-rewrite: it DROPs every table
+		// previously recorded for a dataset name and pins the evidence payload to
+		// id=1. Callers pass a FIXED per-server dataset (`buildStageOptions` sets
+		// `dataset: stagingPrefix`), so without per-stage uniqueness the second
+		// result from one server destroys the first and dangles its handle.
+		const { ns: perServerNs } = makeDo({
+			"/process": okProcess,
+			"/schema": okSchema,
+		});
+		const { ns: wsNs, calls: wsCalls } = makeDo({
+			"/ws/stage": (body) => {
+				const dataset = (body as { dataset: string }).dataset;
+				return json({
+					success: true,
+					dataset,
+					data_access_id: `${dataset}_ws`,
+					tables: [`${dataset}__targets`],
+					row_count: 1,
+				});
+			},
+		});
+
+		const stage = () =>
+			stageToDoAndRespond(
+				{ targets: [{ id: 1 }] },
+				perServerNs,
+				"chembl",
+				undefined,
+				undefined,
+				"chembl",
+				undefined,
+				{ workspace: { namespace: wsNs, id: "W", dataset: "chembl" } },
+			);
+
+		const first = await stage();
+		const second = await stage();
+
+		const datasets = wsCalls
+			.filter((c) => c.path === "/ws/stage")
+			.map((c) => (c.body as { dataset: string }).dataset);
+		expect(datasets).toHaveLength(2);
+		expect(datasets[0]).not.toBe(datasets[1]);
+
+		// Both stages stay independently addressable.
+		expect(first.dataAccessId).not.toBe(second.dataAccessId);
+		expect(first.tablesCreated).not.toEqual(second.tablesCreated);
+
+		// The per-server prefix is retained for attribution/greppability.
+		for (const d of datasets) expect(d.startsWith("chembl")).toBe(true);
+	});
 });
 
 describe("queryDataFromDo SQL guards", () => {
@@ -280,7 +339,7 @@ describe("queryDataFromDo SQL guards", () => {
 });
 
 describe("queryDataFromDo execution", () => {
-	it("appends LIMIT, probes schema, and returns rows", async () => {
+	it("rejects a partial response without accepting its rows", async () => {
 		const { ns, calls } = makeDo({
 			"/schema": okSchema,
 			"/query": () =>
@@ -292,15 +351,9 @@ describe("queryDataFromDo execution", () => {
 					total_matching: 50,
 				}),
 		});
-		const result = await queryDataFromDo(ns, "civic_1", "SELECT * FROM t", 25);
-		expect(result).toMatchObject({
-			row_count: 1,
-			truncated: true,
-			total_matching: 50,
-			data_access_id: "civic_1",
-		});
-		expect(result.sql).toBe("SELECT * FROM t LIMIT 25");
-		expect(result.rows).toEqual([{ a: 1 }]);
+		await expect(
+			queryDataFromDo(ns, "civic_1", "SELECT * FROM t", 25),
+		).rejects.toThrow(/LOSSLESS_QUERY_REJECTED_PARTIAL/);
 		const queryBody = calls.find((c) => c.path === "/query")?.body as {
 			sql: string;
 		};
@@ -360,6 +413,17 @@ describe("queryDataFromDo execution", () => {
 			message: expect.stringContaining("syntax error"),
 			validated: true,
 		});
+	});
+
+	it("propagates the DO's error code onto the thrown error", async () => {
+		const { ns } = makeDo({
+			"/schema": okSchema,
+			"/query": () =>
+				json({ success: false, error: "no such table", code: "NO_SUCH_TABLE" }),
+		});
+		await expect(
+			queryDataFromDo(ns, "civic_1", "SELECT * FROM t"),
+		).rejects.toMatchObject({ code: "NO_SUCH_TABLE" });
 	});
 });
 
@@ -426,8 +490,7 @@ describe("createQueryDataHandler", () => {
 		expect(res.structuredContent).toMatchObject({ success: true });
 	});
 
-	it("emits a completeness verdict and maps not-found query errors to DATA_ACCESS_ERROR", async () => {
-		// truncated:true → complete:false completeness branch
+	it("rejects partial rows and maps not-found query errors to DATA_ACCESS_ERROR", async () => {
 		const truncNs = makeDo({
 			"/schema": okSchema,
 			"/query": () =>
@@ -443,7 +506,8 @@ describe("createQueryDataHandler", () => {
 			{ data_access_id: "civic_1", sql: "SELECT * FROM t" },
 			{ DATA_DO: truncNs },
 		);
-		expect(JSON.stringify(trunc)).toContain("row_limit");
+		expect(trunc.structuredContent).toMatchObject({ success: false });
+		expect(JSON.stringify(trunc)).toContain("LOSSLESS_QUERY_REJECTED_PARTIAL");
 
 		// a query error whose message contains "not found" maps to DATA_ACCESS_ERROR
 		const nfNs = makeDo({

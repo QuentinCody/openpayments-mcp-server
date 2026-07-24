@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { MAX_RESULT_BYTES, MAX_RESULT_ROWS } from "../staging/sql-guard";
+import { MAX_RESULT_ROWS } from "../staging/sql-guard";
 import {
 	clearWorkspace,
 	prefixSchema,
@@ -105,8 +105,10 @@ describe("stageDataset", () => {
 		const handle = stageDataset(sql, chembl);
 		expect(handle.dataset).toBe("chembl");
 		expect(handle.tables).toContain("chembl__targets");
+		expect(handle.evidence_table).toBe("chembl__evidence");
 		expect(handle.row_count).toBe(2);
 		expect(handle.completeness.complete).toBe(true);
+		expect(handle.completeness.evidence_preserved).toBe(true);
 
 		const rows = sql
 			.exec("SELECT symbol, action FROM chembl__targets ORDER BY symbol")
@@ -115,6 +117,10 @@ describe("stageDataset", () => {
 			{ symbol: "ABL1", action: "inhibitor" },
 			{ symbol: "KIT", action: "inhibitor" },
 		]);
+		const evidence = sql
+			.exec("SELECT payload_json FROM chembl__evidence")
+			.one();
+		expect(evidence?.payload_json).toBe(JSON.stringify(chembl.data));
 	});
 
 	it("re-staging the same dataset replaces its old tables", () => {
@@ -146,7 +152,11 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 			dataset: "multi",
 			data: { genes: [{ name: "TP53" }], drugs: [{ name: "aspirin" }] },
 		});
-		expect(handle.tables.sort()).toEqual(["multi__drugs", "multi__genes"]);
+		expect(handle.tables.sort()).toEqual([
+			"multi__drugs",
+			"multi__evidence",
+			"multi__genes",
+		]);
 		expect(sql.exec("SELECT name FROM multi__genes").toArray()).toEqual([
 			{ name: "TP53" },
 		]);
@@ -173,7 +183,8 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 			dataset: "note",
 			data: "just a scalar",
 		});
-		expect(handle.tables).toEqual(["note__payload"]);
+		expect(handle.tables).toEqual(["note__payload", "note__evidence"]);
+		expect(handle.evidence_table).toBe("note__evidence");
 		expect(handle.row_count).toBe(1);
 		const row = sql.exec(`SELECT root_json FROM "note__payload"`).one();
 		expect(row?.root_json).toBe('"just a scalar"');
@@ -197,14 +208,14 @@ describe("stageDataset & queryWorkspace — branches and edge cases", () => {
 		expect(schema.datasets[0].completeness).toBeNull();
 	});
 
-	it("does not flag truncation when the caller supplied their own LIMIT", () => {
+	it("returns a complete intentional view when the caller supplies LIMIT", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
 		const result = queryWorkspace(sql, {
 			sql: "SELECT symbol FROM chembl__targets LIMIT 1",
 		});
 		expect(result.row_count).toBe(1);
-		expect(result.truncated).toBe(false);
+		expect(result.complete_view).toBe(true);
 	});
 });
 
@@ -223,16 +234,15 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		expect(result.row_count).toBe(1);
 	});
 
-	it("appends a default LIMIT and flags truncation when a full page comes back", () => {
+	it("rejects a result that exceeds the implicit bound without returning partial rows", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
-		const result = queryWorkspace(sql, {
-			sql: "SELECT symbol FROM chembl__targets",
-			limit: 1,
-		});
-		expect(result.row_count).toBe(1);
-		expect(result.truncated).toBe(true);
-		expect(result.sql).toContain("LIMIT 1");
+		expect(() =>
+			queryWorkspace(sql, {
+				sql: "SELECT symbol FROM chembl__targets",
+				limit: 1,
+			}),
+		).toThrow(/LOSSLESS_QUERY_BOUND_REQUIRED.*No partial rows were returned/);
 	});
 
 	// `assertReadOnlySql` deliberately ALLOWS `PRAGMA table_info(<t>)` (T3.4), but
@@ -253,7 +263,7 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		expect(result.rows.map((r) => r.name)).toContain("symbol");
 	});
 
-	it("never flags a describe as truncated, even past the default page size", () => {
+	it("returns every column in a describe, even past the default page size", () => {
 		const sql = makeSql();
 		// 120 columns > the default limit of 100: the row-count heuristic would
 		// otherwise read a complete describe as a truncated page.
@@ -263,7 +273,7 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		const result = queryWorkspace(sql, { sql: "PRAGMA table_info(wide__t)" });
 
 		expect(result.row_count).toBe(120);
-		expect(result.truncated).toBe(false);
+		expect(result.complete_view).toBe(true);
 	});
 
 	it("rejects a write disguised as a query", () => {
@@ -304,7 +314,7 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		);
 	});
 
-	it("bounds the response bytes and says why (doc 03 §5)", () => {
+	it("rejects an oversized response in full and says why", () => {
 		const sql = makeSql();
 		// ~2 KB per row x 200 rows = ~400 KB, far past the ~96 KB ceiling.
 		sql.exec("CREATE TABLE big__t (blob TEXT)");
@@ -312,17 +322,12 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 			sql.exec("INSERT INTO big__t (blob) VALUES (?)", "x".repeat(2000));
 		}
 
-		const result = queryWorkspace(sql, { sql: "SELECT blob FROM big__t" });
-
-		expect(result.truncated).toBe(true);
-		expect(result.truncation?.reason).toBe("size_limit");
-		expect(result.row_count).toBeLessThan(200);
-		expect(JSON.stringify(result.rows).length).toBeLessThanOrEqual(
-			MAX_RESULT_BYTES,
-		);
+		expect(() =>
+			queryWorkspace(sql, { sql: "SELECT blob FROM big__t LIMIT 200" }),
+		).toThrow(/LOSSLESS_QUERY_RESULT_TOO_LARGE.*No partial rows were returned/);
 	});
 
-	it("leaves a small result free of any cost signal", () => {
+	it("marks a small result as a complete view", () => {
 		const sql = makeSql();
 		stageDataset(sql, chembl);
 
@@ -330,8 +335,7 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 			sql: "SELECT symbol FROM chembl__targets LIMIT 5",
 		});
 
-		expect(result.truncation).toBeUndefined();
-		expect(result.truncated).toBe(false);
+		expect(result.complete_view).toBe(true);
 	});
 
 	// Documents the REAL interaction of the two doc-03 ceilings, which is not
@@ -339,7 +343,7 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 	// serialize under 96 KB / 10,000 = 9.8 bytes. Even a minimal {"id":12345} is
 	// 12 bytes, so the BYTE cap always binds first and the row cap is effectively
 	// unreachable on this path. Both outcomes are explicit, which is what matters.
-	it("byte ceiling binds before the row ceiling, and says so", () => {
+	it("rejects when the byte ceiling binds before the row ceiling", () => {
 		const sql = makeSql();
 		sql.exec("CREATE TABLE many__t (id INTEGER)");
 		sql.exec(
@@ -347,18 +351,12 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 				"(SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 10001) SELECT x FROM c",
 		);
 
-		const result = queryWorkspace(sql, {
-			sql: "SELECT id FROM many__t",
-			limit: 10_000_000,
-		});
-
-		// Never silently: the caller is told the result was cut and why.
-		expect(result.truncated).toBe(true);
-		expect(result.truncation?.reason).toBe("size_limit");
-		expect(result.row_count).toBeLessThan(MAX_RESULT_ROWS);
-		expect(JSON.stringify(result.rows).length).toBeLessThanOrEqual(
-			MAX_RESULT_BYTES,
-		);
+		expect(() =>
+			queryWorkspace(sql, {
+				sql: "SELECT id FROM many__t LIMIT 10000",
+				limit: 10_000_000,
+			}),
+		).toThrow(/LOSSLESS_QUERY_RESULT_TOO_LARGE/);
 	});
 });
 

@@ -95,12 +95,12 @@ describe("pullBoundedRows (doc 03 §2)", () => {
 
 	// The pre-change handler called `res.toArray()`: whatever the cursor held all
 	// landed in the response. This pins that the cap is what now bounds it.
-	it("stops at the row ceiling where toArray() returned everything", () => {
+	it("rejects the whole pull at the row ceiling", () => {
 		expect(makeCursor(rowsOf(50_000)).toArray()).toHaveLength(50_000); // pre-doc-03
 		const pull = pullBoundedRows(makeCursor(rowsOf(50_000)), { maxRows: 10 });
-		expect(pull.rows).toHaveLength(10);
-		expect(pull.truncated).toBe(true);
-		expect(pull.truncation?.reason).toBe("row_limit");
+		expect(pull.rows).toEqual([]);
+		expect(pull.truncated).toBe(false);
+		expect(pull.cost_error).toMatch(/No partial rows were returned/);
 	});
 
 	it("does not flag truncation when the cursor holds exactly the ceiling", () => {
@@ -109,14 +109,12 @@ describe("pullBoundedRows (doc 03 §2)", () => {
 		expect(pull.truncated).toBe(false);
 	});
 
-	it("stops at the byte ceiling and names the reason", () => {
+	it("rejects the whole pull at the byte ceiling", () => {
 		const wide = Array.from({ length: 100 }, () => ({ blob: "x".repeat(100) }));
 		const pull = pullBoundedRows(makeCursor(wide), { maxBytes: 500 });
-		expect(pull.rows.length).toBeGreaterThan(0);
-		expect(pull.rows.length).toBeLessThan(100);
-		expect(pull.truncated).toBe(true);
-		expect(pull.truncation?.reason).toBe("size_limit");
-		expect(JSON.stringify(pull.rows).length).toBeLessThanOrEqual(500);
+		expect(pull.rows).toEqual([]);
+		expect(pull.truncated).toBe(false);
+		expect(pull.cost_error).toMatch(/No partial rows were returned/);
 	});
 
 	it("measures the byte ceiling in UTF-8 BYTES, not UTF-16 units (rs1 #4)", () => {
@@ -125,9 +123,8 @@ describe("pullBoundedRows (doc 03 §2)", () => {
 		// UTF-8 size of what came back stays within the ceiling.
 		const rows = Array.from({ length: 200 }, () => ({ e: "😀".repeat(20) }));
 		const pull = pullBoundedRows(makeCursor(rows), { maxBytes: 2_000 });
-		const utf8 = new TextEncoder().encode(JSON.stringify(pull.rows)).length;
-		expect(utf8).toBeLessThanOrEqual(2_000);
-		expect(pull.truncated).toBe(true);
+		expect(pull.rows).toEqual([]);
+		expect(pull.cost_error).toMatch(/complete result exceeds/);
 	});
 
 	// Regression: the budget must measure the SERIALIZED ARRAY. Summing only the
@@ -138,8 +135,8 @@ describe("pullBoundedRows (doc 03 §2)", () => {
 		const pull = pullBoundedRows(makeCursor(rowsOf(10_000)), {
 			maxBytes: 1_000,
 		});
-		expect(JSON.stringify(pull.rows).length).toBeLessThanOrEqual(1_000);
-		expect(pull.truncated).toBe(true);
+		expect(pull.rows).toEqual([]);
+		expect(pull.cost_error).toMatch(/complete result exceeds/);
 	});
 
 	// The adversarial shape: an aggregate over a CROSS JOIN returns ONE row but
@@ -192,17 +189,14 @@ describe("pullSignals", () => {
 		expect(pullSignals({ rows: [], truncated: false })).toEqual({});
 	});
 
-	it("emits an explicit truncated + reason when the pull was cut short", () => {
+	it("never emits a partial-result signal", () => {
 		expect(
 			pullSignals({
 				rows: [],
 				truncated: true,
 				truncation: { reason: "row_limit", detail: "d" },
 			}),
-		).toEqual({
-			truncated: true,
-			truncation: { reason: "row_limit", detail: "d" },
-		});
+		).toEqual({});
 	});
 });
 
@@ -255,7 +249,6 @@ describe("countTotal — cost cap (doc 03 §3)", () => {
 		const exec = () => ({ one: () => ({ c: MAX_COUNT_SCAN + 1 }) as never });
 		expect(countTotal(exec, "SELECT * FROM huge", 100)).toEqual({
 			total_matching: MAX_COUNT_SCAN,
-			truncated: true,
 			count_capped: true,
 		});
 	});
@@ -264,7 +257,6 @@ describe("countTotal — cost cap (doc 03 §3)", () => {
 		const exec = () => ({ one: () => ({ c: MAX_COUNT_SCAN }) as never });
 		expect(countTotal(exec, "SELECT * FROM t", 10)).toEqual({
 			total_matching: MAX_COUNT_SCAN,
-			truncated: true,
 		});
 	});
 });
@@ -388,17 +380,15 @@ describe("readOnlySqlError", () => {
 describe("countTotal", () => {
 	const execWith = (c: unknown) => () => ({ one: () => ({ c }) as never });
 
-	it("reports the total and flags truncation when it exceeds the page", () => {
+	it("reports the total without reclassifying an intentional SQL view", () => {
 		expect(countTotal(execWith(42), "SELECT * FROM t LIMIT 10", 10)).toEqual({
 			total_matching: 42,
-			truncated: true,
 		});
 	});
 
 	it("does not flag truncation when the page holds every row", () => {
 		expect(countTotal(execWith(3), "SELECT * FROM t", 3)).toEqual({
 			total_matching: 3,
-			truncated: false,
 		});
 	});
 
@@ -415,7 +405,6 @@ describe("countTotal", () => {
 		const exec = () => ({ one: () => undefined });
 		expect(countTotal(exec, "SELECT * FROM t", 7)).toEqual({
 			total_matching: 7,
-			truncated: false,
 		});
 	});
 });

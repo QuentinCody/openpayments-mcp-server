@@ -510,9 +510,11 @@ export class RestStagingDO extends DurableObject {
 				const stagingWarnings: Record<string, unknown> = {};
 				if (result.failedRows > 0) {
 					stagingWarnings.rows_skipped = result.failedRows;
-					stagingWarnings.sample_errors = result.warnings
-						.slice(0, 5)
-						.map((w) => ({ row: w.rowIndex, table: w.table, error: w.error }));
+					stagingWarnings.sample_errors = result.warnings.map((w) => ({
+						row: w.rowIndex,
+						table: w.table,
+						error: w.error,
+					}));
 				}
 				const lossPercent =
 					result.inputRows > 0

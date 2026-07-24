@@ -162,7 +162,7 @@ export function createMyGeneResolver(
 			if (!response.ok) {
 				const body = await response.text().catch(() => response.statusText);
 				throw new Error(
-					`MyGene.info query failed: HTTP ${response.status} — ${body.slice(0, 200)}`,
+					`MyGene.info query failed: HTTP ${response.status} — ${body}`,
 				);
 			}
 

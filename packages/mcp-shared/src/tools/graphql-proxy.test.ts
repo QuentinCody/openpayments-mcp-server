@@ -22,6 +22,38 @@ function makeTool(
 
 const stubCtx: ToolContext = { sql: () => [] };
 
+function makeDoNamespace() {
+	return {
+		idFromName: (name: string) => name,
+		get: () => ({
+			async fetch(request: Request) {
+				const path = new URL(request.url).pathname;
+				if (path === "/process")
+					return new Response(
+						JSON.stringify({
+							success: true,
+							tables_created: ["graphql_evidence"],
+							total_rows: 1,
+							input_rows: 1,
+							table_row_counts: { graphql_evidence: 1 },
+						}),
+						{ headers: { "content-type": "application/json" } },
+					);
+				if (path === "/schema")
+					return new Response(
+						JSON.stringify({ success: true, schema: { tables: {} } }),
+						{ headers: { "content-type": "application/json" } },
+					);
+				if (path === "/register")
+					return new Response(JSON.stringify({ success: true }), {
+						headers: { "content-type": "application/json" },
+					});
+				return new Response(JSON.stringify({ success: false }), { status: 404 });
+			},
+		}),
+	};
+}
+
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), {
 		status,
@@ -346,6 +378,19 @@ describe("createGraphqlProxyTool", () => {
 		expect(result.__errors).toHaveLength(1);
 	});
 
+	it("keeps partial errors visible when GraphQL data is scalar", async () => {
+		const tool = makeTool(async () => ({
+			// SAFETY: malformed upstream GraphQL payload intentionally exercises the runtime lossless guard.
+			data: "partial-value" as unknown as Record<string, unknown>,
+			errors: [{ message: "Scalar warning" }],
+		}));
+		const result = await tool.handler({ query: "{ value }" }, stubCtx);
+		expect(result).toEqual({
+			data: "partial-value",
+			__errors: [{ message: "Scalar warning" }],
+		});
+	});
+
 	it("returns __gql_error when fetch throws", async () => {
 		const tool = makeTool(async () => {
 			throw new Error("Network failure");
@@ -522,8 +567,48 @@ describe("createGraphqlProxyTool — passthrough transport-size guards (doc 11)"
 		expect(result.__gql_error).toBe(true);
 		expect(result.code).toBe("RESPONSE_TOO_LARGE");
 		expect(result.incomplete).toBe(true);
+		expect(result.evidence_returned).toBe(false);
 		// The error object itself must survive transport, and note the suppressed errors.
 		expect(JSON.stringify(result).length).toBeLessThan(100_000);
-		expect(String(result.message)).toContain("partial error");
+		expect(String(result.message)).toContain("GraphQL response exceeds");
+	});
+
+	it("routes a large partial data-and-errors envelope through staging as one unit", async () => {
+		const ns = makeDoNamespace();
+		const data = {
+			rows: Array.from({ length: 400 }, () => ({ v: "z".repeat(100) })),
+		};
+		const errors = Array.from({ length: 700 }, () => ({
+			message: "e".repeat(100),
+		}));
+		const tool = makeTool(async () => ({ data, errors }), { doNamespace: ns });
+		const result = (await tool.handler({ query: "{ rows }" }, stubCtx)) as Record<
+			string,
+			unknown
+		>;
+		expect(result.__staged).toBe(true);
+		expect(result._staging).toMatchObject({
+			evidence_table: "payloads",
+		});
+		expect(String((result._staging as Record<string, unknown>).payload_hash)).toMatch(
+			/^sha256:/,
+		);
+	});
+
+	it("routes a large errors-only envelope through staging", async () => {
+		const ns = makeDoNamespace();
+		const errors = Array.from({ length: 1200 }, () => ({
+			message: "e".repeat(100),
+		}));
+		const tool = makeTool(async () => ({ errors }), { doNamespace: ns });
+		const result = (await tool.handler({ query: "{ bad }" }, stubCtx)) as Record<
+			string,
+			unknown
+		>;
+		expect(result).toMatchObject({
+			__gql_error: true,
+			code: "ERROR_EVIDENCE_STAGED",
+			evidence: { __staged: true },
+		});
 	});
 });

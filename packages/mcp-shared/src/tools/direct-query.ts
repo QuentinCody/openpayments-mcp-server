@@ -9,7 +9,7 @@
  *   1. Read-only enforcement (SELECT/WITH only, no write keywords, no semicolons)
  *   2. Table deny list (system tables, sensitive tables)
  *   3. Sensitive column redaction
- *   4. Row count and result size limits
+ *   4. Lossless row-count and result-size gates (reject whole results; never trim)
  */
 
 import { z } from "zod";
@@ -182,6 +182,28 @@ export function ensureLimit(sql: string, maxRows: number = MAX_ROWS): string {
 	return `${stripped} LIMIT ${maxRows + 1}`;
 }
 
+function rowBoundError(actualRows: number): Record<string, unknown> {
+	return {
+		error:
+			`Query crossed the ${MAX_ROWS}-row safety bound. No partial rows were returned. ` +
+			"Add an explicit LIMIT or a narrower predicate to request an intentional complete view.",
+		error_code: "LOSSLESS_QUERY_BOUND_REQUIRED",
+		observed_rows: actualRows,
+		returned_rows: 0,
+	};
+}
+
+function resultSizeError(actualBytes: number): Record<string, unknown> {
+	return {
+		error:
+			`Query result is ${actualBytes} bytes, over the ${MAX_RESULT_BYTES}-byte direct-query limit. ` +
+			"No partial rows were returned; narrow the query or use staged workspace access.",
+		error_code: "QUERY_TOO_LARGE",
+		observed_bytes: actualBytes,
+		returned_rows: 0,
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Tool entries
 // ---------------------------------------------------------------------------
@@ -231,23 +253,17 @@ export const directQueryTools: ToolEntry[] = [
 					params,
 				);
 
-				const truncated = rows.length > MAX_ROWS;
-				const resultRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
+				if (rows.length > MAX_ROWS) return rowBoundError(rows.length);
 
 				// 5. Redact sensitive columns
-				const redacted = resultRows.map((row) => redactRow(row));
+				const redacted = rows.map((row) => redactRow(row));
 
 				// 6. Check result size
 				const serialized = JSON.stringify(redacted);
-				if (serialized.length > MAX_RESULT_BYTES) {
-					return {
-						error:
-							"Result exceeds 1MB size limit. Add a LIMIT clause or narrow your SELECT columns.",
-						error_code: "QUERY_TOO_LARGE",
-					};
-				}
+				if (serialized.length > MAX_RESULT_BYTES)
+					return resultSizeError(serialized.length);
 
-				return { rows: redacted, count: redacted.length, truncated };
+				return { rows: redacted, count: redacted.length, complete_view: true };
 			} catch (e: unknown) {
 				const error = e instanceof Error ? e.message : String(e);
 				return { error, error_code: "QUERY_ERROR" };
@@ -320,9 +336,17 @@ export const directQueryTools: ToolEntry[] = [
 						limitedSql,
 						q.params,
 					);
-					const truncated = rows.length > MAX_ROWS;
-					const resultRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
-					results.push(resultRows.map((row) => redactRow(row)));
+					if (rows.length > MAX_ROWS) {
+						results.push(rowBoundError(rows.length));
+						continue;
+					}
+					const redacted = rows.map((row) => redactRow(row));
+					const serialized = JSON.stringify(redacted);
+					if (serialized.length > MAX_RESULT_BYTES) {
+						results.push(resultSizeError(serialized.length));
+						continue;
+					}
+					results.push(redacted);
 				} catch (e: unknown) {
 					const error = e instanceof Error ? e.message : String(e);
 					results.push({ error, error_code: "QUERY_ERROR" });
