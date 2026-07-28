@@ -20,7 +20,7 @@ import {
 } from "./graphql-introspection";
 import { searchTrimmedIntrospection } from "./graphql-search";
 import { createCodeModeError, ErrorCodes } from "./response";
-import { formatEndpoint, searchEndpoints } from "./search-tool";
+import { formatEndpoint, searchEndpoints } from "./search-core";
 
 /**
  * Message surfaced (as `schema.note` inside the isolate and as the `_search`
