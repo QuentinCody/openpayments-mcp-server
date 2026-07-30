@@ -4,7 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { canonicalJson, sha256Hex } from "../provenance/provenance";
 import { extractRowSets } from "./canonicalize";
-import { callTool, type McpRpcStub } from "./internal-call";
+import { callTool, type McpServiceFetcher } from "./internal-call";
 import { runOnce } from "./run-once";
 import {
 	appendSnapshot,
@@ -16,8 +16,8 @@ import { SOURCES } from "./sources/index";
 
 interface MonitorEnv {
 	MONITOR_DO: DurableObjectNamespace;
-	/** Cross-script binding to fda-orange-book-mcp-server's MyMCP DO (in-fabric, no public hop). */
-	SRV_FDA_ORANGE_BOOK: DurableObjectNamespace;
+	/** In-fabric Worker service binding to fda-orange-book-mcp-server. */
+	SRV_FDA_ORANGE_BOOK: McpServiceFetcher;
 }
 
 interface SubscriptionRow {
@@ -107,21 +107,14 @@ export class MonitorDO extends DurableObject<MonitorEnv> {
 		return this.callId;
 	}
 
-	private async stubFor(server: string): Promise<McpRpcStub> {
-		const bindings: Record<string, DurableObjectNamespace | undefined> = {
+	private serviceFor(server: string): McpServiceFetcher {
+		const bindings: Record<string, McpServiceFetcher | undefined> = {
 			"fda-orange-book": this.env.SRV_FDA_ORANGE_BOOK,
 		};
-		const ns = bindings[server];
-		if (!ns)
+		const service = bindings[server];
+		if (!service)
 			throw new Error(`monitor: no in-fabric binding for server '${server}'`);
-		// Stable session name keeps one warm RPC session across ticks. Agents-SDK DOs
-		// require their name set before any RPC method is called (workerd #2240).
-		const name = `rpc:monitor:${server}`;
-		const stub = ns.get(ns.idFromName(name)) as unknown as McpRpcStub;
-		await (stub as { setName?: (n: string) => Promise<unknown> }).setName?.(
-			name,
-		);
-		return stub;
+		return service;
 	}
 
 	private loadSub(id: string): SubscriptionRow | null {
@@ -169,7 +162,7 @@ export class MonitorDO extends DurableObject<MonitorEnv> {
 			source,
 			input: JSON.parse(sub.input_json) as Record<string, unknown>,
 			run: async (q) =>
-				callTool(await this.stubFor(q.server), q.tool, q.params, this.nextId()),
+				callTool(this.serviceFor(q.server), q.tool, q.params, this.nextId()),
 			priorRowSets,
 			priorContentHash: latest?.content_hash ?? null,
 		});

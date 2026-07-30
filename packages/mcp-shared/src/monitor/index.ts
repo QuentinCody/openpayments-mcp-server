@@ -19,7 +19,7 @@ export {
 	buildToolCall,
 	callTool,
 	type McpRpcResponse,
-	type McpRpcStub,
+	type McpServiceFetcher,
 	parseToolResult,
 } from "./internal-call";
 export { autoDetectKey, type KeyColumnStat } from "./key-detect";

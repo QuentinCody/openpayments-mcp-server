@@ -5,7 +5,7 @@
  * execute: V8 isolate with api.get + searchSpec/listCategories.
  */
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@bio-mcp/shared/mcp";
 import { createSearchTool } from "@bio-mcp/shared/codemode/search-tool";
 import { createExecuteTool } from "@bio-mcp/shared/codemode/execute-tool";
 import { openPaymentsCatalog } from "../spec/catalog";

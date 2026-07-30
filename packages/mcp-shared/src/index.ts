@@ -1,16 +1,47 @@
 // Unified tool registry
 
+// Provenance / citation (verifiable per-result source attribution)
+export {
+	BUILD_GIT_SHA,
+	type BuildCitationInput,
+	buildHealthPayload,
+	buildHealthResponse,
+	CANONICALIZATION_PROFILE,
+	CITATION_VERSION,
+	type Citation,
+	type CitationMetricCounters,
+	type CitationSignature,
+	type CitationTrustStore,
+	type CitationVerification,
+	canonicalJson,
+	FLEET_CONTRACT_VERSION,
+	HASH_ALGORITHM,
+	hashCanonicalJson,
+	missingCitationMetrics,
+	parseCitation,
+	type QueryScope,
+	type ResultScope,
+	resolveQueryScope,
+	resolveResultScope,
+	type SignatureCheckStatus,
+	type SourceDescriptor,
+	sha256Hex,
+	type VerifyResult,
+	verifyCitation,
+	verifyCitationEnvelope,
+	verifyResultHash,
+} from "@bio-mcp/provenance-core";
 // Agentic validation, replay, and lossless-evidence contracts
 export {
-	classifyExternalAccessFailure,
-	evaluateValidation,
-	requiredTier,
 	type AgenticRunManifest,
 	type AnalysisConsequence,
 	type ContextDimension,
+	classifyExternalAccessFailure,
 	type EvidenceDisposition,
+	evaluateValidation,
 	type HypothesisRecord,
 	type ReplayToolCall,
+	requiredTier,
 	type ValidationDecision,
 	type ValidationEvidence,
 	type ValidationRecord,
@@ -21,12 +52,11 @@ export {
 	buildLosslessReference,
 	isLosslessEvidenceReference,
 	LOSSLESS_STAGE_THRESHOLD_BYTES,
-	MCP_INLINE_LIMIT_BYTES,
-	serializedBytes,
 	type LosslessEvidenceReference,
 	type LosslessStorage,
+	MCP_INLINE_LIMIT_BYTES,
+	serializedBytes,
 } from "./agentic/lossless";
-
 export type {
 	ChartResponseOptions,
 	ChartResponseResult,
@@ -61,7 +91,6 @@ export { buildGraphqlProxySource } from "./codemode/graphql-proxy";
 export { buildGraphqlSchemaSource } from "./codemode/graphql-schema-source";
 export { introspectionToSummary } from "./codemode/graphql-to-typescript";
 // Code Mode infrastructure
-export { CodeModeProxy } from "./codemode/proxy";
 // Code Mode response helpers
 export {
 	type CodeModeResponse,
@@ -120,6 +149,11 @@ export {
 	type PassthroughCitationArgs,
 } from "./provenance/passthrough-citation";
 export {
+	buildCitation,
+	clearCitationSigningConfiguration,
+	configureCitationSigning,
+} from "./provenance/provenance";
+export {
 	buildJwks,
 	CITATION_SIG_ALG,
 	type CitationJwk,
@@ -130,53 +164,28 @@ export {
 	importCitationPrivateKey,
 	importCitationPublicKey,
 	type Jwks,
-	signCitation,
 	type SignatureVerdict,
+	signCitation,
 	verifyCitationSignature,
 } from "./provenance/signing";
-
-// Provenance / citation (verifiable per-result source attribution)
-export {
-	type BuildCitationInput,
-	BUILD_GIT_SHA,
-	buildHealthPayload,
-	buildHealthResponse,
-	CANONICALIZATION_PROFILE,
-	type Citation,
-	type CitationMetricCounters,
-	type CitationTrustStore,
-	type CitationVerification,
-	type CitationSignature,
-	CITATION_VERSION,
-	canonicalJson,
-	FLEET_CONTRACT_VERSION,
-	hashCanonicalJson,
-	HASH_ALGORITHM,
-	missingCitationMetrics,
-	parseCitation,
-	type QueryScope,
-	resolveQueryScope,
-	resolveResultScope,
-	type ResultScope,
-	type SourceDescriptor,
-	sha256Hex,
-	type SignatureCheckStatus,
-	type VerifyResult,
-	verifyCitation,
-	verifyCitationEnvelope,
-	verifyResultHash,
-} from "@bio-mcp/provenance-core";
-export {
-	buildCitation,
-	clearCitationSigningConfiguration,
-	configureCitationSigning,
-} from "./provenance/provenance";
 export { type ToolDefinition, ToolRegistry } from "./registry/registry";
-export { getRequestScope, type MaybeExtra } from "./registry/request-scope";
+export {
+	CHAT_SCOPE_META_KEY,
+	childTraceparent,
+	getRequestCorrelation,
+	getRequestScope,
+	getRequestTraceparent,
+	type MaybeExtra,
+	nestedCallMeta,
+	type RequestCorrelation,
+	TRACEPARENT_META_KEY,
+	validTraceparent,
+} from "./registry/request-scope";
 export type {
 	SqlTaggedTemplate,
 	ToolContext,
 	ToolEntry,
+	ToolRequestContext,
 } from "./registry/types";
 // Staging infrastructure
 export {

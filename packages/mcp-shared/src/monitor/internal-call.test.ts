@@ -3,11 +3,18 @@ import { buildToolCall, callTool, parseToolResult } from "./internal-call";
 
 describe("buildToolCall", () => {
 	it("builds a JSON-RPC tools/call message", () => {
-		expect(buildToolCall("orange_book_execute", { code: "x" }, 7)).toEqual({
+		expect(buildToolCall("orange_book_execute", { code: "x" }, 7)).toMatchObject({
 			jsonrpc: "2.0",
 			id: 7,
 			method: "tools/call",
-			params: { name: "orange_book_execute", arguments: { code: "x" } },
+			params: {
+				_meta: {
+					"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+					"io.modelcontextprotocol/clientCapabilities": {},
+				},
+				name: "orange_book_execute",
+				arguments: { code: "x" },
+			},
 		});
 	});
 });
@@ -63,17 +70,27 @@ describe("parseToolResult", () => {
 });
 
 describe("callTool", () => {
-	it("sends the message to the stub and returns its structuredContent", async () => {
-		const calls: unknown[] = [];
-		const stub = {
-			handleMcpMessage: async (msg: unknown) => {
-				calls.push(msg);
-				return { result: { structuredContent: { ok: true } } };
+	it("sends a modern request over the service binding", async () => {
+		const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+		const service = {
+			fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+				calls.push({ input, init });
+				return Response.json({
+					jsonrpc: "2.0",
+					id: 3,
+					result: { structuredContent: { ok: true } },
+				});
 			},
 		};
-		const out = await callTool(stub, "t", { p: 1 }, 3);
+		const out = await callTool(service, "t", { p: 1 }, 3);
 		expect(out).toEqual({ ok: true });
-		expect(calls[0]).toMatchObject({
+		expect(calls[0].input).toBe("https://mcp.internal/mcp");
+		expect(calls[0].init?.headers).toMatchObject({
+			"mcp-method": "tools/call",
+			"mcp-name": "t",
+			"mcp-protocol-version": "2026-07-28",
+		});
+		expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({
 			method: "tools/call",
 			params: { name: "t", arguments: { p: 1 } },
 		});

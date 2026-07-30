@@ -2,15 +2,15 @@
  * Administrative purge handlers for Durable Objects.
  *
  * Design: Worker-side helper calls RPC methods on the DO stub rather than
- * proxying HTTP into the DO. This avoids any risk of interfering with the
- * McpAgent streaming-HTTP transport, which owns the DO's `fetch()`.
+ * proxying HTTP into the DO. This keeps administrative state operations
+ * separate from the Worker's stateless MCP request handler.
  *
  * Usage from a Worker's default `fetch()`:
  *
  *     import { handleAdminPurge } from "@bio-mcp/shared/tools/admin-purge";
  *     export default {
  *         async fetch(request, env, ctx) {
- *             const adminResp = await handleAdminPurge(request, env, "MCP_OBJECT");
+ *             const adminResp = await handleAdminPurge(request, env, "EXAMPLE_DATA_DO");
  *             if (adminResp) return adminResp;
  *             // ...existing routing...
  *         }

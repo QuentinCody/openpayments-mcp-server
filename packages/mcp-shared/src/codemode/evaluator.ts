@@ -3,10 +3,9 @@
  *
  * Uses Worker Loader to spin up sandboxed V8 isolates that execute
  * agent-provided JavaScript code. The isolate gets a `codemode` Proxy
- * that routes function calls through CodeModeProxy (a WorkerEntrypoint
- * accessed via service binding) back to the agent's callTool() method.
+ * that routes function calls through the Fetcher supplied by the caller.
  *
- * Flow: Isolate → CodeModeProxy (RPC) → DO.callTool() (RPC, reentrancy)
+ * Flow: Isolate → caller-supplied function proxy (RPC)
  *
  * The user's code is embedded directly in the module source (not eval'd),
  * since V8 isolates don't allow eval/new Function by default.

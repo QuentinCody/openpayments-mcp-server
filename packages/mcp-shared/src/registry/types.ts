@@ -10,9 +10,15 @@ export type SqlTaggedTemplate = <
 	...values: (string | number | boolean | null)[]
 ) => T[];
 
+/** Per-call correlation context propagated through nested orchestrator calls. */
+export interface ToolRequestContext {
+	chatId?: string;
+	traceparent?: string;
+}
+
 /**
  * Context passed to every tool handler.
- * Provides access to platform primitives without coupling tools to McpAgent.
+ * Provides access to platform primitives without coupling tools to a transport adapter.
  */
 export interface ToolContext {
 	sql: SqlTaggedTemplate;
@@ -49,6 +55,11 @@ export interface ToolContext {
 	 * per-server staging, unchanged. Flows in from the `_execute` `workspace` arg.
 	 */
 	workspace?: string;
+	/**
+	 * Request-local correlation only. ToolRegistry clones its base context for
+	 * each MCP call, so concurrent chats never share or overwrite these values.
+	 */
+	requestContext?: ToolRequestContext;
 }
 
 /**

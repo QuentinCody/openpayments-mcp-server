@@ -1,7 +1,8 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp/stateless-worker";
 import { z } from "zod";
 import { serializedBytes } from "../agentic/lossless";
 import { canonicalJson, sha256Hex } from "../provenance/provenance";
+import { getRequestCorrelation, type MaybeExtra } from "./request-scope";
 import type { ToolContext, ToolEntry } from "./types";
 
 const MCP_STRUCTURED_LIMIT_BYTES = 100_000;
@@ -29,7 +30,11 @@ async function storeLosslessToolResult(
 		)
 	`;
 	let chunkCount = 0;
-	for (let offset = 0; offset < canonical.length; offset += RESULT_CHUNK_CHARS) {
+	for (
+		let offset = 0;
+		offset < canonical.length;
+		offset += RESULT_CHUNK_CHARS
+	) {
 		const chunk = canonical.slice(offset, offset + RESULT_CHUNK_CHARS);
 		ctx.sql`
 			INSERT INTO __lossless_tool_result_chunks (result_id, chunk_index, chunk_text)
@@ -124,28 +129,41 @@ export class ToolRegistry {
 			if (tool.hidden) continue;
 			const ctx = this.ctx;
 			for (const registeredName of toolNames(tool.name)) {
-				server.tool(registeredName, tool.description, tool.schema, async (input) => {
-					try {
-						const result = await tool.handler(input, ctx);
-						return await toolSuccess(ctx, tool.name, result) as never;
-					} catch (e: unknown) {
-						const error = e instanceof Error ? e.message : String(e);
-						return {
-							isError: true,
-							content: [{ type: "text", text: JSON.stringify({ error }) }],
-							structuredContent: {
-								success: false,
-								error: { code: "TOOL_EXECUTION_ERROR", message: error },
-							},
-						};
-					}
-				});
+				server.tool(
+					registeredName,
+					tool.description,
+					tool.schema,
+					async (input, extra) => {
+						try {
+							const requestContext = getRequestCorrelation(extra as MaybeExtra);
+							const callContext = requestContext
+								? { ...ctx, requestContext }
+								: ctx;
+							const result = await tool.handler(input, callContext);
+							return (await toolSuccess(
+								callContext,
+								tool.name,
+								result,
+							)) as never;
+						} catch (e: unknown) {
+							const error = e instanceof Error ? e.message : String(e);
+							return {
+								isError: true,
+								content: [{ type: "text", text: JSON.stringify({ error }) }],
+								structuredContent: {
+									success: false,
+									error: { code: "TOOL_EXECUTION_ERROR", message: error },
+								},
+							};
+						}
+					},
+				);
 			}
 		}
 	}
 
 	/**
-	 * Handle a tool call from a V8 isolate (via CodeModeProxy → DO RPC).
+	 * Handle a tool call from a V8 isolate through a caller-supplied proxy.
 	 */
 	async handleIsolateCall(
 		functionName: string,

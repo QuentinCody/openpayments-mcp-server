@@ -33,13 +33,7 @@
  * importing `{ defineTool }` from `@bio-mcp/shared`.
  */
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type {
-	CallToolResult,
-	ServerNotification,
-	ServerRequest,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import { MCP_INLINE_LIMIT_BYTES, serializedBytes } from "../agentic/lossless";
 import type {
@@ -48,6 +42,7 @@ import type {
 	SuccessResponse,
 } from "../codemode/response";
 import { buildCitation, type SourceDescriptor } from "../provenance/provenance";
+import type { McpServer } from "../mcp/stateless-worker";
 
 /** A single text content block — the fleet's human/agent-readable summary. */
 export interface ToolContent {
@@ -57,14 +52,10 @@ export interface ToolContent {
 
 /**
  * The context object every tool handler receives as its second argument,
- * identical to what `server.registerTool`'s callback is handed (session id,
- * request metadata, abort signal, …). On Cloudflare McpAgent it additionally
- * carries `env`; read it with a cast (`(extra as { env?: Env }).env`).
+ * identical to the MCP SDK v2 `ServerContext` handed to a registered tool
+ * (request envelope, abort signal, and optional HTTP context).
  */
-export type ToolHandlerExtra = RequestHandlerExtra<
-	ServerRequest,
-	ServerNotification
->;
+export type ToolHandlerExtra = ServerContext;
 
 /**
  * Success branch of a tool's return. REQUIRES `content` + `structuredContent`.

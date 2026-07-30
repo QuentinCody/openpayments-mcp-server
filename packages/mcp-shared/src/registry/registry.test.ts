@@ -17,14 +17,14 @@ const entry = (over: Partial<ToolEntry> & { name: string }): ToolEntry =>
 const makeServer = () => {
 	const registered: Array<{
 		name: string;
-		handler: (input: unknown) => Promise<unknown>;
+		handler: (input: unknown, extra?: unknown) => Promise<unknown>;
 	}> = [];
 	const server = {
 		tool: (
 			name: string,
 			_desc: unknown,
 			_schema: unknown,
-			handler: (input: unknown) => Promise<unknown>,
+			handler: (input: unknown, extra?: unknown) => Promise<unknown>,
 		) => {
 			registered.push({ name, handler });
 		},
@@ -57,6 +57,33 @@ describe("ToolRegistry.registerAll", () => {
 			content: [{ type: "text", text: JSON.stringify({ n: 5 }) }],
 			structuredContent: { success: true, data: { n: 5 } },
 		});
+	});
+
+	it("passes request-local chat and trace context to a handler", async () => {
+		const handler = vi.fn(
+			async (_input, ctx: ToolContext) => ctx.requestContext,
+		);
+		const reg = new ToolRegistry(CTX);
+		reg.add(entry({ name: "nested", handler }));
+		const { server, registered } = makeServer();
+		reg.registerAll(server);
+		const traceparent =
+			"00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+		await registered[0].handler(
+			{},
+			{
+				_meta: {
+					"dev.quentincody.bio/chatId": "chat-nested",
+					traceparent,
+				},
+			},
+		);
+		expect(handler).toHaveBeenCalledWith(
+			{},
+			expect.objectContaining({
+				requestContext: { chatId: "chat-nested", traceparent },
+			}),
+		);
 	});
 
 	it("serializes undefined results as the string 'undefined'", async () => {
@@ -120,7 +147,12 @@ describe("ToolRegistry.registerAll", () => {
 			return [];
 		}) as ToolContext["sql"];
 		const reg = new ToolRegistry({ sql });
-		reg.add(entry({ name: "large", handler: async () => ({ blob: "x".repeat(120_000) }) }));
+		reg.add(
+			entry({
+				name: "large",
+				handler: async () => ({ blob: "x".repeat(120_000) }),
+			}),
+		);
 		const { server, registered } = makeServer();
 		reg.registerAll(server);
 		const result = (await registered[0].handler({})) as {
@@ -129,7 +161,9 @@ describe("ToolRegistry.registerAll", () => {
 		expect(result.structuredContent.data.lossless).toBe(true);
 		expect(result.structuredContent.data.payload_hash).toMatch(/^sha256:/);
 		expect(result.structuredContent.data.complete).toBe(true);
-		expect(calls.some((call) => call.sql.includes("__lossless_tool_result_chunks"))).toBe(true);
+		expect(
+			calls.some((call) => call.sql.includes("__lossless_tool_result_chunks")),
+		).toBe(true);
 	});
 });
 
