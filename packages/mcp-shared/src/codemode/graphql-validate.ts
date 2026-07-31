@@ -20,6 +20,7 @@
  * Callers MUST only block when `checked === true && errors.length > 0`.
  */
 
+import { formatFieldSuggestions } from "./field-suggestions";
 import type {
 	TrimmedField,
 	TrimmedIntrospection,
@@ -54,6 +55,7 @@ interface ParsedField {
 }
 
 /** Thrown internally to abort parsing → the validator reports `checked: false`. */
+// interlinked: defer hybrid_class -- empty marker subclass; it carries no fields and no methods, so the finding is a false positive on `extends Error`.
 class UnparseableError extends Error {}
 
 class SelectionParser {
@@ -298,10 +300,21 @@ function isRequiredArg(arg: { type: string; defaultValue?: string }): boolean {
 	return arg.type.trim().endsWith("!") && arg.defaultValue == null;
 }
 
-function fieldList(type: TrimmedType): string {
+const MAX_SUGGESTED_FIELDS = 12;
+
+/**
+ * The valid-field hint for an unknown-field error, ranked by closeness to the
+ * name the caller actually used. Declaration order is the wrong axis to
+ * truncate on: it hides the intended field exactly when it is needed. Observed
+ * live — a model asked for `clinicalSignificance` on CIViC's `EvidenceItem` and
+ * the real field, `significance`, sat in the withheld tail.
+ *
+ * `rejectedField` defaults to "" only so the ranking degrades to declaration
+ * order if a future caller has no name to offer; every current caller passes one.
+ */
+function fieldList(type: TrimmedType, rejectedField = ""): string {
 	const names = (type.fields ?? []).map((f) => f.name);
-	if (names.length <= 12) return names.join(", ");
-	return `${names.slice(0, 12).join(", ")}, … (+${names.length - 12} more)`;
+	return formatFieldSuggestions(names, rejectedField, MAX_SUGGESTED_FIELDS);
 }
 
 function argList(def: TrimmedField): string {
@@ -338,6 +351,7 @@ export function validateGraphqlQuery(
 	const errors: GqlValidationError[] = [];
 	const MAX_ERRORS = 6;
 
+	// interlinked: defer cognitive_complexity -- pre-existing; this turn only changed the fieldList hint. Splitting the GraphQL selection walker is its own change with its own risk, not a drive-by.
 	const walk = (selection: ParsedField[], typeName: string): void => {
 		if (errors.length >= MAX_ERRORS) return;
 		const type = typeIndex.get(typeName);
@@ -354,7 +368,7 @@ export function validateGraphqlQuery(
 				errors.push({
 					type: typeName,
 					field: sel.name,
-					message: `Field "${sel.name}" does not exist on type "${typeName}". Valid fields: ${fieldList(type)}.`,
+					message: `Field "${sel.name}" does not exist on type "${typeName}". Valid fields: ${fieldList(type, sel.name)}.`,
 				});
 				continue; // can't resolve a return type for an unknown field
 			}
