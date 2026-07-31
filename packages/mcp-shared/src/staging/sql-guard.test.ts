@@ -4,9 +4,53 @@ import {
 	assertReadOnlySql,
 	assertRecursiveHasLimit,
 	clampLimit,
+	hasExplicitOuterLimit,
 	MAX_RESULT_ROWS,
 	stripTrailingLimit,
 } from "./sql-guard";
+
+describe("hasExplicitOuterLimit", () => {
+	it("detects the outer bounds a caller can actually write", () => {
+		expect(hasExplicitOuterLimit("SELECT * FROM t LIMIT 10")).toBe(true);
+		expect(hasExplicitOuterLimit("SELECT * FROM t LIMIT 10 OFFSET 5")).toBe(true);
+		expect(hasExplicitOuterLimit("SELECT * FROM t LIMIT 5, 10")).toBe(true);
+		// Expression operand: not an integer the recognizer can rewrite, but still
+		// unmistakably the caller's own bound.
+		expect(hasExplicitOuterLimit("SELECT * FROM t LIMIT 1+1")).toBe(true);
+	});
+
+	it("does not mistake the word 'limit' for a bound", () => {
+		// Each of these previously read as caller-bounded under includes("limit"),
+		// which suppressed the completeness check and let a clipped page be
+		// reported as the complete result.
+		expect(hasExplicitOuterLimit("SELECT * FROM t WHERE note LIKE '%limit%'")).toBe(
+			false,
+		);
+		expect(hasExplicitOuterLimit("SELECT dose_limit FROM t")).toBe(false);
+		expect(hasExplicitOuterLimit("SELECT * FROM limitations")).toBe(false);
+		expect(hasExplicitOuterLimit("SELECT * FROM t -- no limit")).toBe(false);
+		// A LIMIT scoped to a subquery does not bound the outer result.
+		expect(
+			hasExplicitOuterLimit("SELECT * FROM t WHERE x IN (SELECT y FROM u LIMIT 5)"),
+		).toBe(false);
+	});
+
+	it("agrees with applyDefaultLimit about who bounded the query", () => {
+		// The invariant that keeps the two from drifting: a default bound is
+		// appended exactly when the caller did not set one.
+		for (const sql of [
+			"SELECT * FROM t",
+			"SELECT * FROM t LIMIT 10",
+			"SELECT * FROM t WHERE note LIKE '%limit%'",
+			"SELECT dose_limit FROM t",
+			"SELECT * FROM t WHERE x IN (SELECT y FROM u LIMIT 5)",
+			"SELECT * FROM t LIMIT 1+1",
+		]) {
+			const appended = applyDefaultLimit(sql, 100).endsWith("LIMIT 100");
+			expect(appended).toBe(!hasExplicitOuterLimit(sql));
+		}
+	});
+});
 
 describe("assertReadOnlySql", () => {
 	it("accepts a plain SELECT and returns it trimmed", () => {

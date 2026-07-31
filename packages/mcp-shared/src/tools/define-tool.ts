@@ -36,6 +36,10 @@
 import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import { MCP_INLINE_LIMIT_BYTES, serializedBytes } from "../agentic/lossless";
+import {
+	canonicalPayloadHash,
+	stagedPayloadHash,
+} from "../codemode/citation-meta";
 import type {
 	ErrorResponse,
 	ResponseMeta,
@@ -43,6 +47,24 @@ import type {
 } from "../codemode/response";
 import { buildCitation, type SourceDescriptor } from "../provenance/provenance";
 import type { McpServer } from "../mcp/stateless-worker";
+
+/**
+ * The sha256 of the COMPLETE staged payload, when staging preserved one.
+ *
+ * A staged response's inline `data` is the staging ENVELOPE (a handle plus table
+ * metadata), not the payload it points at. So only this hash may accompany the
+ * `staged:full_result` result scope. When staging preserved no payload hash, the
+ * citation must instead describe the bytes it actually hashed
+ * (`structured_content:data`): a citation that claims the staged scope while
+ * holding the envelope's hash reads as authentic today only because no verifier
+ * materializes staged bytes yet — the moment one does, every such citation
+ * mismatches and a untampered result gets quarantined.
+ */
+export function resolveStagedPayloadHash(
+	meta: ResponseMeta | undefined,
+): string | undefined {
+	return canonicalPayloadHash(stagedPayloadHash(meta?._staging));
+}
 
 /** A single text content block — the fleet's human/agent-readable summary. */
 export interface ToolContent {
@@ -205,6 +227,13 @@ function resolveDataAccessId(
 	meta: ResponseMeta | undefined,
 ): string | undefined {
 	if (meta && typeof meta.data_access_id === "string") return meta.data_access_id;
+	// Staging writes the handle into `_meta._staging` (StagingMetadata); only
+	// some callers also hoist it to the top level. Without this the citation
+	// silently omits the handle a verifier needs to materialize what it cites.
+	const staging = meta?._staging as Record<string, unknown> | undefined;
+	if (staging && typeof staging.data_access_id === "string") {
+		return staging.data_access_id;
+	}
 	if (
 		data &&
 		typeof data === "object" &&
@@ -328,6 +357,13 @@ export function defineTool<Shape extends z.ZodRawShape, Data = unknown>(
 			const data = structured.data;
 			const meta = structured._meta as ResponseMeta | undefined;
 			const dataAccessId = resolveDataAccessId(data, meta);
+			// A `staged:full_result` citation must carry the hash of the STAGED
+			// payload, which is what a verifier materializes — see
+			// resolveStagedPayloadHash. Hashing `data` under that scope is only
+			// self-consistent while `data` happens to be the full payload; once
+			// staging hands back an envelope instead, the citation attests the
+			// envelope while claiming to attest the payload.
+			const stagedHash = resolveStagedPayloadHash(meta);
 			const citation = await buildCitation({
 				source: config.source,
 				server: config.source.id,
@@ -335,9 +371,15 @@ export function defineTool<Shape extends z.ZodRawShape, Data = unknown>(
 				query: args,
 				queryScope: "tool_arguments",
 				result: data,
-				resultScope: dataAccessId
-					? "staged:full_result"
-					: "structured_content:data",
+				// Without a preserved payload hash the scope stays as it was: an
+				// oversized `data` is replaced by a reference below, so claiming
+				// `structured_content:data` there would make a verifier hash the
+				// reference and quarantine an untampered result.
+				resultScope:
+					stagedHash || dataAccessId
+						? "staged:full_result"
+						: "structured_content:data",
+				...(stagedHash ? { resultHash: stagedHash } : {}),
 				retrievedAt: new Date().toISOString(),
 				recordCount: resolveRecordCount(data, meta),
 				dataAccessId,

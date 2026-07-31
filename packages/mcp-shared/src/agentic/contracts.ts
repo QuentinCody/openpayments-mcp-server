@@ -160,8 +160,12 @@ export interface AgenticRunManifest {
 
 /** Access failures remain visible but are not misreported as implementation defects. */
 export function classifyExternalAccessFailure(message: string): boolean {
-	return /\b(401|403|unauthori[sz]ed|forbidden|api[ _-]?key|oauth|credentials?|authentication|access denied|subscription required)\b/i.test(
-		message,
+	// Underscores are word characters, so `\bapi[ _-]?key\b` never matches inside
+	// `UMLS_API_KEY` — the exact spelling these failures arrive in, since they name
+	// an env var. Separators are normalized to spaces first so the boundaries bite.
+	const normalized = message.replace(/_/g, " ");
+	return /\b(401|403|unauthori[sz]ed|forbidden|api ?key|oauth|credentials?|authentication|access denied|subscription required)\b/i.test(
+		normalized,
 	);
 }
 

@@ -219,30 +219,64 @@ function cappedLimitClause(match: RegExpExecArray, ceiling: number): string {
  *   it DOWN to the ceiling.
  * - Trailing LIMIT within [0, ceiling] -> left exactly as the caller wrote it.
  */
-export function applyDefaultLimit(
-	sql: string,
-	limit: number,
-	ceiling = MAX_RESULT_ROWS,
-): string {
+/**
+ * The one normalized view every outer-`LIMIT` decision is made on.
+ *
+ * Shared so "did the caller bound this query?" and "should a bound be appended?"
+ * can never disagree: they are the same question, and answering it two different
+ * ways is how a bounded-looking result gets reported as a complete one.
+ */
+function outerLimit(sql: string): {
+	trimmed: string;
+	match: RegExpExecArray | null;
+	explicit: boolean;
+} {
 	// String-aware sanitize: a trailing CODE line comment must not carry a
 	// phantom `LIMIT` (`SELECT * FROM t -- LIMIT 5` is unbounded — SQLite ignores
 	// the comment — yet the bare regex saw the commented LIMIT as the bound and
 	// appended nothing, rs1 #9). Strip code comments and trailing semicolons.
 	const trimmed = stripTrailingSemicolons(stripLineComments(sql).trimEnd()).trimEnd();
-	if (isReadOnlyDescribe(trimmed)) return trimmed;
-
 	// Detect the trailing LIMIT on the blanked projection (so a `limit` inside a
-	// trailing string literal is not matched); rewrite the ORIGINAL at the same
-	// index, since blanking preserves length.
+	// trailing string literal is not matched); the ORIGINAL is rewritten at the
+	// same index, since blanking preserves length.
 	const blanked = blankQuotedLiterals(trimmed);
 	const match = TRAILING_LIMIT_RE.exec(blanked);
+	// A trailing LIMIT whose operand is an EXPRESSION (LIMIT 1+1, a subquery)
+	// will not match the integer recognizer, but it IS still a caller bound. The
+	// pattern means an OUTER trailing LIMIT (no closing paren before end), not
+	// one inside a subquery.
+	const explicit = match !== null || /\bLIMIT\b[^)]*$/i.test(blanked);
+	return { trimmed, match, explicit };
+}
+
+/**
+ * Did the caller write their own outer `LIMIT`?
+ *
+ * True means the caller asked for a deliberately bounded view, so returning
+ * fewer rows than matched is what they requested. False means any bound is ours,
+ * and a full page is indistinguishable from a clipped one — the caller must be
+ * told, never handed a partial result labelled complete.
+ *
+ * A bare `sql.includes("limit")` answers a DIFFERENT question and gets this
+ * wrong in the dangerous direction: `WHERE note LIKE '%limit%'`, a column named
+ * `dose_limit`, or `-- no limit` all read as "caller-bounded".
+ */
+export function hasExplicitOuterLimit(sql: string): boolean {
+	return outerLimit(sql).explicit;
+}
+
+export function applyDefaultLimit(
+	sql: string,
+	limit: number,
+	ceiling = MAX_RESULT_ROWS,
+): string {
+	const { trimmed, match, explicit } = outerLimit(sql);
+	if (isReadOnlyDescribe(trimmed)) return trimmed;
 	if (!match) {
-		// A trailing LIMIT whose operand is an EXPRESSION (LIMIT 1+1, a subquery)
-		// will not match the integer recognizer. Appending a second LIMIT would be
-		// invalid SQL (rs2 #5), so leave the caller's clause — the DO row/byte/scan
-		// caps still bound the actual result. The pattern below means an OUTER
-		// trailing LIMIT (no closing paren before end), not one inside a subquery.
-		if (/\bLIMIT\b[^)]*$/i.test(blanked)) return trimmed;
+		// Appending a second LIMIT after an expression operand would be invalid
+		// SQL (rs2 #5), so leave the caller's clause — the DO row/byte/scan caps
+		// still bound the actual result.
+		if (explicit) return trimmed;
 		return `${trimmed} LIMIT ${clampLimit(limit, ceiling)}`;
 	}
 

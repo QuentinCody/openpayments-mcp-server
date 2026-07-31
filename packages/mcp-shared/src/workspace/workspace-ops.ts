@@ -23,6 +23,7 @@ import {
 	applyDefaultLimit,
 	assertReadOnlySql,
 	clampLimit,
+	hasExplicitOuterLimit,
 	isReadOnlyDescribe,
 	MAX_RESULT_BYTES,
 } from "../staging/sql-guard";
@@ -321,7 +322,12 @@ export function queryWorkspace(
 	const sanitized = assertReadOnlySql(params.sql);
 	// doc 03 §1 — a caller limit can only ever be LOWERED to the hard ceiling.
 	const limit = clampLimit(params.limit ?? 100);
-	const callerSetLimit = sanitized.toLowerCase().includes("limit");
+	// Whether the CALLER bounded the query, which decides if a short result is a
+	// deliberate view or a clipped one. This must use the same trailing-outer-LIMIT
+	// analysis `applyDefaultLimit` uses: a bare `includes("limit")` also fires on
+	// `WHERE note LIKE '%limit%'` and on columns like `dose_limit`, which skipped
+	// the bound check below and returned a clipped page as `complete_view: true`.
+	const callerSetLimit = hasExplicitOuterLimit(sanitized);
 	// T3.4 — the `PRAGMA table_info(<table>)` describe takes no LIMIT (appending
 	// one is a SQLite syntax error), so it skips applyDefaultLimit. Mirrors
 	// `queryDataFromDo` in ../staging/utils.ts; `assertReadOnlySql` lets the

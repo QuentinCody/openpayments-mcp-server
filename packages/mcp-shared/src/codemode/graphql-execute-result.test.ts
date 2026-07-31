@@ -109,6 +109,34 @@ describe("handleExecutorResult", () => {
 		expect(sc.data.schema).toBeUndefined();
 	});
 
+	// Same defect as the REST path: the recovery fired for every error and
+	// dropped the message, so a crashed program returned success:true carrying
+	// the last staged GraphQL response. Affects every *_graphql_query /
+	// GraphQL _execute tool in the fleet.
+	it("never reports a crashed program as a completed one", async () => {
+		const r = await handleExecutorResult({
+			error: "DELIBERATE_CRASH_MARKER",
+			__stagedResults: [
+				{ __staged: true, data_access_id: "rcsb_pdb_3", total_rows: 5 },
+			],
+		});
+		const sc = r.structuredContent as Sc;
+
+		expect(sc.disposition).toBe("partial");
+		expect(sc.program_error.code).toBe("PROGRAM_DID_NOT_COMPLETE");
+		expect(sc.program_error.message).toBe("DELIBERATE_CRASH_MARKER");
+		expect(r.content[0].text).toContain("PROGRAM DID NOT COMPLETE");
+		// The staged evidence still comes back — that part was always right.
+		expect(sc._meta.data_access_id).toBe("rcsb_pdb_3");
+	});
+
+	it("leaves a completed program unmarked", async () => {
+		const r = await handleExecutorResult({ result: { gene: "EGFR" } });
+		const sc = r.structuredContent as Sc;
+		expect(sc.disposition).toBeUndefined();
+		expect(sc.program_error).toBeUndefined();
+	});
+
 	it("includes console output on a successful result", async () => {
 		const r = await handleExecutorResult({
 			result: { ok: 1 },

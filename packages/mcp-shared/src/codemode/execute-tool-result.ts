@@ -3,6 +3,7 @@ import {
 	type CodeModeCitationContext,
 	stagedPayloadHash,
 } from "./citation-meta";
+import { markDidNotComplete } from "./program-error";
 import {
 	createCodeModeError,
 	createCodeModeResponse,
@@ -74,9 +75,19 @@ async function errorResult(
 	context: CodeModeCitationContext | undefined,
 	retrievedAt: string,
 ) {
+	// Recovery exists for one narrow case: `api.get` auto-staged, so the program
+	// received an envelope where it expected rows and threw on the first array
+	// access. Dropping the staged evidence there would discard a completed fetch.
+	// It fires for ANY error though, so the failure has to travel with it.
 	const lastStaged = result.__stagedResults?.at(-1);
 	if (lastStaged) {
-		return stagedResult(lastStaged, result.logs, context, retrievedAt);
+		const recovered = await stagedResult(
+			lastStaged,
+			result.logs,
+			context,
+			retrievedAt,
+		);
+		return markDidNotComplete(recovered, result.error, lastStaged.data_access_id);
 	}
 	const logOutput = result.logs?.length
 		? `\n\nConsole output:\n${result.logs.join("\n")}`

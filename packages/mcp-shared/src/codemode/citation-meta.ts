@@ -11,7 +11,13 @@ export interface CodeModeCitationContext {
 	query: unknown;
 }
 
-function canonicalPayloadHash(value: unknown): string | undefined {
+/**
+ * Normalize a staged payload hash into the bare lower-case sha256 hex a
+ * {@link Citation}'s `result_hash` carries. Staging metadata writes it as
+ * `sha256:<hex>`; anything else yields undefined, so a citation can never claim
+ * the `staged:full_result` scope while holding a hash of some other bytes.
+ */
+export function canonicalPayloadHash(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const digest = value.startsWith("sha256:") ? value.slice(7) : value;
 	return /^[0-9a-f]{64}$/.test(digest) ? digest : undefined;

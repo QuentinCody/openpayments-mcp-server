@@ -30,6 +30,15 @@ describe("agentic validation contracts", () => {
 		expect(classifyExternalAccessFailure("HTTP 401 API key required")).toBe(true);
 		expect(classifyExternalAccessFailure("unexpected response schema")).toBe(false);
 	});
+
+	// These arrive naming an env var, and `_` is a word character — so the
+	// boundary in `\bapi[ _-]?key\b` never bit inside `UMLS_API_KEY`, and the
+	// fleet's one live credential gap classified as an implementation defect.
+	it("recognizes a credential failure spelled as an env var name", () => {
+		expect(classifyExternalAccessFailure("UMLS_API_KEY not configured")).toBe(true);
+		expect(classifyExternalAccessFailure("missing OPENAI_API_KEY")).toBe(true);
+		expect(classifyExternalAccessFailure("monkey business")).toBe(false);
+	});
 });
 
 describe("lossless transport contract", () => {

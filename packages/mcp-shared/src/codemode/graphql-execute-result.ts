@@ -10,6 +10,7 @@ import {
 	type CodeModeCitationContext,
 	stagedPayloadHash,
 } from "./citation-meta";
+import { markDidNotComplete } from "./program-error";
 import {
 	createCodeModeError,
 	createCodeModeResponse,
@@ -53,39 +54,49 @@ function slimStaged(obj: Record<string, unknown>): {
 	};
 }
 
-/** The isolate reported an error. If it was a staged-array access, recover the
- *  staging metadata; otherwise return a plain code-mode error. */
+/** Rebuild the staged response the isolate had produced before it threw. */
+async function recoverStaged(
+	staged: Record<string, unknown>,
+	result: ExecutorResult,
+	prov: CitationCtx | undefined,
+	retrievedAt: string,
+) {
+	const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } =
+		slimStaged(staged);
+	const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
+	const cite = await buildCodeModeCitationMeta(
+		prov,
+		slim,
+		totalRows as number | undefined,
+		dataAccessId,
+		retrievedAt,
+		payloadHash,
+	);
+	const response = createCodeModeResponse(slim, {
+		meta: {
+			staged: true,
+			data_access_id: dataAccessId,
+			tables_created: tablesCreated,
+			total_rows: totalRows,
+			...(payloadHash ? { payload_hash: payloadHash } : {}),
+			...cite,
+			...(logOutput ? { console_output: logOutput } : {}),
+			executed_at: retrievedAt,
+		},
+	});
+	return markDidNotComplete(response, result.error, dataAccessId);
+}
+
+/** The isolate reported an error. Recover the staged evidence when there is any
+ *  — discarding a fetch that completed would be worse — but never present a
+ *  crash as a clean run. See ./program-error for the full rationale. */
 async function errorResult(
 	result: ExecutorResult,
 	prov: CitationCtx | undefined,
 	retrievedAt: string,
 ) {
-	if (result.__stagedResults?.length) {
-		const staged = result.__stagedResults[result.__stagedResults.length - 1];
-		const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } =
-			slimStaged(staged);
-		const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
-		const cite = await buildCodeModeCitationMeta(
-			prov,
-			slim,
-			totalRows as number | undefined,
-			dataAccessId,
-			retrievedAt,
-			payloadHash,
-		);
-		return createCodeModeResponse(slim, {
-			meta: {
-				staged: true,
-				data_access_id: dataAccessId,
-				tables_created: tablesCreated,
-				total_rows: totalRows,
-				...(payloadHash ? { payload_hash: payloadHash } : {}),
-				...cite,
-				...(logOutput ? { console_output: logOutput } : {}),
-				executed_at: retrievedAt,
-			},
-		});
-	}
+	const staged = result.__stagedResults?.at(-1);
+	if (staged) return recoverStaged(staged, result, prov, retrievedAt);
 
 	const logOutput = result.logs?.length
 		? `\n\nConsole output:\n${result.logs.join("\n")}`

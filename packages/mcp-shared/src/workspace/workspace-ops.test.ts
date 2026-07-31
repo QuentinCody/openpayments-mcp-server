@@ -245,6 +245,34 @@ describe("queryWorkspace — the cross-server JOIN surface", () => {
 		).toThrow(/LOSSLESS_QUERY_BOUND_REQUIRED.*No partial rows were returned/);
 	});
 
+	// The word "limit" appearing anywhere in the SQL used to read as "the caller
+	// bounded this", which skipped the bound check entirely — so a clipped page
+	// came back stamped `complete_view: true`. That is the exact failure the
+	// lossless contract exists to prevent, dressed as a completeness guarantee.
+	it("does not treat the word 'limit' in a predicate as a caller bound", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+		expect(() =>
+			queryWorkspace(sql, {
+				sql: "SELECT symbol FROM chembl__targets WHERE symbol NOT LIKE '%limit%'",
+				limit: 1,
+			}),
+		).toThrow(/LOSSLESS_QUERY_BOUND_REQUIRED/);
+	});
+
+	it("still honours a real caller LIMIT as an intentional bounded view", () => {
+		const sql = makeSql();
+		stageDataset(sql, chembl);
+
+		const result = queryWorkspace(sql, {
+			sql: "SELECT symbol FROM chembl__targets LIMIT 1",
+			limit: 1,
+		});
+
+		expect(result.row_count).toBe(1);
+		expect(result.complete_view).toBe(true);
+	});
+
 	// `assertReadOnlySql` deliberately ALLOWS `PRAGMA table_info(<t>)` (T3.4), but
 	// applyDefaultLimit then appended `LIMIT 100` to it — and PRAGMA takes no
 	// LIMIT, so SQLite threw "near LIMIT: syntax error". The one describe the

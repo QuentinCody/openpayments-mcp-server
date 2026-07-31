@@ -257,6 +257,67 @@ describe("defineTool", () => {
 		expect(JSON.stringify(res.structuredContent).length).toBeLessThan(100_000);
 	});
 
+	it("cites the preserved payload hash, not the inline envelope, when staged", async () => {
+		const { server, calls } = fakeServer();
+		// What staging really hands back once it has preserved the payload: a
+		// SMALL envelope in `data` plus the complete payload's hash in `_staging`.
+		const payloadHash = "a".repeat(64);
+		defineTool(server, {
+			name: "demo_staged_envelope",
+			description: "d",
+			inputSchema: {},
+			source: { id: "demo", name: "Demo Source" },
+			handler: () =>
+				toolOk(
+					{ data_access_id: "demo_3", tables: ["demo_3__rows"], row_count: 20000 },
+					{
+						meta: {
+							_staging: {
+								data_access_id: "demo_3",
+								payload_hash: `sha256:${payloadHash}`,
+								query_tool: "demo_query_data",
+								schema_tool: "demo_get_schema",
+							},
+						},
+					},
+				),
+		});
+		const res = await calls[0].cb({}, {});
+		const sc = res.structuredContent as {
+			_meta: {
+				citation: {
+					result_scope: string;
+					result_hash: string;
+					data_access_id?: string;
+				};
+			};
+		};
+		expect(sc._meta.citation.result_scope).toBe("staged:full_result");
+		// The load-bearing assertion: the cited hash addresses the STAGED payload.
+		// Before the fix this was sha256 of the envelope, so materializing the
+		// staged bytes would have mismatched and quarantined an untampered result.
+		expect(sc._meta.citation.result_hash).toBe(payloadHash);
+		// ...and the citation names the handle to materialize, which lives only
+		// under `_meta._staging` here.
+		expect(sc._meta.citation.data_access_id).toBe("demo_3");
+	});
+
+	it("falls back to the envelope-scoped citation when staging preserved no hash", async () => {
+		const { server, calls } = fakeServer();
+		defineTool(server, {
+			name: "demo_unstaged_hash",
+			description: "d",
+			inputSchema: {},
+			source: { id: "demo", name: "Demo Source" },
+			handler: () => toolOk({ n: 1 }),
+		});
+		const res = await calls[0].cb({}, {});
+		const sc = res.structuredContent as {
+			_meta: { citation: { result_scope: string } };
+		};
+		expect(sc._meta.citation.result_scope).toBe("structured_content:data");
+	});
+
 	it("fails loudly when staging metadata itself exceeds the transport limit", async () => {
 		const { server, calls } = fakeServer();
 		defineTool(server, {
