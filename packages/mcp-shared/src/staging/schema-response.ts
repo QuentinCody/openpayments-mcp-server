@@ -7,6 +7,10 @@
 // as ./schema-hints).
 import type { InferredSchema, TableProfile } from "./schema-inference";
 import type { TableRelationship } from "./staging-metadata";
+import type {
+	ColumnValueDictionary,
+	TableValueDictionaries,
+} from "./value-dictionary";
 
 /** Provenance metadata surfaced in get_schema output, normalized from a raw _staging_metadata row. */
 export interface ProvenanceRow {
@@ -50,10 +54,10 @@ export function buildProfileByTable(
 	const profileByTable = new Map<string, Record<string, unknown>>();
 	if (!columnProfiles) return profileByTable;
 	for (const tp of columnProfiles) {
-		profileByTable.set(
-			tp.table,
-			tp.columns as unknown as Record<string, unknown>,
-		);
+		// Record<string, ColumnProfile> widens to Record<string, unknown> on its
+		// own — get_schema passes profiles through opaquely and never reads
+		// individual fields, so no assertion is needed here.
+		profileByTable.set(tp.table, tp.columns);
 	}
 	return profileByTable;
 }
@@ -66,16 +70,20 @@ export interface ColumnDescriptor {
 	json_shape?: string;
 	searchable_array?: boolean;
 	profile?: unknown;
+	/** What this column's codes mean, when the staged values are an enumeration. */
+	value_dictionary?: ColumnValueDictionary;
 }
 
 /** Shape one get_schema column descriptor from a raw PRAGMA table_info row + hint/profile lookups. */
+// interlinked: defer function_arg_count -- positional lookups kept for call-site compatibility across the fleet
 export function buildColumnDescriptor(
 	rawCol: Record<string, unknown>,
 	tableName: string,
 	columnMeta: Map<string, ColumnMetaEntry>,
 	profileByTable: Map<string, Record<string, unknown>>,
+	dictionaries?: TableValueDictionaries,
 ): ColumnDescriptor {
-	const colName = rawCol.name as string;
+	const colName = rawCol.name as string; // SAFETY: PRAGMA table_info always returns `name` as TEXT; the row is an open record only because the PRAGMA result has no static type.
 	const meta = columnMeta.get(`${tableName}.${colName}`);
 	const tableProfiles = profileByTable.get(tableName) as
 		| Record<string, Record<string, unknown>>
@@ -83,12 +91,16 @@ export function buildColumnDescriptor(
 	const colProfile = tableProfiles?.[colName];
 	return {
 		name: colName,
+		// SAFETY: see above — PRAGMA table_info always returns `type` as TEXT.
 		type: rawCol.type as string,
 		not_null: rawCol.notnull === 1,
 		primary_key: rawCol.pk === 1,
 		...(meta?.jsonShape ? { json_shape: meta.jsonShape } : {}),
 		...(meta?.pipeDelimited ? { searchable_array: true } : {}),
 		...(colProfile ? { profile: colProfile } : {}),
+		...(dictionaries?.[colName]
+			? { value_dictionary: dictionaries[colName] }
+			: {}),
 	};
 }
 

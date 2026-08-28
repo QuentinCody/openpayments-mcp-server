@@ -207,3 +207,72 @@ describe("RestStagingDO /process — payload-store fallback", () => {
 		expect(body.table_row_counts).toEqual({ payloads: body.total_rows });
 	});
 });
+
+/**
+ * Regression: the lossless fallback tables are named in every staging envelope's
+ * `tables_created`, but only inference-derived tables were allowlisted — so the
+ * documented recovery path ("query `payloads` with the data_access_id") was
+ * rejected as "unknown table 'payloads'". The validator must accept any table
+ * that physically exists in the DO.
+ */
+describe("RestStagingDO allowlists physically-present tables", () => {
+	/** A DO whose inferred schema knows only `records`, but which also holds `payloads`. */
+	function makeDoWithSchema(): { instance: RestStagingDO; executed: string[] } {
+		const executed: string[] = [];
+		const schema = JSON.stringify({
+			tables: [{ name: "records", columns: [{ name: "id" }], indexes: [] }],
+		});
+		const sql: SqlDouble = {
+			exec(query: string) {
+				executed.push(query);
+				const rows = /_inferred_schema/.test(query)
+					? [{ schema_json: schema }]
+					: /sqlite_master/.test(query)
+						? [{ name: "records" }, { name: "payloads" }]
+						: /COUNT\(\*\)/.test(query)
+							? [{ c: 1 }]
+							: [{ root_json: "{}" }];
+				let i = 0;
+				return {
+					toArray: () => rows,
+					one: () => rows[0],
+					next: () =>
+						i < rows.length
+							? { done: false as const, value: rows[i++] }
+							: { done: true as const },
+					get rowsRead() {
+						return i;
+					},
+					[Symbol.iterator]: () => rows[Symbol.iterator](),
+				};
+			},
+		};
+		// SAFETY: as in makeDo above — a real prototype chain with the two fields
+		// the fetch routes read assigned manually.
+		const instance = Object.create(RestStagingDO.prototype) as RestStagingDO;
+		// SAFETY: same object viewed through the fields the handlers use.
+		const internals = instance as unknown as DoInternals;
+		internals.ctx = { storage: { sql } };
+		internals.chunking = new ChunkingEngine();
+		return { instance, executed };
+	}
+
+	it("does not reject a SELECT against the lossless `payloads` table", async () => {
+		const { instance } = makeDoWithSchema();
+		const res = await instance.fetch(
+			post("/query", { sql: "SELECT root_json FROM payloads LIMIT 1" }),
+		);
+		// The bug returned 400 with "unknown table 'payloads'".
+		const body = (await res.json()) as { error?: string };
+		expect(body.error ?? "").not.toMatch(/unknown table/i);
+		expect(res.status).not.toBe(400);
+	});
+
+	it("still rejects a table that exists nowhere", async () => {
+		const { instance } = makeDoWithSchema();
+		const res = await instance.fetch(
+			post("/query", { sql: "SELECT * FROM not_a_table" }),
+		);
+		expect(res.status).toBe(400);
+	});
+});

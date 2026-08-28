@@ -10,6 +10,7 @@ import type {
 	InferredSchema,
 	MaterializationWarning,
 } from "./schema-inference";
+import type { ValueDictionaries } from "./value-dictionary";
 
 // ---------------------------------------------------------------------------
 // Table schema (used by both Tier 1 and Tier 2, matches per-server `TableSchema`)
@@ -81,6 +82,12 @@ export interface StagingResult {
 	inputRows?: number;
 	failedRows?: number;
 	materializationWarnings?: MaterializationWarning[];
+	/**
+	 * What coded column values mean, keyed by table then column. Derived from the
+	 * staged rows themselves (see ./value-dictionary); absent when no column
+	 * carried a recoverable code→label pairing.
+	 */
+	valueDictionaries?: ValueDictionaries;
 }
 
 // ---------------------------------------------------------------------------

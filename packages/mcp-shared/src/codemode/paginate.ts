@@ -121,8 +121,47 @@ export function extractItems(
 		const idlist = getPath(root, "esearchresult.idlist");
 		if (Array.isArray(idlist))
 			return { items: idlist, field: "esearchresult.idlist" };
+		// NCBI esummary: { header, result: { uids: [...], "<uid>": {...} } }.
+		// `result` is an OBJECT keyed by uid, so it never matches ITEM_KEYS —
+		// without this branch a populated esummary page extracts zero records.
+		const uids = getPath(root, "result.uids");
+		if (Array.isArray(uids)) return { items: uids, field: "result.uids" };
 	}
 	return { items: [] };
+}
+
+/** Rough size of a response body, for reporting only. */
+function approximateByteLength(resp: unknown): number {
+	if (typeof resp === "string") return resp.length;
+	try {
+		return JSON.stringify(resp)?.length ?? 0;
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * Marker for a first page that carried content but yielded no records, or
+ * `undefined` when the page parsed cleanly (including a genuine empty).
+ */
+export function detectUnparsedFirstPage(
+	pages: number,
+	pageItemCount: number,
+	resp: unknown,
+	field: string | undefined,
+): { bytes: number } | undefined {
+	if (pages !== 1 || pageItemCount !== 0) return undefined;
+	if (!isUnparsedBody(resp, field)) return undefined;
+	return { bytes: approximateByteLength(resp) };
+}
+
+export function isUnparsedBody(resp: unknown, field: string | undefined): boolean {
+	if (field !== undefined) return false; // we located a records field
+	if (Array.isArray(resp)) return false; // a parsed, genuinely empty list
+	if (resp === null || resp === undefined) return false;
+	if (typeof resp === "string") return resp.trim().length > 0;
+	if (typeof resp === "object") return Object.keys(resp).length > 0;
+	return true;
 }
 
 /** Extract a next-page cursor/token from a response, if present. */
@@ -216,10 +255,27 @@ interface VerdictInput {
 	returned: number;
 	max: number;
 	maxPages: number;
+	/** Page 1 had content but no records could be extracted from it. */
+	unparsedFirstPage?: { bytes: number };
 }
 
 /** Turn the loop's exit conditions into a {@link Completeness} verdict. */
 function buildCompleteness(v: VerdictInput): Completeness {
+	// Checked BEFORE the capped/exhausted branches: a body we could not parse
+	// yields zero items and would otherwise satisfy the short-page rule and be
+	// certified complete, turning "unreadable" into a false certified empty.
+	if (v.unparsedFirstPage && v.returned === 0) {
+		return {
+			complete: false,
+			returned: 0,
+			truncation: {
+				reason: "unparsed_page",
+				detail: `Page 1 returned ${v.unparsedFirstPage.bytes} byte(s) of content but no records could be extracted; this is NOT a certified empty result.`,
+				remedy:
+					"Pass itemsField to name the records array, or use api.get() and parse the body yourself — this endpoint does not return a recognised JSON envelope.",
+			},
+		};
+	}
 	if (v.cappedByItems || v.cappedByPages) {
 		return {
 			complete: false,
@@ -280,6 +336,7 @@ export async function paginateAll(
 	let cappedByItems = false;
 	let cappedByPages = false;
 	let exhausted = false;
+	let unparsedFirstPage: { bytes: number } | undefined;
 
 	while (true) {
 		if (pages >= cfg.maxPages) {
@@ -298,6 +355,12 @@ export async function paginateAll(
 		const ext = extractItems(resp, itemsField);
 		if (!itemsField && ext.field) itemsField = ext.field; // lock onto the field after page 1
 		const pageItems = ext.items;
+		unparsedFirstPage ??= detectUnparsedFirstPage(
+			pages,
+			pageItems.length,
+			resp,
+			ext.field,
+		);
 
 		for (const it of pageItems) {
 			if (items.length >= cfg.max) {
@@ -339,6 +402,7 @@ export async function paginateAll(
 			returned: items.length,
 			max: cfg.max,
 			maxPages: cfg.maxPages,
+			unparsedFirstPage,
 		}),
 	};
 }

@@ -91,7 +91,10 @@ export function citationSigningInput(
 		issuer_git_sha: citation.issuer_git_sha,
 		fleet_contract_version: citation.fleet_contract_version,
 		record_count: citation.record_count ?? null,
-		negative_result: citation.negative_result ?? false,
+		// null, NOT false. `false` is a positive assertion that the result is not
+		// a negative; when the record count could not be determined we do not know
+		// that, and signing the guess laundered "unknown" into "verified present".
+		negative_result: citation.negative_result ?? null,
 		verification: citation.verification ?? null,
 	});
 }

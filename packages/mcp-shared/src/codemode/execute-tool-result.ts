@@ -1,3 +1,4 @@
+import { inferUpstreamTotal } from "../completeness";
 import {
 	buildCodeModeCitationMeta,
 	type CodeModeCitationContext,
@@ -19,7 +20,28 @@ export interface RestExecutorResult {
 
 function countRecords(data: unknown, totalRows: unknown): number | undefined {
 	if (typeof totalRows === "number") return totalRows;
-	return Array.isArray(data) ? data.length : undefined;
+	if (Array.isArray(data)) return data.length;
+	// Envelope shapes ({total, hits:[]}, {gene, curations:[]}) previously returned
+	// undefined here, so an empty result could never be classified as a negative
+	// and was signed as negative_result:false. Read the upstream's own total when
+	// it exposes one, else fall back to the single records array in the envelope.
+	const upstream = inferUpstreamTotal(data);
+	if (upstream !== undefined) return upstream;
+	return countSoleRecordsArray(data);
+}
+
+/**
+ * Length of the one array in a shallow envelope, when there is exactly one.
+ *
+ * Deliberately conservative: with zero or several candidate arrays the shape is
+ * ambiguous, and guessing wrong would mislabel a populated result as empty.
+ */
+function countSoleRecordsArray(data: unknown): number | undefined {
+	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+	const arrays = Object.values(data as Record<string, unknown>).filter(
+		Array.isArray,
+	);
+	return arrays.length === 1 ? (arrays[0] as unknown[]).length : undefined;
 }
 
 function slimStaged(staged: Record<string, unknown>) {

@@ -136,4 +136,29 @@ describe("stageData — Tier-1 metadata parity (#8)", () => {
 		expect(result.inferredSchema).toBeUndefined();
 		expect(result.tableRowCounts).toBeUndefined();
 	});
+
+	it("recovers what coded column values mean from paired label columns", () => {
+		const result = stageData(
+			{
+				items: [
+					{ id: 1, treatment_group: 1, treatment_group_label: "albuterol" },
+					{ id: 2, treatment_group: 2, treatment_group_label: "azithromycin" },
+				],
+			},
+			noopSql,
+		);
+		const table = result.tablesCreated[0];
+		expect(result.valueDictionaries?.[table]?.treatment_group.values).toEqual({
+			"1": "albuterol",
+			"2": "azithromycin",
+		});
+	});
+
+	it("omits value dictionaries when no column carries a code→label pairing", () => {
+		const result = stageData(
+			{ items: [{ a: 1, b: "x" }, { a: 2, b: "y" }] },
+			noopSql,
+		);
+		expect(result.valueDictionaries).toBeUndefined();
+	});
 });

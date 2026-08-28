@@ -177,3 +177,143 @@ describe("restFetch", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });
+
+/**
+ * Retry-budget contract.
+ *
+ * Until 2026-08-28 `restFetch` built ONE `AbortSignal.timeout(timeout)` outside
+ * the attempt loop and reused it for every retry. On the one failure mode
+ * retries exist for — an upstream that accepts the connection and then stalls —
+ * attempt 1 burned the whole signal and attempts 2..n reused an already-aborted
+ * one, so the configured retry budget was dead code. The fleet symptom was
+ * `unichem` reporting "Execution timed out" with wallTime 30021ms, cpuTime 13ms
+ * and exactly one upstream subrequest.
+ *
+ * These use REAL timers with millisecond budgets on purpose: `AbortSignal.timeout`
+ * runs on an internal timer that `vi.useFakeTimers()` does not drive, so a faked
+ * clock would make the abort never fire and the assertions vacuous.
+ */
+describe("restFetch retry budget", () => {
+	let fetchMock: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		resetRateLimitState();
+		fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	const res = (status: number, body = "{}") => new Response(body, { status });
+
+	/** A request that never answers — it settles only when its signal aborts. */
+	const stall = (_url: string, init: RequestInit) =>
+		new Promise<Response>((_resolve, reject) => {
+			init.signal?.addEventListener("abort", () =>
+				reject(new Error("stalled")),
+			);
+		});
+
+	it("gives every attempt its own un-aborted AbortSignal", async () => {
+		const signals: AbortSignal[] = [];
+		fetchMock.mockImplementation((url: string, init: RequestInit) => {
+			signals.push(init.signal as AbortSignal);
+			return signals.length === 1
+				? stall(url, init)
+				: Promise.resolve(res(200, '{"ok":1}'));
+		});
+
+		const response = await restFetch("https://api.test", "/x", undefined, {
+			timeout: 80,
+			deadlineMs: 4000,
+			retries: 2,
+		});
+
+		expect(response.status).toBe(200);
+		expect(signals).toHaveLength(2);
+		expect(signals[0]).not.toBe(signals[1]);
+		expect(signals[0].aborted).toBe(true);
+		expect(signals[1].aborted).toBe(false);
+	});
+
+	it("defaults the deadline to `timeout`, so a persistent stall cannot outlast one attempt", async () => {
+		fetchMock.mockImplementation(stall);
+		const startedAt = Date.now();
+
+		await expect(
+			restFetch("https://api.test", "/x", undefined, {
+				timeout: 120,
+				retries: 3,
+			}),
+		).rejects.toThrow("stalled");
+
+		// Without the default budget, the signal fix alone would turn one 120ms
+		// stall into 4 attempts plus backoff — strictly worse than the bug.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(Date.now() - startedAt).toBeLessThan(1000);
+	});
+
+	it("stops retrying once the wall-clock deadline is spent", async () => {
+		fetchMock.mockImplementation(stall);
+
+		await expect(
+			restFetch("https://api.test", "/x", undefined, {
+				timeout: 100,
+				deadlineMs: 350,
+				retries: 5,
+			}),
+		).rejects.toThrow("stalled");
+
+		expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+	});
+
+	it("clamps an attempt's timeout to the budget that is left", async () => {
+		const timeouts: number[] = [];
+		fetchMock.mockImplementation((url: string, init: RequestInit) => {
+			timeouts.push(Date.now());
+			return stall(url, init);
+		});
+		const startedAt = Date.now();
+
+		await expect(
+			restFetch("https://api.test", "/x", undefined, {
+				timeout: 5000,
+				deadlineMs: 200,
+				retries: 2,
+			}),
+		).rejects.toThrow("stalled");
+
+		// The attempt would run 5s on its own timeout; the 200ms deadline wins.
+		expect(Date.now() - startedAt).toBeLessThan(2000);
+	});
+
+	it("still retries a fast retryable status while the deadline allows", async () => {
+		fetchMock
+			.mockResolvedValueOnce(res(503))
+			.mockResolvedValueOnce(res(200, '{"ok":1}'));
+
+		const response = await restFetch("https://api.test", "/x", undefined, {
+			timeout: 500,
+			deadlineMs: 6000,
+			retries: 2,
+		});
+
+		expect(response.status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("returns the upstream response rather than sleeping past the deadline", async () => {
+		fetchMock.mockResolvedValue(res(503));
+
+		const response = await restFetch("https://api.test", "/x", undefined, {
+			timeout: 200,
+			deadlineMs: 300,
+			retries: 3,
+		});
+
+		expect(response.status).toBe(503);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+});

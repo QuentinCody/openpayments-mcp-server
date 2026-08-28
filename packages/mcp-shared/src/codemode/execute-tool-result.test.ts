@@ -136,3 +136,57 @@ describe("REST execute result handling", () => {
 		expect(sc.program_error).toBeUndefined();
 	});
 });
+
+describe("negative-result classification for envelope payloads", () => {
+	// Regression: countRecords only understood a top-level Array, so every
+	// envelope-shaped empty produced record_count=undefined -> negative_result
+	// undefined -> signed as `false`, i.e. an affirmative "this is not a
+	// negative" over a result nobody had verified. Asserted through the REAL
+	// handler, never through buildCitation alone, which is why it was missed.
+	const cite = async (result: unknown) =>
+		(
+			(await handleRestExecutorResult({ result }, context))
+				.structuredContent as {
+				_meta: {
+					citation: {
+						record_count?: number;
+						negative_result?: boolean;
+						verification?: string;
+					};
+				};
+			}
+		)._meta.citation;
+
+	it("classifies an upstream-total envelope empty as a negative", async () => {
+		const c = await cite({ total: 0, hits: [] });
+		expect(c.record_count).toBe(0);
+		expect(c.negative_result).toBe(true);
+		expect(c.verification).toBe("unverified-empty");
+	});
+
+	it("classifies a sole-array envelope empty as a negative (clingen shape)", async () => {
+		const c = await cite({ gene: "ABCA1", curations: [] });
+		expect(c.record_count).toBe(0);
+		expect(c.negative_result).toBe(true);
+	});
+
+	it("does NOT mark a populated envelope as a negative", async () => {
+		const c = await cite({ total: 3, hits: [1, 2, 3] });
+		expect(c.record_count).toBe(3);
+		expect(c.negative_result).toBeUndefined();
+	});
+
+	it("leaves an ambiguous multi-array envelope unclassified", async () => {
+		// Two candidate arrays: guessing which holds the records could mislabel a
+		// populated result as empty, so the count stays unknown on purpose.
+		const c = await cite({ warnings: [], curations: [{ id: 1 }] });
+		expect(c.record_count).toBeUndefined();
+		expect(c.negative_result).toBeUndefined();
+	});
+
+	it("still classifies a bare empty array", async () => {
+		const c = await cite([]);
+		expect(c.record_count).toBe(0);
+		expect(c.negative_result).toBe(true);
+	});
+});

@@ -93,6 +93,45 @@ describe("buildColumnDescriptor", () => {
 			primary_key: false,
 		});
 	});
+	it("attaches a value dictionary when one covers the column", () => {
+		const d = buildColumnDescriptor(
+			{ name: "treatment_group", type: "INTEGER", notnull: 0, pk: 0 },
+			"t",
+			meta,
+			profiles,
+			{
+				treatment_group: {
+					values: { "1": "albuterol" },
+					source: "paired_column",
+					label_column: "treatment_group_label",
+				},
+			},
+		);
+		expect(d.value_dictionary?.values["1"]).toBe("albuterol");
+		expect(d.value_dictionary?.source).toBe("paired_column");
+	});
+
+	it("omits value_dictionary for columns the dictionary does not cover", () => {
+		const d = buildColumnDescriptor(
+			{ name: "age", type: "INTEGER", notnull: 0, pk: 0 },
+			"t",
+			meta,
+			profiles,
+			{ treatment_group: { values: { "1": "albuterol" }, source: "declared" } },
+		);
+		expect(d.value_dictionary).toBeUndefined();
+	});
+
+	it("stays backward compatible when no dictionaries are passed", () => {
+		const d = buildColumnDescriptor(
+			{ name: "treatment_group", type: "INTEGER", notnull: 0, pk: 0 },
+			"t",
+			meta,
+			profiles,
+		);
+		expect(d.value_dictionary).toBeUndefined();
+	});
+
 	it("sets not_null / primary_key from the 1 sentinel", () => {
 		const d = buildColumnDescriptor(
 			{ name: "id", type: "INTEGER", notnull: 1, pk: 1 },

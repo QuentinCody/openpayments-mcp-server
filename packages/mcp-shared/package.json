@@ -60,6 +60,14 @@
       "types": "./dist/variants/*.d.ts",
       "default": "./dist/variants/*.js"
     },
+    "./phenopacket/*": {
+      "types": "./dist/phenopacket/*.d.ts",
+      "default": "./dist/phenopacket/*.js"
+    },
+    "./vrs/*": {
+      "types": "./dist/vrs/*.d.ts",
+      "default": "./dist/vrs/*.js"
+    },
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
       "default": "./dist/adapters/*.js"

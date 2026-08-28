@@ -29,6 +29,10 @@ import type {
 	StagingHints,
 	StagingResult,
 } from "./types";
+import {
+	inferValueDictionaries,
+	type ValueDictionaries,
+} from "./value-dictionary";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -266,12 +270,14 @@ function runTier1(
 	}
 
 	const result = materializeSchema(schema, rowsMap, sql);
+	const valueDictionaries = deriveValueDictionaries(rowsMap);
 
 	return {
 		success: true,
 		tier: 1,
 		tablesCreated: result.tablesCreated,
 		totalRows: result.totalRows,
+		...(Object.keys(valueDictionaries).length > 0 ? { valueDictionaries } : {}),
 		// #8: expose the Tier-1 artifacts so the consolidated staging path can
 		// persist the schema and surface relationships / per-table row counts.
 		inferredSchema: schema,
@@ -280,6 +286,18 @@ function runTier1(
 		failedRows: result.failedRows,
 		materializationWarnings: result.warnings,
 	};
+}
+
+/** Recover code→label meaning per table from the rows about to be staged. */
+function deriveValueDictionaries(
+	rowsMap: Map<string, unknown[]>,
+): ValueDictionaries {
+	const dictionaries: ValueDictionaries = {};
+	for (const [tableName, rows] of rowsMap) {
+		const forTable = inferValueDictionaries(rows as Record<string, unknown>[]);
+		if (Object.keys(forTable).length > 0) dictionaries[tableName] = forTable;
+	}
+	return dictionaries;
 }
 
 function storeFallbackPayload(data: unknown, sql: SqlExec): StagingResult {

@@ -30,6 +30,15 @@ export type TruncationReason =
 	| "insertion_failure"
 	/** The upstream API itself capped the result set. */
 	| "upstream_cap"
+	/**
+	 * The first page came back non-empty but no records could be extracted from
+	 * it — an unrecognised envelope, or a non-JSON body (MEDLINE text, XML).
+	 *
+	 * Emitted so that "we could not parse this" never renders as "there is
+	 * nothing here": a zero-row result from an unparsed body is NOT a certified
+	 * empty and must not be reported as complete.
+	 */
+	| "unparsed_page"
 	/** Incompleteness detected but the cause could not be classified. */
 	| "unknown";
 

@@ -17,6 +17,16 @@ export interface SourceDescriptor {
 	url?: string;
 	license?: string;
 	version?: string;
+	/**
+	 * Data Use Ontology CURIEs (e.g. `["DUO:0000042"]`) describing what the
+	 * source permits. `license` is prose a human reads; these are the same terms
+	 * a program can check before redistributing a result. See ./duo.
+	 *
+	 * Additive only: the signing input (./signing `citationSigningInput`) covers
+	 * `source.id` and not the rest of the descriptor, so annotating a source
+	 * does not invalidate previously issued signatures.
+	 */
+	duo_codes?: string[];
 }
 
 export interface CitationSignature {

@@ -7,6 +7,7 @@
  */
 
 import type { Completeness } from "../completeness";
+import type { ValueDictionaries } from "./value-dictionary";
 
 /** Describes a parent→child table relationship created by child table extraction */
 export interface TableRelationship {
@@ -58,6 +59,12 @@ export interface StagingMetadata {
 	 * recover. Absent when no completeness determination could be made.
 	 */
 	completeness?: Completeness;
+	/**
+	 * What coded column values mean, keyed by table then column. Upstream codes
+	 * are staged verbatim, so without this a column of bare integers is
+	 * queryable but not interpretable. See ./value-dictionary.
+	 */
+	value_dictionaries?: ValueDictionaries;
 }
 
 /**
@@ -76,6 +83,7 @@ export function buildStagingMetadata(opts: {
 	completeness?: Completeness;
 	evidenceTable?: string;
 	payloadHash?: string;
+	valueDictionaries?: ValueDictionaries;
 }): StagingMetadata {
 	return {
 		staged: true,
@@ -98,5 +106,8 @@ export function buildStagingMetadata(opts: {
 			? { relationships: opts.relationships }
 			: {}),
 		...(opts.completeness ? { completeness: opts.completeness } : {}),
+		...(opts.valueDictionaries && Object.keys(opts.valueDictionaries).length > 0
+			? { value_dictionaries: opts.valueDictionaries }
+			: {}),
 	};
 }

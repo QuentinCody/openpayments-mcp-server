@@ -167,3 +167,45 @@ describe("computeColumnProfiles / profileColumn", () => {
 		expect(profile.columns.flaky.sample_values).toEqual(["a", "b"]);
 	});
 });
+
+/**
+ * Regression: get_schema is metadata and must be bounded. `sample_values` was
+ * truncated but `min`/`max` and `top_values` were not, so on a staged full-text
+ * table MIN/MAX returned whole documents and one get_schema response reached
+ * 693,325 characters and overflowed the caller's context.
+ */
+describe("profile values are clamped so a schema can never carry documents", () => {
+	const LONG = "x".repeat(5000);
+
+	it("clamps min, max, samples and top_values alike", () => {
+		const [profile] = computeColumnProfiles(
+			schemaOf([{ name: "root_json", type: "TEXT" }]),
+			fakeSql(
+				baseRules({
+					minmax: [{ min_val: LONG, max_val: LONG }],
+					samples: [{ v: LONG }],
+					top: [{ v: LONG, c: 5 }],
+				}),
+			),
+		);
+		const col = profile.columns.root_json;
+		const emitted = [
+			col.min,
+			col.max,
+			...(col.sample_values ?? []),
+			...(col.top_values ?? []).map((t) => t.value),
+		].filter((v): v is string => typeof v === "string");
+
+		expect(emitted.length).toBeGreaterThan(0);
+		for (const v of emitted) expect(v.length).toBeLessThanOrEqual(120);
+	});
+
+	it("leaves short values untouched", () => {
+		const [profile] = computeColumnProfiles(
+			schemaOf([{ name: "status", type: "TEXT" }]),
+			fakeSql(baseRules()),
+		);
+		expect(profile.columns.status.min).toBe("a");
+		expect(profile.columns.status.max).toBe("z");
+	});
+});

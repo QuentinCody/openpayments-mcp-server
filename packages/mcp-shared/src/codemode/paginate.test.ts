@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	extractItems,
+	isUnparsedBody,
 	extractNextCursor,
 	type PageFetcher,
 	paginateAll,
@@ -239,5 +240,76 @@ describe("paginateAll — cursor strategy with full-URL next (CourtListener/DRF)
 		expect(seen).toEqual(["", "c1", "c2"]);
 		expect(seen.some((s) => s.startsWith("http"))).toBe(false);
 		expect(result.completeness.complete).toBe(true);
+	});
+});
+
+describe("unparsed first page is never certified complete", () => {
+	// Regression: a body the extractor cannot read yields 0 items, which used to
+	// satisfy the short-page rule and be reported as {complete:true, returned:0}
+	// — turning "we could not read this" into a certified empty result.
+	const once =
+		(body: unknown): PageFetcher =>
+		async () =>
+			body;
+
+	it("refuses to certify a MEDLINE text body (entrez efetch rettype=medline)", async () => {
+		const medline =
+			"PMID- 9500320\nTI  - Some title.\nPT  - Retracted Publication\nRIN - Retraction in: ...\n";
+		const r = await paginateAll(once(medline));
+		expect(r.items).toEqual([]);
+		expect(r.completeness.complete).toBe(false);
+		expect(r.completeness.truncation?.reason).toBe("unparsed_page");
+		expect(r.completeness.truncation?.detail).toContain("NOT a certified empty");
+	});
+
+	it("refuses to certify an unrecognised JSON envelope (egquery)", async () => {
+		const r = await paginateAll(once({ eGQueryResult: { term: "asthma" } }));
+		expect(r.completeness.complete).toBe(false);
+		expect(r.completeness.truncation?.reason).toBe("unparsed_page");
+	});
+
+	it("extracts NCBI esummary records via result.uids", async () => {
+		const r = await paginateAll(
+			once({ header: {}, result: { uids: ["1", "2"] } }),
+		);
+		expect(r.items).toEqual(["1", "2"]);
+		expect(r.completeness.complete).toBe(true);
+	});
+
+	it("still certifies a genuinely empty parsed result", async () => {
+		// A bare [] and a recognised envelope with an empty array are REAL empties.
+		expect((await paginateAll(once([]))).completeness.complete).toBe(true);
+		const env = await paginateAll(once({ results: [] }));
+		expect(env.completeness.complete).toBe(true);
+		expect(env.completeness.truncation).toBeUndefined();
+	});
+
+	it("leaves the existing under-count verdict intact", async () => {
+		// total known but unreachable → page_limit, NOT unparsed_page
+		const r = await paginateAll(once({ total: 42, results: [] }));
+		expect(r.completeness.complete).toBe(false);
+		expect(r.completeness.truncation?.reason).toBe("page_limit");
+	});
+});
+
+describe("isUnparsedBody", () => {
+	it("treats a located records field as parsed", () => {
+		expect(isUnparsedBody({ anything: 1 }, "results")).toBe(false);
+	});
+	it("treats a bare array as a parsed empty", () => {
+		expect(isUnparsedBody([], undefined)).toBe(false);
+	});
+	it("treats null/undefined/empty bodies as parsed", () => {
+		expect(isUnparsedBody(null, undefined)).toBe(false);
+		expect(isUnparsedBody(undefined, undefined)).toBe(false);
+		expect(isUnparsedBody("   ", undefined)).toBe(false);
+		expect(isUnparsedBody({}, undefined)).toBe(false);
+	});
+	it("flags non-empty text and unrecognised objects", () => {
+		expect(isUnparsedBody("PMID- 1\n", undefined)).toBe(true);
+		expect(isUnparsedBody({ eGQueryResult: {} }, undefined)).toBe(true);
+	});
+	it("flags a non-object primitive body", () => {
+		expect(isUnparsedBody(42, undefined)).toBe(true);
 	});
 });

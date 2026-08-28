@@ -7,9 +7,17 @@ export interface RestFetchOptions {
 	method?: string;
 	headers?: Record<string, string>;
 	body?: string | object;
+	/** Per-ATTEMPT cap, in ms. Each retry gets its own fresh AbortSignal. */
 	timeout?: number;
 	retries?: number;
 	retryOn?: number[];
+	/**
+	 * Wall-clock budget for ALL attempts including backoff, in ms.
+	 * Defaults to `timeout`, which preserves the ceiling this function has
+	 * always had in practice (see the retry-budget note on `restFetch`) while
+	 * making the retries inside that ceiling actually run.
+	 */
+	deadlineMs?: number;
 	userAgent?: string;
 	/** Rate-limit policy key — requests sharing the same key are serialized */
 	rateLimitKey?: string;
@@ -140,6 +148,18 @@ export function buildQueryString(params: Record<string, unknown>): string {
 /**
  * Fetch a REST API with retries, timeout, query string construction,
  * optional per-source rate limiting, and Worker-side caching.
+ *
+ * Two separate budgets, deliberately:
+ *   - `timeout`    caps ONE attempt. Each attempt gets its own AbortSignal.
+ *   - `deadlineMs` caps the whole call — every attempt plus every backoff —
+ *                  and defaults to `timeout`.
+ *
+ * The default keeps the wall-clock ceiling callers already observed (a single
+ * hoisted 30s signal used to bound the entire loop), so fixing the per-attempt
+ * signal cannot turn a persistently stalling upstream into a 4x-longer hang.
+ * A caller that wants real retries against a stalling upstream lowers `timeout`
+ * below `deadlineMs` — see `servers/unichem-mcp-server/src/lib/http.ts`, where
+ * EBI answers healthy requests in ~1s but stalls ~1 in 3 for 31-34s.
  */
 export async function restFetch(
 	baseUrl: string,
@@ -154,10 +174,13 @@ export async function restFetch(
 		timeout = DEFAULT_TIMEOUT,
 		retries = DEFAULT_RETRIES,
 		retryOn = DEFAULT_RETRY_ON,
+		deadlineMs,
 		userAgent = "bio-mcp-server/1.0",
 		rateLimitKey,
 		cache: cacheOpts,
 	} = opts ?? {};
+
+	const budget = deadlineMs ?? timeout;
 
 	let url = `${baseUrl.replace(/\/$/, "")}${path}`;
 	if (params && Object.keys(params).length > 0) {
@@ -189,7 +212,6 @@ export async function restFetch(
 	const fetchInit: RequestInit = {
 		method,
 		headers: fetchHeaders,
-		signal: AbortSignal.timeout(timeout),
 	};
 
 	if (body) {
@@ -205,9 +227,27 @@ export async function restFetch(
 
 	let lastError: Error | undefined;
 
+	// Wall-clock budget across every attempt and every backoff. `Date.now()` in
+	// a Worker only advances across I/O, which is exactly where this is read.
+	const deadlineAt = Date.now() + budget;
+	const msLeft = () => deadlineAt - Date.now();
+
 	for (let attempt = 0; attempt <= retries; attempt++) {
+		const remaining = msLeft();
+		if (remaining <= 0) break;
+
 		try {
-			const response = await fetch(url, fetchInit);
+			// A FRESH signal per attempt. Hoisting this out of the loop (as this
+			// function did until 2026-08-28) makes the whole retry budget dead
+			// code on the one failure mode retries exist for: attempt 1 stalls
+			// until the signal fires, and every later attempt then reuses that
+			// already-aborted signal and dies instantly. Symptom in the fleet
+			// sweep: `unichem` reporting "Execution timed out" with wallTime
+			// 30021ms / cpuTime 13ms and exactly ONE upstream subrequest.
+			const response = await fetch(url, {
+				...fetchInit,
+				signal: AbortSignal.timeout(Math.max(1, Math.min(timeout, remaining))),
+			});
 
 			if (retryOn.includes(response.status) && attempt < retries) {
 				// Exponential backoff
@@ -217,8 +257,14 @@ export async function restFetch(
 				const waitMs = retryAfter
 					? Math.min(Number(retryAfter) * 1000 || delay, 30_000)
 					: delay;
-				await new Promise((r) => setTimeout(r, waitMs));
-				continue;
+				// Only sleep if a further attempt still fits in the budget;
+				// otherwise hand the caller the upstream's real response rather
+				// than burning what is left of the deadline on a nap.
+				if (waitMs < msLeft()) {
+					await new Promise((r) => setTimeout(r, waitMs));
+					continue;
+				}
+				return response;
 			}
 
 			// ── Cache store (only on 2xx GET responses) ──────────────
@@ -232,6 +278,7 @@ export async function restFetch(
 			lastError = err instanceof Error ? err : new Error(String(err));
 			if (attempt < retries) {
 				const delay = Math.min(1000 * 2 ** attempt, 10_000);
+				if (delay >= msLeft()) break;
 				await new Promise((r) => setTimeout(r, delay));
 			}
 		}

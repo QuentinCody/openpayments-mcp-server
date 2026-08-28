@@ -54,6 +54,24 @@ interface ProfileSql {
  * Designed to be called inside the same transaction as materializeSchema()
  * so there's no extra I/O cost.
  */
+/** Max characters kept for any profile value echoed back to the caller. */
+const PROFILE_VALUE_MAX_CHARS = 120;
+
+/**
+ * Clamp a profile value so a schema response can never carry whole documents.
+ *
+ * `sample_values` was already truncated, but `min`/`max` and `top_values` were
+ * not — so on a staged full-text dataset MIN(col)/MAX(col) returned entire
+ * articles and a single get_schema response reached 693KB, overflowing the
+ * caller's context. A schema is metadata; it is bounded by definition.
+ */
+function clampProfileValue(
+	v: string | number | null,
+): string | number | null {
+	if (typeof v !== "string" || v.length <= PROFILE_VALUE_MAX_CHARS) return v;
+	return `${v.slice(0, PROFILE_VALUE_MAX_CHARS - 3)}...`;
+}
+
 export function computeColumnProfiles(
 	schema: InferredSchema,
 	sql: ProfileSql,
@@ -167,8 +185,12 @@ function profileColumn(
 				)
 				.one();
 			if (minMaxResult) {
-				profile.min = minMaxResult.min_val as string | number | null;
-				profile.max = minMaxResult.max_val as string | number | null;
+				profile.min = clampProfileValue(
+					minMaxResult.min_val as string | number | null,
+				);
+				profile.max = clampProfileValue(
+					minMaxResult.max_val as string | number | null,
+				);
 			}
 		} catch {
 			// Non-critical
@@ -187,9 +209,7 @@ function profileColumn(
 				profile.sample_values = sampleRows.map((r) => {
 					const v = r.v;
 					// Truncate long strings in samples to save context
-					if (typeof v === "string" && v.length > 120)
-						return `${v.slice(0, 117)}...`;
-					return v as string | number | null;
+					return clampProfileValue(v as string | number | null);
 				});
 			}
 		} catch {
@@ -207,7 +227,7 @@ function profileColumn(
 				.toArray();
 			if (topRows.length > 0) {
 				profile.top_values = topRows.map((r) => ({
-					value: r.v as string | number | null,
+					value: clampProfileValue(r.v as string | number | null),
 					count: Number(r.c),
 				}));
 			}
