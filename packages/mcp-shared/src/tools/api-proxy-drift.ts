@@ -385,3 +385,56 @@ export function buildDriftHint(
 
 	return undefined;
 }
+
+/**
+ * Params the caller sent that this endpoint does not declare.
+ *
+ * The dangerous case is NOT an error — it is HTTP 200. FINRA's data API honours
+ * only `limit` and `offset` on a GET and SILENTLY DISCARDS every other query
+ * param: `?symbolCode=AAPL` returns Agilent with a 200 and a well-formed body.
+ * Real filtering is a POST with `compareFilters`. A model reading that response
+ * gets a confident, sourced, WRONG answer — and `_meta.citation` faithfully
+ * attests to bytes that do not answer the question asked. That is strictly worse
+ * than the silent-empty case the fleet already guards, because there is no
+ * zero-row signal to notice.
+ *
+ * We cannot know which params an upstream honours. We CAN know which ones the
+ * catalog documents, and an undocumented param is exactly the one at risk of
+ * being dropped on the floor. So: warn, name the params, and name what the
+ * endpoint does declare. Never fail the call — the catalog may simply be behind
+ * the API, and turning that into an error would break working code.
+ */
+export function detectUndeclaredParams(
+	method: string,
+	requestPath: string,
+	params: Record<string, unknown> | undefined,
+	knownEndpoints: KnownEndpoint[],
+): { undeclared: string[]; declared: string[]; message: string } | null {
+	const names = Object.keys(params ?? {});
+	if (names.length === 0 || knownEndpoints.length === 0) return null;
+
+	const normalizedMethod = method.toUpperCase();
+	const matched = knownEndpoints.find(
+		(e) => e.method === normalizedMethod && pathMatches(requestPath, e.path),
+	);
+	if (!matched) return null; // unknown endpoints are the drift hint's job
+
+	const declared = uniqueStrings([
+		...matched.pathParamNames,
+		...matched.queryParamNames,
+	]);
+	// An endpoint that documents no params at all tells us nothing useful.
+	if (declared.length === 0) return null;
+
+	const undeclared = names.filter((n) => !declared.includes(n));
+	if (undeclared.length === 0) return null;
+
+	return {
+		undeclared,
+		declared,
+		message:
+			`${normalizedMethod} ${matched.path} does not document ${undeclared.map((n) => `\`${n}\``).join(", ")}. ` +
+			`Some APIs silently IGNORE unknown params and return HTTP 200 with an UNFILTERED body, so this result may not be filtered the way you asked. ` +
+			`Documented params: ${declared.join(", ")}. Verify the response actually reflects your filter before relying on it.`,
+	};
+}

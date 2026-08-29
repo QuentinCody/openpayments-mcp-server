@@ -183,7 +183,10 @@ export function catalogToTypeScript(
 		}
 	}
 
-	const omitted = catalog.endpointCount - selected.length;
+	// endpoints.length, not the declared endpointCount: an inflated declaration
+	// told the model there were N more endpoints to discover that do not exist
+	// (ebi-tools declared 36 against a real 18).
+	const omitted = catalog.endpoints.length - selected.length;
 	if (omitted > 0) {
 		lines.push(
 			`  ... ${omitted} more endpoints — use searchSpec(query) in your code to discover them`,

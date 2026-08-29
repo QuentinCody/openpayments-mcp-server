@@ -5,6 +5,7 @@ import {
 	buildDriftHint,
 	buildKnownEndpointIndex,
 	preflightUnknownEndpoint,
+	detectUndeclaredParams,
 } from "./api-proxy-drift";
 
 const catalog: ApiCatalog = {
@@ -134,5 +135,78 @@ describe("preflightUnknownEndpoint", () => {
 		expect(hint?.kind).toBe("unknown_endpoint");
 		expect(hint?.message).toContain("Unknown endpoint");
 		expect(hint?.suggestions?.length).toBeGreaterThan(0);
+	});
+});
+
+/**
+ * The silent-wrong-filter guard.
+ *
+ * FINRA's data API honours only `limit`/`offset` on a GET and silently discards
+ * everything else: `?symbolCode=AAPL` returns Agilent Technologies with HTTP 200
+ * and a well-formed body (measured 2026-08-28). A model reading that gets a
+ * confident, sourced, WRONG answer, and the citation attests to bytes that do
+ * not answer the question asked — worse than a silent empty, which at least has
+ * a zero-row signal.
+ */
+describe("detectUndeclaredParams", () => {
+	const endpoints = buildKnownEndpointIndex(
+		{
+			name: "finra",
+			baseUrl: "https://api.finra.org",
+			endpoints: [
+				{
+					method: "GET",
+					path: "/data/group/otcMarket/name/consolidatedShortInterest",
+					summary: "browse",
+					category: "otc",
+					queryParams: [
+						{ name: "limit", type: "number", required: false, description: "" },
+						{ name: "offset", type: "number", required: false, description: "" },
+					],
+				},
+			],
+		} as never,
+		undefined,
+	);
+
+	it("warns when a caller filters with a param the endpoint does not document", () => {
+		const out = detectUndeclaredParams(
+			"GET",
+			"/data/group/otcMarket/name/consolidatedShortInterest",
+			{ limit: 1, symbolCode: "AAPL" },
+			endpoints,
+		);
+		expect(out?.undeclared).toEqual(["symbolCode"]);
+		expect(out?.message).toContain("silently IGNORE");
+		expect(out?.declared).toEqual(expect.arrayContaining(["limit", "offset"]));
+	});
+
+	it("stays quiet when every param is documented", () => {
+		expect(
+			detectUndeclaredParams(
+				"GET",
+				"/data/group/otcMarket/name/consolidatedShortInterest",
+				{ limit: 1, offset: 0 },
+				endpoints,
+			),
+		).toBeNull();
+	});
+
+	it("stays quiet for an unknown endpoint — that is the drift hint's job", () => {
+		expect(
+			detectUndeclaredParams("GET", "/no/such/route", { anything: 1 }, endpoints),
+		).toBeNull();
+	});
+
+	it("stays quiet when the endpoint documents no params at all", () => {
+		const bare = buildKnownEndpointIndex(
+			{
+				name: "x",
+				baseUrl: "https://x.test",
+				endpoints: [{ method: "GET", path: "/ping", summary: "", category: "c" }],
+			} as never,
+			undefined,
+		);
+		expect(detectUndeclaredParams("GET", "/ping", { q: 1 }, bare)).toBeNull();
 	});
 });

@@ -39,7 +39,7 @@ export function createCatalogSearchTool(
 	return {
 		name: toolName,
 		description:
-			`Search the ${catalog.name} API catalog (${catalog.endpointCount} endpoints). ` +
+			`Search the ${catalog.name} API catalog (${catalog.endpoints.length} endpoints). ` +
 			`Returns matching endpoints with full parameter docs. Use this to discover API capabilities before calling ${prefix}_execute.\n\n` +
 			`Categories: ${categoryList}\n\n` +
 			`USAGE IN ${prefix}_execute:\n` +
@@ -118,7 +118,7 @@ export function createCatalogSearchTool(
 							structuredContent: {
 								success: true,
 								data: {
-									total_endpoints: catalog.endpointCount,
+									total_endpoints: catalog.endpoints.length,
 									results_count: 0,
 									endpoints: [],
 									query,
@@ -130,7 +130,7 @@ export function createCatalogSearchTool(
 					}
 
 					const formatted = results.map(formatEndpoint).join("\n\n");
-					const header = `Found ${results.length} endpoint(s) in ${catalog.name} API (${catalog.endpointCount} total):`;
+					const header = `Found ${results.length} endpoint(s) in ${catalog.name} API (${catalog.endpoints.length} total):`;
 
 					return {
 						content: [
@@ -139,7 +139,7 @@ export function createCatalogSearchTool(
 						structuredContent: {
 							success: true,
 							data: {
-								total_endpoints: catalog.endpointCount,
+								total_endpoints: catalog.endpoints.length,
 								results_count: results.length,
 								endpoints: results,
 							},

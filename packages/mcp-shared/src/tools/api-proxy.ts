@@ -23,6 +23,7 @@ import {
 } from "../staging/utils";
 import {
 	buildDriftHint,
+	detectUndeclaredParams,
 	buildKnownEndpointIndex,
 	preflightUnknownEndpoint,
 } from "./api-proxy-drift";
@@ -303,6 +304,11 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 					return { __api_error: true, incomplete: true, status: 413, code: "RESPONSE_TOO_LARGE", message: `Response too large (${responseBytes} > ${TRANSPORT_LIMIT}); narrow the query (fewer fields/rows) or use a paged endpoint.` };
 				}
 
+				// A 200 is not proof the filter was applied — see detectUndeclaredParams.
+				const undeclared = detectUndeclaredParams(method, interpolatedPath, rawParams, knownEndpoints);
+				if (undeclared && result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+					return { ...(result.data as Record<string, unknown>), __unfiltered_warning: undeclared };
+				}
 				return result.data;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);

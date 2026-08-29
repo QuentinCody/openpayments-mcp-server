@@ -51,7 +51,15 @@ export interface ApiCatalog {
 	name: string;
 	baseUrl: string;
 	version?: string;
-	endpointCount: number;
+	/**
+	 * DECLARED endpoint count. Do NOT read this to report coverage — it drifts:
+	 * 25 of 95 fleet catalogs disagreed with their own `endpoints` array on
+	 * 2026-08-28, ebi-tools by 2x (36 declared, 18 real), and the number is
+	 * rendered straight into the model-facing tool description. Consumers use
+	 * `endpoints.length`; `tests/catalog-conformance.test.ts` keeps this field
+	 * honest so it cannot quietly lie again.
+	 */
+	endpointCount?: number;
 	auth?: string;
 	/** Important notes about response formats, quirks, or conventions for this API */
 	notes?: string;
