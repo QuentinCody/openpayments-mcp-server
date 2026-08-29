@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createMcpHandler, McpServer } from "./stateless-worker";
+import { createMcpHandler, McpServer, StatelessMcpWorker } from "./stateless-worker";
 
 const REQUEST_META = {
 	"io.modelcontextprotocol/protocolVersion": "2026-07-28",
@@ -248,5 +248,70 @@ describe("MCP 2026-07-28 shared adapter", () => {
 			success: true,
 			data: { string: "diabetes" },
 		});
+	});
+});
+
+/**
+ * Deep readiness.
+ *
+ * bio-orchestrator answered HTTP 500 to every MCP request for four weeks while
+ * `/health` stayed green, because `/health` returns a static payload and never
+ * touches the server factory. `readiness()` runs the same construct-and-init
+ * path a real request runs, so a factory that throws is reported as 503 with the
+ * real reason.
+ */
+describe("StatelessMcpWorker.readiness", () => {
+	class Ok extends StatelessMcpWorker<unknown> {
+		server = { _registeredTools: { a: {}, mcp_a: {} } } as never;
+		init() {}
+	}
+
+	class Throws extends StatelessMcpWorker<unknown> {
+		server = {} as never;
+		init() {
+			// The verbatim SDK error that took bio-orchestrator down.
+			throw new Error("Tool mcp_execute_bio_code is already registered");
+		}
+	}
+
+	class NoTools extends StatelessMcpWorker<unknown> {
+		server = { _registeredTools: {} } as never;
+		init() {}
+	}
+
+	it("reports ready with a tool count when the server builds", async () => {
+		const res = await Ok.readiness({}, "demo");
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body.ready).toBe(true);
+		expect(body.tools).toBe(2);
+		expect(body.server).toBe("demo");
+	});
+
+	it("reports 503 with the real error when the factory throws", async () => {
+		const res = await Throws.readiness({}, "demo");
+		expect(res.status).toBe(503);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body.ready).toBe(false);
+		// The opaque -32603 the client used to get is exactly what this replaces.
+		expect(String(body.error)).toContain("already registered");
+	});
+
+	it("treats zero registered tools as an outage, not a state", async () => {
+		const res = await NoTools.readiness({}, "demo");
+		expect(res.status).toBe(503);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body.ready).toBe(false);
+		expect(String(body.error)).toContain("0 tools");
+	});
+
+	it("never throws out of the probe itself", async () => {
+		class Weird extends StatelessMcpWorker<unknown> {
+			server = null as never;
+			init() {}
+		}
+		const res = await Weird.readiness({}, "demo");
+		// A probe that throws would take a healthy server red; it must answer.
+		expect(res.status).toBe(503);
 	});
 });

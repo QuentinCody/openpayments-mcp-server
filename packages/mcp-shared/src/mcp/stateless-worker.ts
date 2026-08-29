@@ -10,6 +10,7 @@ import {
 	type ServerOptions,
 } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
+import { buildHealthPayload } from "@bio-mcp/provenance-core";
 import { z } from "zod";
 
 export { createMcpHandler };
@@ -224,6 +225,17 @@ type WorkerConstructor = new (
  * context needed for `server/discover`, envelope validation, deterministic tool
  * order, result stamping, and the stateless legacy fallback.
  */
+
+/**
+ * Count tools registered on an SDK McpServer. The registry is a private field,
+ * so read it defensively: a readiness probe must never itself throw on an SDK
+ * internals change — it would turn a healthy server red.
+ */
+function countRegisteredTools(server: unknown): number {
+	const reg = (server as { _registeredTools?: Record<string, unknown> })?._registeredTools;
+	return reg && typeof reg === "object" ? Object.keys(reg).length : 0;
+}
+
 export abstract class StatelessMcpWorker<Env = unknown> {
 	readonly env: Env;
 	protected executionContext: ExecutionContext | undefined;
@@ -242,6 +254,60 @@ export abstract class StatelessMcpWorker<Env = unknown> {
 	): void {
 		this.requestContext = requestContext;
 		this.executionContext = executionContext;
+	}
+
+	/**
+	 * Deep readiness: build the server the way a real request would, and report
+	 * whether it actually came up.
+	 *
+	 * `/health` cannot answer this. It returns a static payload, so it proves the
+	 * Worker booted and nothing more — which is how bio-orchestrator served HTTP
+	 * 500 to EVERY MCP request for four weeks (2026-08-02 to 2026-08-28) behind a
+	 * green health check. The failure was deterministic and in the server factory
+	 * itself: tool registration threw, `createMcpHandler` caught it, and the
+	 * client got an opaque -32603 while `/health` kept saying "ok".
+	 *
+	 * This runs the SAME construct-and-init path `serve()` runs per request, so
+	 * any error that would break every MCP call breaks this too — and reports 503
+	 * with the real message instead of a cheerful 200.
+	 *
+	 * Registering zero tools is treated as a FAILURE, not a state: an empty tool
+	 * list is the fleet's documented silent-outage signature (see CLAUDE.md on
+	 * the missing `Host` header, where `listTools()` returned [] and every health
+	 * check stayed green while the model answered from memory).
+	 */
+	static async readiness(env: unknown, serverName: string): Promise<Response> {
+		const Worker = this as unknown as WorkerConstructor;
+		const startedAt = Date.now();
+		try {
+			const worker = new Worker(undefined, env);
+			await worker.init();
+			const tools = countRegisteredTools(worker.server);
+			if (tools < 1) {
+				throw new Error(
+					"server constructed but registered 0 tools — an empty tool list is an outage, not a state",
+				);
+			}
+			return Response.json(
+				{
+					...buildHealthPayload(serverName, { tools }),
+					ready: true,
+					ms: Date.now() - startedAt,
+				},
+				{ headers: { "cache-control": "no-store" } },
+			);
+		} catch (err) {
+			return Response.json(
+				{
+					status: "error",
+					ready: false,
+					server: serverName,
+					error: err instanceof Error ? err.message : String(err),
+					ms: Date.now() - startedAt,
+				},
+				{ status: 503, headers: { "cache-control": "no-store" } },
+			);
+		}
 	}
 
 	static serve(
