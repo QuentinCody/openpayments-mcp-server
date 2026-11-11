@@ -114,6 +114,7 @@ const TOTAL_KEYS: readonly string[] = [
 	"total",
 	"numFound", // Solr
 	"hitCount",
+	"HitCount", // Europe PMC Grist JSON; count is commonly a decimal string.
 	"count", // lowest priority — ambiguous, may mean "this page"
 ];
 

@@ -1,0 +1,2081 @@
+{
+  "results": [
+    {
+      "change_type": "NEW",
+      "covered_recipient_type": "Covered Recipient Physician",
+      "noncovered_recipient_entity_name": "",
+      "teaching_hospital_ccn": "",
+      "teaching_hospital_id": "",
+      "teaching_hospital_name": "",
+      "covered_recipient_profile_id": "11300410",
+      "covered_recipient_npi": "1295113405",
+      "covered_recipient_first_name": "ABHIJEET",
+      "covered_recipient_middle_name": "",
+      "covered_recipient_last_name": "GUMMADAVELLI",
+      "covered_recipient_name_suffix": "",
+      "recipient_primary_business_street_address_line1": "7780 S Broadway STE 350",
+      "recipient_primary_business_street_address_line2": "",
+      "recipient_city": "Littleton",
+      "recipient_state": "CO",
+      "recipient_zip_code": "80122-2641",
+      "recipient_country": "United States",
+      "recipient_province": "",
+      "recipient_postal_code": "",
+      "covered_recipient_primary_type_1": "Medical Doctor",
+      "covered_recipient_primary_type_2": "",
+      "covered_recipient_primary_type_3": "",
+      "covered_recipient_primary_type_4": "",
+      "covered_recipient_primary_type_5": "",
+      "covered_recipient_primary_type_6": "",
+      "covered_recipient_specialty_1": "Allopathic & Osteopathic Physicians|Neurological Surgery",
+      "covered_recipient_specialty_2": "",
+      "covered_recipient_specialty_3": "",
+      "covered_recipient_specialty_4": "",
+      "covered_recipient_specialty_5": "",
+      "covered_recipient_specialty_6": "",
+      "covered_recipient_license_state_code1": "CO",
+      "covered_recipient_license_state_code2": "TN",
+      "covered_recipient_license_state_code3": "CT",
+      "covered_recipient_license_state_code4": "",
+      "covered_recipient_license_state_code5": "",
+      "principal_investigator_1_covered_recipient_type": "",
+      "principal_investigator_1_profile_id": "",
+      "principal_investigator_1_npi": "",
+      "principal_investigator_1_first_name": "",
+      "principal_investigator_1_middle_name": "",
+      "principal_investigator_1_last_name": "",
+      "principal_investigator_1_name_suffix": "",
+      "principal_investigator_1_business_street_address_line1": "",
+      "principal_investigator_1_business_street_address_line2": "",
+      "principal_investigator_1_city": "",
+      "principal_investigator_1_state": "",
+      "principal_investigator_1_zip_code": "",
+      "principal_investigator_1_country": "",
+      "principal_investigator_1_province": "",
+      "principal_investigator_1_postal_code": "",
+      "principal_investigator_1_primary_type_1": "",
+      "principal_investigator_1_primary_type_2": "",
+      "principal_investigator_1_primary_type_3": "",
+      "principal_investigator_1_primary_type_4": "",
+      "principal_investigator_1_primary_type_5": "",
+      "principal_investigator_1_primary_type_6": "",
+      "principal_investigator_1_specialty_1": "",
+      "principal_investigator_1_specialty_2": "",
+      "principal_investigator_1_specialty_3": "",
+      "principal_investigator_1_specialty_4": "",
+      "principal_investigator_1_specialty_5": "",
+      "principal_investigator_1_specialty_6": "",
+      "principal_investigator_1_license_state_code1": "",
+      "principal_investigator_1_license_state_code2": "",
+      "principal_investigator_1_license_state_code3": "",
+      "principal_investigator_1_license_state_code4": "",
+      "principal_investigator_1_license_state_code5": "",
+      "principal_investigator_2_covered_recipient_type": "",
+      "principal_investigator_2_profile_id": "",
+      "principal_investigator_2_npi": "",
+      "principal_investigator_2_first_name": "",
+      "principal_investigator_2_middle_name": "",
+      "principal_investigator_2_last_name": "",
+      "principal_investigator_2_name_suffix": "",
+      "principal_investigator_2_business_street_address_line1": "",
+      "principal_investigator_2_business_street_address_line2": "",
+      "principal_investigator_2_city": "",
+      "principal_investigator_2_state": "",
+      "principal_investigator_2_zip_code": "",
+      "principal_investigator_2_country": "",
+      "principal_investigator_2_province": "",
+      "principal_investigator_2_postal_code": "",
+      "principal_investigator_2_primary_type_1": "",
+      "principal_investigator_2_primary_type_2": "",
+      "principal_investigator_2_primary_type_3": "",
+      "principal_investigator_2_primary_type_4": "",
+      "principal_investigator_2_primary_type_5": "",
+      "principal_investigator_2_primary_type_6": "",
+      "principal_investigator_2_specialty_1": "",
+      "principal_investigator_2_specialty_2": "",
+      "principal_investigator_2_specialty_3": "",
+      "principal_investigator_2_specialty_4": "",
+      "principal_investigator_2_specialty_5": "",
+      "principal_investigator_2_specialty_6": "",
+      "principal_investigator_2_license_state_code1": "",
+      "principal_investigator_2_license_state_code2": "",
+      "principal_investigator_2_license_state_code3": "",
+      "principal_investigator_2_license_state_code4": "",
+      "principal_investigator_2_license_state_code5": "",
+      "principal_investigator_3_covered_recipient_type": "",
+      "principal_investigator_3_profile_id": "",
+      "principal_investigator_3_npi": "",
+      "principal_investigator_3_first_name": "",
+      "principal_investigator_3_middle_name": "",
+      "principal_investigator_3_last_name": "",
+      "principal_investigator_3_name_suffix": "",
+      "principal_investigator_3_business_street_address_line1": "",
+      "principal_investigator_3_business_street_address_line2": "",
+      "principal_investigator_3_city": "",
+      "principal_investigator_3_state": "",
+      "principal_investigator_3_zip_code": "",
+      "principal_investigator_3_country": "",
+      "principal_investigator_3_province": "",
+      "principal_investigator_3_postal_code": "",
+      "principal_investigator_3_primary_type_1": "",
+      "principal_investigator_3_primary_type_2": "",
+      "principal_investigator_3_primary_type_3": "",
+      "principal_investigator_3_primary_type_4": "",
+      "principal_investigator_3_primary_type_5": "",
+      "principal_investigator_3_primary_type_6": "",
+      "principal_investigator_3_specialty_1": "",
+      "principal_investigator_3_specialty_2": "",
+      "principal_investigator_3_specialty_3": "",
+      "principal_investigator_3_specialty_4": "",
+      "principal_investigator_3_specialty_5": "",
+      "principal_investigator_3_specialty_6": "",
+      "principal_investigator_3_license_state_code1": "",
+      "principal_investigator_3_license_state_code2": "",
+      "principal_investigator_3_license_state_code3": "",
+      "principal_investigator_3_license_state_code4": "",
+      "principal_investigator_3_license_state_code5": "",
+      "principal_investigator_4_covered_recipient_type": "",
+      "principal_investigator_4_profile_id": "",
+      "principal_investigator_4_npi": "",
+      "principal_investigator_4_first_name": "",
+      "principal_investigator_4_middle_name": "",
+      "principal_investigator_4_last_name": "",
+      "principal_investigator_4_name_suffix": "",
+      "principal_investigator_4_business_street_address_line1": "",
+      "principal_investigator_4_business_street_address_line2": "",
+      "principal_investigator_4_city": "",
+      "principal_investigator_4_state": "",
+      "principal_investigator_4_zip_code": "",
+      "principal_investigator_4_country": "",
+      "principal_investigator_4_province": "",
+      "principal_investigator_4_postal_code": "",
+      "principal_investigator_4_primary_type_1": "",
+      "principal_investigator_4_primary_type_2": "",
+      "principal_investigator_4_primary_type_3": "",
+      "principal_investigator_4_primary_type_4": "",
+      "principal_investigator_4_primary_type_5": "",
+      "principal_investigator_4_primary_type_6": "",
+      "principal_investigator_4_specialty_1": "",
+      "principal_investigator_4_specialty_2": "",
+      "principal_investigator_4_specialty_3": "",
+      "principal_investigator_4_specialty_4": "",
+      "principal_investigator_4_specialty_5": "",
+      "principal_investigator_4_specialty_6": "",
+      "principal_investigator_4_license_state_code1": "",
+      "principal_investigator_4_license_state_code2": "",
+      "principal_investigator_4_license_state_code3": "",
+      "principal_investigator_4_license_state_code4": "",
+      "principal_investigator_4_license_state_code5": "",
+      "principal_investigator_5_covered_recipient_type": "",
+      "principal_investigator_5_profile_id": "",
+      "principal_investigator_5_npi": "",
+      "principal_investigator_5_first_name": "",
+      "principal_investigator_5_middle_name": "",
+      "principal_investigator_5_last_name": "",
+      "principal_investigator_5_name_suffix": "",
+      "principal_investigator_5_business_street_address_line1": "",
+      "principal_investigator_5_business_street_address_line2": "",
+      "principal_investigator_5_city": "",
+      "principal_investigator_5_state": "",
+      "principal_investigator_5_zip_code": "",
+      "principal_investigator_5_country": "",
+      "principal_investigator_5_province": "",
+      "principal_investigator_5_postal_code": "",
+      "principal_investigator_5_primary_type_1": "",
+      "principal_investigator_5_primary_type_2": "",
+      "principal_investigator_5_primary_type_3": "",
+      "principal_investigator_5_primary_type_4": "",
+      "principal_investigator_5_primary_type_5": "",
+      "principal_investigator_5_primary_type_6": "",
+      "principal_investigator_5_specialty_1": "",
+      "principal_investigator_5_specialty_2": "",
+      "principal_investigator_5_specialty_3": "",
+      "principal_investigator_5_specialty_4": "",
+      "principal_investigator_5_specialty_5": "",
+      "principal_investigator_5_specialty_6": "",
+      "principal_investigator_5_license_state_code1": "",
+      "principal_investigator_5_license_state_code2": "",
+      "principal_investigator_5_license_state_code3": "",
+      "principal_investigator_5_license_state_code4": "",
+      "principal_investigator_5_license_state_code5": "",
+      "submitting_applicable_manufacturer_or_applicable_gpo_name": "Hubly Incorporated",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_id": "100001351929",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_name": "Hubly Incorporated",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_state": "IL",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_country": "United States",
+      "related_product_indicator": "Yes",
+      "covered_or_noncovered_indicator_1": "Covered",
+      "indicate_drug_or_biological_or_device_or_medical_supply_1": "Device",
+      "product_category_or_therapeutic_area_1": "Powered simple cranial drills, burrs, trephines, and their accessories",
+      "name_of_drug_or_biological_or_device_or_medical_supply_1": "Hubly Auto-Stop Drill",
+      "associated_drug_or_biological_ndc_1": "",
+      "associated_device_or_medical_supply_pdi_1": "",
+      "covered_or_noncovered_indicator_2": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_2": "",
+      "product_category_or_therapeutic_area_2": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_2": "",
+      "associated_drug_or_biological_ndc_2": "",
+      "associated_device_or_medical_supply_pdi_2": "",
+      "covered_or_noncovered_indicator_3": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_3": "",
+      "product_category_or_therapeutic_area_3": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_3": "",
+      "associated_drug_or_biological_ndc_3": "",
+      "associated_device_or_medical_supply_pdi_3": "",
+      "covered_or_noncovered_indicator_4": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_4": "",
+      "product_category_or_therapeutic_area_4": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_4": "",
+      "associated_drug_or_biological_ndc_4": "",
+      "associated_device_or_medical_supply_pdi_4": "",
+      "covered_or_noncovered_indicator_5": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_5": "",
+      "product_category_or_therapeutic_area_5": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_5": "",
+      "associated_drug_or_biological_ndc_5": "",
+      "associated_device_or_medical_supply_pdi_5": "",
+      "total_amount_of_payment_usdollars": "281.25",
+      "date_of_payment": "09/12/2025",
+      "form_of_payment_or_transfer_of_value": "Cash or cash equivalent",
+      "expenditure_category1": "",
+      "expenditure_category2": "",
+      "expenditure_category3": "",
+      "expenditure_category4": "",
+      "expenditure_category5": "",
+      "expenditure_category6": "",
+      "preclinical_research_indicator": "Yes",
+      "delay_in_publication_indicator": "No",
+      "name_of_study": "",
+      "dispute_status_for_publication": "No",
+      "record_id": "1157245940",
+      "program_year": "2025",
+      "payment_publication_date": "06/30/2026",
+      "clinicaltrials_gov_identifier": "",
+      "research_information_link": "",
+      "context_of_research": ""
+    },
+    {
+      "change_type": "NEW",
+      "covered_recipient_type": "Covered Recipient Physician",
+      "noncovered_recipient_entity_name": "",
+      "teaching_hospital_ccn": "",
+      "teaching_hospital_id": "",
+      "teaching_hospital_name": "",
+      "covered_recipient_profile_id": "6168980",
+      "covered_recipient_npi": "1649794819",
+      "covered_recipient_first_name": "SEYED",
+      "covered_recipient_middle_name": "",
+      "covered_recipient_last_name": "MANSOURI",
+      "covered_recipient_name_suffix": "",
+      "recipient_primary_business_street_address_line1": "30 Hope Dr STE 1200",
+      "recipient_primary_business_street_address_line2": "",
+      "recipient_city": "Hershey",
+      "recipient_state": "PA",
+      "recipient_zip_code": "17033-2036",
+      "recipient_country": "United States",
+      "recipient_province": "",
+      "recipient_postal_code": "",
+      "covered_recipient_primary_type_1": "Medical Doctor",
+      "covered_recipient_primary_type_2": "",
+      "covered_recipient_primary_type_3": "",
+      "covered_recipient_primary_type_4": "",
+      "covered_recipient_primary_type_5": "",
+      "covered_recipient_primary_type_6": "",
+      "covered_recipient_specialty_1": "Allopathic & Osteopathic Physicians|Neurological Surgery",
+      "covered_recipient_specialty_2": "",
+      "covered_recipient_specialty_3": "",
+      "covered_recipient_specialty_4": "",
+      "covered_recipient_specialty_5": "",
+      "covered_recipient_specialty_6": "",
+      "covered_recipient_license_state_code1": "PA",
+      "covered_recipient_license_state_code2": "",
+      "covered_recipient_license_state_code3": "",
+      "covered_recipient_license_state_code4": "",
+      "covered_recipient_license_state_code5": "",
+      "principal_investigator_1_covered_recipient_type": "",
+      "principal_investigator_1_profile_id": "",
+      "principal_investigator_1_npi": "",
+      "principal_investigator_1_first_name": "",
+      "principal_investigator_1_middle_name": "",
+      "principal_investigator_1_last_name": "",
+      "principal_investigator_1_name_suffix": "",
+      "principal_investigator_1_business_street_address_line1": "",
+      "principal_investigator_1_business_street_address_line2": "",
+      "principal_investigator_1_city": "",
+      "principal_investigator_1_state": "",
+      "principal_investigator_1_zip_code": "",
+      "principal_investigator_1_country": "",
+      "principal_investigator_1_province": "",
+      "principal_investigator_1_postal_code": "",
+      "principal_investigator_1_primary_type_1": "",
+      "principal_investigator_1_primary_type_2": "",
+      "principal_investigator_1_primary_type_3": "",
+      "principal_investigator_1_primary_type_4": "",
+      "principal_investigator_1_primary_type_5": "",
+      "principal_investigator_1_primary_type_6": "",
+      "principal_investigator_1_specialty_1": "",
+      "principal_investigator_1_specialty_2": "",
+      "principal_investigator_1_specialty_3": "",
+      "principal_investigator_1_specialty_4": "",
+      "principal_investigator_1_specialty_5": "",
+      "principal_investigator_1_specialty_6": "",
+      "principal_investigator_1_license_state_code1": "",
+      "principal_investigator_1_license_state_code2": "",
+      "principal_investigator_1_license_state_code3": "",
+      "principal_investigator_1_license_state_code4": "",
+      "principal_investigator_1_license_state_code5": "",
+      "principal_investigator_2_covered_recipient_type": "",
+      "principal_investigator_2_profile_id": "",
+      "principal_investigator_2_npi": "",
+      "principal_investigator_2_first_name": "",
+      "principal_investigator_2_middle_name": "",
+      "principal_investigator_2_last_name": "",
+      "principal_investigator_2_name_suffix": "",
+      "principal_investigator_2_business_street_address_line1": "",
+      "principal_investigator_2_business_street_address_line2": "",
+      "principal_investigator_2_city": "",
+      "principal_investigator_2_state": "",
+      "principal_investigator_2_zip_code": "",
+      "principal_investigator_2_country": "",
+      "principal_investigator_2_province": "",
+      "principal_investigator_2_postal_code": "",
+      "principal_investigator_2_primary_type_1": "",
+      "principal_investigator_2_primary_type_2": "",
+      "principal_investigator_2_primary_type_3": "",
+      "principal_investigator_2_primary_type_4": "",
+      "principal_investigator_2_primary_type_5": "",
+      "principal_investigator_2_primary_type_6": "",
+      "principal_investigator_2_specialty_1": "",
+      "principal_investigator_2_specialty_2": "",
+      "principal_investigator_2_specialty_3": "",
+      "principal_investigator_2_specialty_4": "",
+      "principal_investigator_2_specialty_5": "",
+      "principal_investigator_2_specialty_6": "",
+      "principal_investigator_2_license_state_code1": "",
+      "principal_investigator_2_license_state_code2": "",
+      "principal_investigator_2_license_state_code3": "",
+      "principal_investigator_2_license_state_code4": "",
+      "principal_investigator_2_license_state_code5": "",
+      "principal_investigator_3_covered_recipient_type": "",
+      "principal_investigator_3_profile_id": "",
+      "principal_investigator_3_npi": "",
+      "principal_investigator_3_first_name": "",
+      "principal_investigator_3_middle_name": "",
+      "principal_investigator_3_last_name": "",
+      "principal_investigator_3_name_suffix": "",
+      "principal_investigator_3_business_street_address_line1": "",
+      "principal_investigator_3_business_street_address_line2": "",
+      "principal_investigator_3_city": "",
+      "principal_investigator_3_state": "",
+      "principal_investigator_3_zip_code": "",
+      "principal_investigator_3_country": "",
+      "principal_investigator_3_province": "",
+      "principal_investigator_3_postal_code": "",
+      "principal_investigator_3_primary_type_1": "",
+      "principal_investigator_3_primary_type_2": "",
+      "principal_investigator_3_primary_type_3": "",
+      "principal_investigator_3_primary_type_4": "",
+      "principal_investigator_3_primary_type_5": "",
+      "principal_investigator_3_primary_type_6": "",
+      "principal_investigator_3_specialty_1": "",
+      "principal_investigator_3_specialty_2": "",
+      "principal_investigator_3_specialty_3": "",
+      "principal_investigator_3_specialty_4": "",
+      "principal_investigator_3_specialty_5": "",
+      "principal_investigator_3_specialty_6": "",
+      "principal_investigator_3_license_state_code1": "",
+      "principal_investigator_3_license_state_code2": "",
+      "principal_investigator_3_license_state_code3": "",
+      "principal_investigator_3_license_state_code4": "",
+      "principal_investigator_3_license_state_code5": "",
+      "principal_investigator_4_covered_recipient_type": "",
+      "principal_investigator_4_profile_id": "",
+      "principal_investigator_4_npi": "",
+      "principal_investigator_4_first_name": "",
+      "principal_investigator_4_middle_name": "",
+      "principal_investigator_4_last_name": "",
+      "principal_investigator_4_name_suffix": "",
+      "principal_investigator_4_business_street_address_line1": "",
+      "principal_investigator_4_business_street_address_line2": "",
+      "principal_investigator_4_city": "",
+      "principal_investigator_4_state": "",
+      "principal_investigator_4_zip_code": "",
+      "principal_investigator_4_country": "",
+      "principal_investigator_4_province": "",
+      "principal_investigator_4_postal_code": "",
+      "principal_investigator_4_primary_type_1": "",
+      "principal_investigator_4_primary_type_2": "",
+      "principal_investigator_4_primary_type_3": "",
+      "principal_investigator_4_primary_type_4": "",
+      "principal_investigator_4_primary_type_5": "",
+      "principal_investigator_4_primary_type_6": "",
+      "principal_investigator_4_specialty_1": "",
+      "principal_investigator_4_specialty_2": "",
+      "principal_investigator_4_specialty_3": "",
+      "principal_investigator_4_specialty_4": "",
+      "principal_investigator_4_specialty_5": "",
+      "principal_investigator_4_specialty_6": "",
+      "principal_investigator_4_license_state_code1": "",
+      "principal_investigator_4_license_state_code2": "",
+      "principal_investigator_4_license_state_code3": "",
+      "principal_investigator_4_license_state_code4": "",
+      "principal_investigator_4_license_state_code5": "",
+      "principal_investigator_5_covered_recipient_type": "",
+      "principal_investigator_5_profile_id": "",
+      "principal_investigator_5_npi": "",
+      "principal_investigator_5_first_name": "",
+      "principal_investigator_5_middle_name": "",
+      "principal_investigator_5_last_name": "",
+      "principal_investigator_5_name_suffix": "",
+      "principal_investigator_5_business_street_address_line1": "",
+      "principal_investigator_5_business_street_address_line2": "",
+      "principal_investigator_5_city": "",
+      "principal_investigator_5_state": "",
+      "principal_investigator_5_zip_code": "",
+      "principal_investigator_5_country": "",
+      "principal_investigator_5_province": "",
+      "principal_investigator_5_postal_code": "",
+      "principal_investigator_5_primary_type_1": "",
+      "principal_investigator_5_primary_type_2": "",
+      "principal_investigator_5_primary_type_3": "",
+      "principal_investigator_5_primary_type_4": "",
+      "principal_investigator_5_primary_type_5": "",
+      "principal_investigator_5_primary_type_6": "",
+      "principal_investigator_5_specialty_1": "",
+      "principal_investigator_5_specialty_2": "",
+      "principal_investigator_5_specialty_3": "",
+      "principal_investigator_5_specialty_4": "",
+      "principal_investigator_5_specialty_5": "",
+      "principal_investigator_5_specialty_6": "",
+      "principal_investigator_5_license_state_code1": "",
+      "principal_investigator_5_license_state_code2": "",
+      "principal_investigator_5_license_state_code3": "",
+      "principal_investigator_5_license_state_code4": "",
+      "principal_investigator_5_license_state_code5": "",
+      "submitting_applicable_manufacturer_or_applicable_gpo_name": "Hubly Incorporated",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_id": "100001351929",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_name": "Hubly Incorporated",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_state": "IL",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_country": "United States",
+      "related_product_indicator": "Yes",
+      "covered_or_noncovered_indicator_1": "Covered",
+      "indicate_drug_or_biological_or_device_or_medical_supply_1": "Device",
+      "product_category_or_therapeutic_area_1": "Powered simple cranial drills, burrs, trephines, and their accessories",
+      "name_of_drug_or_biological_or_device_or_medical_supply_1": "Hubly Auto-Stop Drill",
+      "associated_drug_or_biological_ndc_1": "",
+      "associated_device_or_medical_supply_pdi_1": "",
+      "covered_or_noncovered_indicator_2": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_2": "",
+      "product_category_or_therapeutic_area_2": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_2": "",
+      "associated_drug_or_biological_ndc_2": "",
+      "associated_device_or_medical_supply_pdi_2": "",
+      "covered_or_noncovered_indicator_3": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_3": "",
+      "product_category_or_therapeutic_area_3": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_3": "",
+      "associated_drug_or_biological_ndc_3": "",
+      "associated_device_or_medical_supply_pdi_3": "",
+      "covered_or_noncovered_indicator_4": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_4": "",
+      "product_category_or_therapeutic_area_4": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_4": "",
+      "associated_drug_or_biological_ndc_4": "",
+      "associated_device_or_medical_supply_pdi_4": "",
+      "covered_or_noncovered_indicator_5": "",
+      "indicate_drug_or_biological_or_device_or_medical_supply_5": "",
+      "product_category_or_therapeutic_area_5": "",
+      "name_of_drug_or_biological_or_device_or_medical_supply_5": "",
+      "associated_drug_or_biological_ndc_5": "",
+      "associated_device_or_medical_supply_pdi_5": "",
+      "total_amount_of_payment_usdollars": "281.25",
+      "date_of_payment": "09/11/2025",
+      "form_of_payment_or_transfer_of_value": "Cash or cash equivalent",
+      "expenditure_category1": "",
+      "expenditure_category2": "",
+      "expenditure_category3": "",
+      "expenditure_category4": "",
+      "expenditure_category5": "",
+      "expenditure_category6": "",
+      "preclinical_research_indicator": "Yes",
+      "delay_in_publication_indicator": "No",
+      "name_of_study": "",
+      "dispute_status_for_publication": "No",
+      "record_id": "1157326022",
+      "program_year": "2025",
+      "payment_publication_date": "06/30/2026",
+      "clinicaltrials_gov_identifier": "",
+      "research_information_link": "",
+      "context_of_research": ""
+    }
+  ],
+  "count": 931959,
+  "schema": {
+    "19628007-c35b-54f7-8f50-21eefc1b6db2": {
+      "fields": {
+        "change_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Change_Type"
+        },
+        "covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Type"
+        },
+        "noncovered_recipient_entity_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Noncovered_Recipient_Entity_Name"
+        },
+        "teaching_hospital_ccn": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Teaching_Hospital_CCN"
+        },
+        "teaching_hospital_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Teaching_Hospital_ID"
+        },
+        "teaching_hospital_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Teaching_Hospital_Name"
+        },
+        "covered_recipient_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Profile_ID"
+        },
+        "covered_recipient_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_NPI"
+        },
+        "covered_recipient_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_First_Name"
+        },
+        "covered_recipient_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Middle_Name"
+        },
+        "covered_recipient_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Last_Name"
+        },
+        "covered_recipient_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Name_Suffix"
+        },
+        "recipient_primary_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Primary_Business_Street_Address_Line1"
+        },
+        "recipient_primary_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Primary_Business_Street_Address_Line2"
+        },
+        "recipient_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_City"
+        },
+        "recipient_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_State"
+        },
+        "recipient_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Zip_Code"
+        },
+        "recipient_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Country"
+        },
+        "recipient_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Province"
+        },
+        "recipient_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Recipient_Postal_Code"
+        },
+        "covered_recipient_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_1"
+        },
+        "covered_recipient_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_2"
+        },
+        "covered_recipient_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_3"
+        },
+        "covered_recipient_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_4"
+        },
+        "covered_recipient_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_5"
+        },
+        "covered_recipient_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Primary_Type_6"
+        },
+        "covered_recipient_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_1"
+        },
+        "covered_recipient_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_2"
+        },
+        "covered_recipient_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_3"
+        },
+        "covered_recipient_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_4"
+        },
+        "covered_recipient_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_5"
+        },
+        "covered_recipient_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_Specialty_6"
+        },
+        "covered_recipient_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_License_State_code1"
+        },
+        "covered_recipient_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_License_State_code2"
+        },
+        "covered_recipient_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_License_State_code3"
+        },
+        "covered_recipient_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_License_State_code4"
+        },
+        "covered_recipient_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_Recipient_License_State_code5"
+        },
+        "principal_investigator_1_covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Covered_Recipient_Type"
+        },
+        "principal_investigator_1_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Profile_ID"
+        },
+        "principal_investigator_1_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_NPI"
+        },
+        "principal_investigator_1_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_First_Name"
+        },
+        "principal_investigator_1_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Middle_Name"
+        },
+        "principal_investigator_1_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Last_Name"
+        },
+        "principal_investigator_1_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Name_Suffix"
+        },
+        "principal_investigator_1_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Business_Street_Address_Line1"
+        },
+        "principal_investigator_1_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Business_Street_Address_Line2"
+        },
+        "principal_investigator_1_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_City"
+        },
+        "principal_investigator_1_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_State"
+        },
+        "principal_investigator_1_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Zip_Code"
+        },
+        "principal_investigator_1_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Country"
+        },
+        "principal_investigator_1_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Province"
+        },
+        "principal_investigator_1_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Postal_Code"
+        },
+        "principal_investigator_1_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_1"
+        },
+        "principal_investigator_1_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_2"
+        },
+        "principal_investigator_1_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_3"
+        },
+        "principal_investigator_1_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_4"
+        },
+        "principal_investigator_1_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_5"
+        },
+        "principal_investigator_1_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Primary_Type_6"
+        },
+        "principal_investigator_1_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_1"
+        },
+        "principal_investigator_1_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_2"
+        },
+        "principal_investigator_1_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_3"
+        },
+        "principal_investigator_1_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_4"
+        },
+        "principal_investigator_1_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_5"
+        },
+        "principal_investigator_1_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_Specialty_6"
+        },
+        "principal_investigator_1_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_License_State_code1"
+        },
+        "principal_investigator_1_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_License_State_code2"
+        },
+        "principal_investigator_1_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_License_State_code3"
+        },
+        "principal_investigator_1_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_License_State_code4"
+        },
+        "principal_investigator_1_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_1_License_State_code5"
+        },
+        "principal_investigator_2_covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Covered_Recipient_Type"
+        },
+        "principal_investigator_2_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Profile_ID"
+        },
+        "principal_investigator_2_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_NPI"
+        },
+        "principal_investigator_2_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_First_Name"
+        },
+        "principal_investigator_2_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Middle_Name"
+        },
+        "principal_investigator_2_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Last_Name"
+        },
+        "principal_investigator_2_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Name_Suffix"
+        },
+        "principal_investigator_2_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Business_Street_Address_Line1"
+        },
+        "principal_investigator_2_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Business_Street_Address_Line2"
+        },
+        "principal_investigator_2_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_City"
+        },
+        "principal_investigator_2_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_State"
+        },
+        "principal_investigator_2_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Zip_Code"
+        },
+        "principal_investigator_2_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Country"
+        },
+        "principal_investigator_2_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Province"
+        },
+        "principal_investigator_2_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Postal_Code"
+        },
+        "principal_investigator_2_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_1"
+        },
+        "principal_investigator_2_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_2"
+        },
+        "principal_investigator_2_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_3"
+        },
+        "principal_investigator_2_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_4"
+        },
+        "principal_investigator_2_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_5"
+        },
+        "principal_investigator_2_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Primary_Type_6"
+        },
+        "principal_investigator_2_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_1"
+        },
+        "principal_investigator_2_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_2"
+        },
+        "principal_investigator_2_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_3"
+        },
+        "principal_investigator_2_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_4"
+        },
+        "principal_investigator_2_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_5"
+        },
+        "principal_investigator_2_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_Specialty_6"
+        },
+        "principal_investigator_2_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_License_State_code1"
+        },
+        "principal_investigator_2_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_License_State_code2"
+        },
+        "principal_investigator_2_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_License_State_code3"
+        },
+        "principal_investigator_2_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_License_State_code4"
+        },
+        "principal_investigator_2_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_2_License_State_code5"
+        },
+        "principal_investigator_3_covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Covered_Recipient_Type"
+        },
+        "principal_investigator_3_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Profile_ID"
+        },
+        "principal_investigator_3_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_NPI"
+        },
+        "principal_investigator_3_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_First_Name"
+        },
+        "principal_investigator_3_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Middle_Name"
+        },
+        "principal_investigator_3_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Last_Name"
+        },
+        "principal_investigator_3_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Name_Suffix"
+        },
+        "principal_investigator_3_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Business_Street_Address_Line1"
+        },
+        "principal_investigator_3_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Business_Street_Address_Line2"
+        },
+        "principal_investigator_3_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_City"
+        },
+        "principal_investigator_3_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_State"
+        },
+        "principal_investigator_3_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Zip_Code"
+        },
+        "principal_investigator_3_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Country"
+        },
+        "principal_investigator_3_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Province"
+        },
+        "principal_investigator_3_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Postal_Code"
+        },
+        "principal_investigator_3_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_1"
+        },
+        "principal_investigator_3_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_2"
+        },
+        "principal_investigator_3_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_3"
+        },
+        "principal_investigator_3_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_4"
+        },
+        "principal_investigator_3_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_5"
+        },
+        "principal_investigator_3_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Primary_Type_6"
+        },
+        "principal_investigator_3_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_1"
+        },
+        "principal_investigator_3_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_2"
+        },
+        "principal_investigator_3_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_3"
+        },
+        "principal_investigator_3_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_4"
+        },
+        "principal_investigator_3_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_5"
+        },
+        "principal_investigator_3_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_Specialty_6"
+        },
+        "principal_investigator_3_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_License_State_code1"
+        },
+        "principal_investigator_3_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_License_State_code2"
+        },
+        "principal_investigator_3_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_License_State_code3"
+        },
+        "principal_investigator_3_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_License_State_code4"
+        },
+        "principal_investigator_3_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_3_License_State_code5"
+        },
+        "principal_investigator_4_covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Covered_Recipient_Type"
+        },
+        "principal_investigator_4_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Profile_ID"
+        },
+        "principal_investigator_4_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_NPI"
+        },
+        "principal_investigator_4_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_First_Name"
+        },
+        "principal_investigator_4_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Middle_Name"
+        },
+        "principal_investigator_4_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Last_Name"
+        },
+        "principal_investigator_4_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Name_Suffix"
+        },
+        "principal_investigator_4_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Business_Street_Address_Line1"
+        },
+        "principal_investigator_4_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Business_Street_Address_Line2"
+        },
+        "principal_investigator_4_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_City"
+        },
+        "principal_investigator_4_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_State"
+        },
+        "principal_investigator_4_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Zip_Code"
+        },
+        "principal_investigator_4_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Country"
+        },
+        "principal_investigator_4_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Province"
+        },
+        "principal_investigator_4_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Postal_Code"
+        },
+        "principal_investigator_4_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_1"
+        },
+        "principal_investigator_4_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_2"
+        },
+        "principal_investigator_4_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_3"
+        },
+        "principal_investigator_4_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_4"
+        },
+        "principal_investigator_4_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_5"
+        },
+        "principal_investigator_4_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Primary_Type_6"
+        },
+        "principal_investigator_4_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_1"
+        },
+        "principal_investigator_4_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_2"
+        },
+        "principal_investigator_4_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_3"
+        },
+        "principal_investigator_4_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_4"
+        },
+        "principal_investigator_4_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_5"
+        },
+        "principal_investigator_4_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_Specialty_6"
+        },
+        "principal_investigator_4_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_License_State_code1"
+        },
+        "principal_investigator_4_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_License_State_code2"
+        },
+        "principal_investigator_4_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_License_State_code3"
+        },
+        "principal_investigator_4_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_License_State_code4"
+        },
+        "principal_investigator_4_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_4_License_State_code5"
+        },
+        "principal_investigator_5_covered_recipient_type": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Covered_Recipient_Type"
+        },
+        "principal_investigator_5_profile_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Profile_ID"
+        },
+        "principal_investigator_5_npi": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_NPI"
+        },
+        "principal_investigator_5_first_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_First_Name"
+        },
+        "principal_investigator_5_middle_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Middle_Name"
+        },
+        "principal_investigator_5_last_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Last_Name"
+        },
+        "principal_investigator_5_name_suffix": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Name_Suffix"
+        },
+        "principal_investigator_5_business_street_address_line1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Business_Street_Address_Line1"
+        },
+        "principal_investigator_5_business_street_address_line2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Business_Street_Address_Line2"
+        },
+        "principal_investigator_5_city": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_City"
+        },
+        "principal_investigator_5_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_State"
+        },
+        "principal_investigator_5_zip_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Zip_Code"
+        },
+        "principal_investigator_5_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Country"
+        },
+        "principal_investigator_5_province": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Province"
+        },
+        "principal_investigator_5_postal_code": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Postal_Code"
+        },
+        "principal_investigator_5_primary_type_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_1"
+        },
+        "principal_investigator_5_primary_type_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_2"
+        },
+        "principal_investigator_5_primary_type_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_3"
+        },
+        "principal_investigator_5_primary_type_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_4"
+        },
+        "principal_investigator_5_primary_type_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_5"
+        },
+        "principal_investigator_5_primary_type_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Primary_Type_6"
+        },
+        "principal_investigator_5_specialty_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_1"
+        },
+        "principal_investigator_5_specialty_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_2"
+        },
+        "principal_investigator_5_specialty_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_3"
+        },
+        "principal_investigator_5_specialty_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_4"
+        },
+        "principal_investigator_5_specialty_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_5"
+        },
+        "principal_investigator_5_specialty_6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_Specialty_6"
+        },
+        "principal_investigator_5_license_state_code1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_License_State_code1"
+        },
+        "principal_investigator_5_license_state_code2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_License_State_code2"
+        },
+        "principal_investigator_5_license_state_code3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_License_State_code3"
+        },
+        "principal_investigator_5_license_state_code4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_License_State_code4"
+        },
+        "principal_investigator_5_license_state_code5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Principal_Investigator_5_License_State_code5"
+        },
+        "submitting_applicable_manufacturer_or_applicable_gpo_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name"
+        },
+        "applicable_manufacturer_or_applicable_gpo_making_payment_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_ID"
+        },
+        "applicable_manufacturer_or_applicable_gpo_making_payment_name": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name"
+        },
+        "applicable_manufacturer_or_applicable_gpo_making_payment_state": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_State"
+        },
+        "applicable_manufacturer_or_applicable_gpo_making_payment_country": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Country"
+        },
+        "related_product_indicator": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Related_Product_Indicator"
+        },
+        "covered_or_noncovered_indicator_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_or_Noncovered_Indicator_1"
+        },
+        "indicate_drug_or_biological_or_device_or_medical_supply_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_1"
+        },
+        "product_category_or_therapeutic_area_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Product_Category_or_Therapeutic_Area_1"
+        },
+        "name_of_drug_or_biological_or_device_or_medical_supply_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1"
+        },
+        "associated_drug_or_biological_ndc_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Drug_or_Biological_NDC_1"
+        },
+        "associated_device_or_medical_supply_pdi_1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Device_or_Medical_Supply_PDI_1"
+        },
+        "covered_or_noncovered_indicator_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_or_Noncovered_Indicator_2"
+        },
+        "indicate_drug_or_biological_or_device_or_medical_supply_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_2"
+        },
+        "product_category_or_therapeutic_area_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Product_Category_or_Therapeutic_Area_2"
+        },
+        "name_of_drug_or_biological_or_device_or_medical_supply_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_2"
+        },
+        "associated_drug_or_biological_ndc_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Drug_or_Biological_NDC_2"
+        },
+        "associated_device_or_medical_supply_pdi_2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Device_or_Medical_Supply_PDI_2"
+        },
+        "covered_or_noncovered_indicator_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_or_Noncovered_Indicator_3"
+        },
+        "indicate_drug_or_biological_or_device_or_medical_supply_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_3"
+        },
+        "product_category_or_therapeutic_area_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Product_Category_or_Therapeutic_Area_3"
+        },
+        "name_of_drug_or_biological_or_device_or_medical_supply_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_3"
+        },
+        "associated_drug_or_biological_ndc_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Drug_or_Biological_NDC_3"
+        },
+        "associated_device_or_medical_supply_pdi_3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Device_or_Medical_Supply_PDI_3"
+        },
+        "covered_or_noncovered_indicator_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_or_Noncovered_Indicator_4"
+        },
+        "indicate_drug_or_biological_or_device_or_medical_supply_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_4"
+        },
+        "product_category_or_therapeutic_area_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Product_Category_or_Therapeutic_Area_4"
+        },
+        "name_of_drug_or_biological_or_device_or_medical_supply_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_4"
+        },
+        "associated_drug_or_biological_ndc_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Drug_or_Biological_NDC_4"
+        },
+        "associated_device_or_medical_supply_pdi_4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Device_or_Medical_Supply_PDI_4"
+        },
+        "covered_or_noncovered_indicator_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Covered_or_Noncovered_Indicator_5"
+        },
+        "indicate_drug_or_biological_or_device_or_medical_supply_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_5"
+        },
+        "product_category_or_therapeutic_area_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Product_Category_or_Therapeutic_Area_5"
+        },
+        "name_of_drug_or_biological_or_device_or_medical_supply_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_5"
+        },
+        "associated_drug_or_biological_ndc_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Drug_or_Biological_NDC_5"
+        },
+        "associated_device_or_medical_supply_pdi_5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Associated_Device_or_Medical_Supply_PDI_5"
+        },
+        "total_amount_of_payment_usdollars": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Total_Amount_of_Payment_USDollars"
+        },
+        "date_of_payment": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Date_of_Payment"
+        },
+        "form_of_payment_or_transfer_of_value": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Form_of_Payment_or_Transfer_of_Value"
+        },
+        "expenditure_category1": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category1"
+        },
+        "expenditure_category2": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category2"
+        },
+        "expenditure_category3": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category3"
+        },
+        "expenditure_category4": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category4"
+        },
+        "expenditure_category5": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category5"
+        },
+        "expenditure_category6": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Expenditure_Category6"
+        },
+        "preclinical_research_indicator": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Preclinical_Research_Indicator"
+        },
+        "delay_in_publication_indicator": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Delay_in_Publication_Indicator"
+        },
+        "name_of_study": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Name_of_Study"
+        },
+        "dispute_status_for_publication": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Dispute_Status_for_Publication"
+        },
+        "record_id": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Record_ID"
+        },
+        "program_year": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Program_Year"
+        },
+        "payment_publication_date": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Payment_Publication_Date"
+        },
+        "clinicaltrials_gov_identifier": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "ClinicalTrials_Gov_Identifier"
+        },
+        "research_information_link": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Research_Information_Link"
+        },
+        "context_of_research": {
+          "type": "text",
+          "mysql_type": "text",
+          "description": "Context_of_Research"
+        }
+      },
+      "indexes": {
+        "idx5": [
+          "record_id"
+        ],
+        "idx12": [
+          "covered_recipient_profile_id"
+        ],
+        "idx14": [
+          "applicable_manufacturer_or_applicable_gpo_making_payment_id"
+        ],
+        "idx18": [
+          "covered_recipient_profile_id",
+          "principal_investigator_1_profile_id",
+          "principal_investigator_2_profile_id",
+          "principal_investigator_3_profile_id",
+          "principal_investigator_4_profile_id",
+          "principal_investigator_5_profile_id"
+        ],
+        "idx22": [
+          "recipient_state",
+          "covered_recipient_type"
+        ],
+        "idx_npi": [
+          "covered_recipient_npi"
+        ]
+      }
+    }
+  },
+  "query": {
+    "limit": 50,
+    "keys": true,
+    "schema": true,
+    "count": true,
+    "sorts": [
+      {
+        "property": "record_id",
+        "order": "asc"
+      }
+    ],
+    "resources": [
+      {
+        "id": "19628007-c35b-54f7-8f50-21eefc1b6db2",
+        "alias": "t"
+      }
+    ],
+    "offset": 0,
+    "results": true,
+    "format": "json",
+    "rowIds": false,
+    "properties": [
+      "change_type",
+      "covered_recipient_type",
+      "noncovered_recipient_entity_name",
+      "teaching_hospital_ccn",
+      "teaching_hospital_id",
+      "teaching_hospital_name",
+      "covered_recipient_profile_id",
+      "covered_recipient_npi",
+      "covered_recipient_first_name",
+      "covered_recipient_middle_name",
+      "covered_recipient_last_name",
+      "covered_recipient_name_suffix",
+      "recipient_primary_business_street_address_line1",
+      "recipient_primary_business_street_address_line2",
+      "recipient_city",
+      "recipient_state",
+      "recipient_zip_code",
+      "recipient_country",
+      "recipient_province",
+      "recipient_postal_code",
+      "covered_recipient_primary_type_1",
+      "covered_recipient_primary_type_2",
+      "covered_recipient_primary_type_3",
+      "covered_recipient_primary_type_4",
+      "covered_recipient_primary_type_5",
+      "covered_recipient_primary_type_6",
+      "covered_recipient_specialty_1",
+      "covered_recipient_specialty_2",
+      "covered_recipient_specialty_3",
+      "covered_recipient_specialty_4",
+      "covered_recipient_specialty_5",
+      "covered_recipient_specialty_6",
+      "covered_recipient_license_state_code1",
+      "covered_recipient_license_state_code2",
+      "covered_recipient_license_state_code3",
+      "covered_recipient_license_state_code4",
+      "covered_recipient_license_state_code5",
+      "principal_investigator_1_covered_recipient_type",
+      "principal_investigator_1_profile_id",
+      "principal_investigator_1_npi",
+      "principal_investigator_1_first_name",
+      "principal_investigator_1_middle_name",
+      "principal_investigator_1_last_name",
+      "principal_investigator_1_name_suffix",
+      "principal_investigator_1_business_street_address_line1",
+      "principal_investigator_1_business_street_address_line2",
+      "principal_investigator_1_city",
+      "principal_investigator_1_state",
+      "principal_investigator_1_zip_code",
+      "principal_investigator_1_country",
+      "principal_investigator_1_province",
+      "principal_investigator_1_postal_code",
+      "principal_investigator_1_primary_type_1",
+      "principal_investigator_1_primary_type_2",
+      "principal_investigator_1_primary_type_3",
+      "principal_investigator_1_primary_type_4",
+      "principal_investigator_1_primary_type_5",
+      "principal_investigator_1_primary_type_6",
+      "principal_investigator_1_specialty_1",
+      "principal_investigator_1_specialty_2",
+      "principal_investigator_1_specialty_3",
+      "principal_investigator_1_specialty_4",
+      "principal_investigator_1_specialty_5",
+      "principal_investigator_1_specialty_6",
+      "principal_investigator_1_license_state_code1",
+      "principal_investigator_1_license_state_code2",
+      "principal_investigator_1_license_state_code3",
+      "principal_investigator_1_license_state_code4",
+      "principal_investigator_1_license_state_code5",
+      "principal_investigator_2_covered_recipient_type",
+      "principal_investigator_2_profile_id",
+      "principal_investigator_2_npi",
+      "principal_investigator_2_first_name",
+      "principal_investigator_2_middle_name",
+      "principal_investigator_2_last_name",
+      "principal_investigator_2_name_suffix",
+      "principal_investigator_2_business_street_address_line1",
+      "principal_investigator_2_business_street_address_line2",
+      "principal_investigator_2_city",
+      "principal_investigator_2_state",
+      "principal_investigator_2_zip_code",
+      "principal_investigator_2_country",
+      "principal_investigator_2_province",
+      "principal_investigator_2_postal_code",
+      "principal_investigator_2_primary_type_1",
+      "principal_investigator_2_primary_type_2",
+      "principal_investigator_2_primary_type_3",
+      "principal_investigator_2_primary_type_4",
+      "principal_investigator_2_primary_type_5",
+      "principal_investigator_2_primary_type_6",
+      "principal_investigator_2_specialty_1",
+      "principal_investigator_2_specialty_2",
+      "principal_investigator_2_specialty_3",
+      "principal_investigator_2_specialty_4",
+      "principal_investigator_2_specialty_5",
+      "principal_investigator_2_specialty_6",
+      "principal_investigator_2_license_state_code1",
+      "principal_investigator_2_license_state_code2",
+      "principal_investigator_2_license_state_code3",
+      "principal_investigator_2_license_state_code4",
+      "principal_investigator_2_license_state_code5",
+      "principal_investigator_3_covered_recipient_type",
+      "principal_investigator_3_profile_id",
+      "principal_investigator_3_npi",
+      "principal_investigator_3_first_name",
+      "principal_investigator_3_middle_name",
+      "principal_investigator_3_last_name",
+      "principal_investigator_3_name_suffix",
+      "principal_investigator_3_business_street_address_line1",
+      "principal_investigator_3_business_street_address_line2",
+      "principal_investigator_3_city",
+      "principal_investigator_3_state",
+      "principal_investigator_3_zip_code",
+      "principal_investigator_3_country",
+      "principal_investigator_3_province",
+      "principal_investigator_3_postal_code",
+      "principal_investigator_3_primary_type_1",
+      "principal_investigator_3_primary_type_2",
+      "principal_investigator_3_primary_type_3",
+      "principal_investigator_3_primary_type_4",
+      "principal_investigator_3_primary_type_5",
+      "principal_investigator_3_primary_type_6",
+      "principal_investigator_3_specialty_1",
+      "principal_investigator_3_specialty_2",
+      "principal_investigator_3_specialty_3",
+      "principal_investigator_3_specialty_4",
+      "principal_investigator_3_specialty_5",
+      "principal_investigator_3_specialty_6",
+      "principal_investigator_3_license_state_code1",
+      "principal_investigator_3_license_state_code2",
+      "principal_investigator_3_license_state_code3",
+      "principal_investigator_3_license_state_code4",
+      "principal_investigator_3_license_state_code5",
+      "principal_investigator_4_covered_recipient_type",
+      "principal_investigator_4_profile_id",
+      "principal_investigator_4_npi",
+      "principal_investigator_4_first_name",
+      "principal_investigator_4_middle_name",
+      "principal_investigator_4_last_name",
+      "principal_investigator_4_name_suffix",
+      "principal_investigator_4_business_street_address_line1",
+      "principal_investigator_4_business_street_address_line2",
+      "principal_investigator_4_city",
+      "principal_investigator_4_state",
+      "principal_investigator_4_zip_code",
+      "principal_investigator_4_country",
+      "principal_investigator_4_province",
+      "principal_investigator_4_postal_code",
+      "principal_investigator_4_primary_type_1",
+      "principal_investigator_4_primary_type_2",
+      "principal_investigator_4_primary_type_3",
+      "principal_investigator_4_primary_type_4",
+      "principal_investigator_4_primary_type_5",
+      "principal_investigator_4_primary_type_6",
+      "principal_investigator_4_specialty_1",
+      "principal_investigator_4_specialty_2",
+      "principal_investigator_4_specialty_3",
+      "principal_investigator_4_specialty_4",
+      "principal_investigator_4_specialty_5",
+      "principal_investigator_4_specialty_6",
+      "principal_investigator_4_license_state_code1",
+      "principal_investigator_4_license_state_code2",
+      "principal_investigator_4_license_state_code3",
+      "principal_investigator_4_license_state_code4",
+      "principal_investigator_4_license_state_code5",
+      "principal_investigator_5_covered_recipient_type",
+      "principal_investigator_5_profile_id",
+      "principal_investigator_5_npi",
+      "principal_investigator_5_first_name",
+      "principal_investigator_5_middle_name",
+      "principal_investigator_5_last_name",
+      "principal_investigator_5_name_suffix",
+      "principal_investigator_5_business_street_address_line1",
+      "principal_investigator_5_business_street_address_line2",
+      "principal_investigator_5_city",
+      "principal_investigator_5_state",
+      "principal_investigator_5_zip_code",
+      "principal_investigator_5_country",
+      "principal_investigator_5_province",
+      "principal_investigator_5_postal_code",
+      "principal_investigator_5_primary_type_1",
+      "principal_investigator_5_primary_type_2",
+      "principal_investigator_5_primary_type_3",
+      "principal_investigator_5_primary_type_4",
+      "principal_investigator_5_primary_type_5",
+      "principal_investigator_5_primary_type_6",
+      "principal_investigator_5_specialty_1",
+      "principal_investigator_5_specialty_2",
+      "principal_investigator_5_specialty_3",
+      "principal_investigator_5_specialty_4",
+      "principal_investigator_5_specialty_5",
+      "principal_investigator_5_specialty_6",
+      "principal_investigator_5_license_state_code1",
+      "principal_investigator_5_license_state_code2",
+      "principal_investigator_5_license_state_code3",
+      "principal_investigator_5_license_state_code4",
+      "principal_investigator_5_license_state_code5",
+      "submitting_applicable_manufacturer_or_applicable_gpo_name",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_id",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_name",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_state",
+      "applicable_manufacturer_or_applicable_gpo_making_payment_country",
+      "related_product_indicator",
+      "covered_or_noncovered_indicator_1",
+      "indicate_drug_or_biological_or_device_or_medical_supply_1",
+      "product_category_or_therapeutic_area_1",
+      "name_of_drug_or_biological_or_device_or_medical_supply_1",
+      "associated_drug_or_biological_ndc_1",
+      "associated_device_or_medical_supply_pdi_1",
+      "covered_or_noncovered_indicator_2",
+      "indicate_drug_or_biological_or_device_or_medical_supply_2",
+      "product_category_or_therapeutic_area_2",
+      "name_of_drug_or_biological_or_device_or_medical_supply_2",
+      "associated_drug_or_biological_ndc_2",
+      "associated_device_or_medical_supply_pdi_2",
+      "covered_or_noncovered_indicator_3",
+      "indicate_drug_or_biological_or_device_or_medical_supply_3",
+      "product_category_or_therapeutic_area_3",
+      "name_of_drug_or_biological_or_device_or_medical_supply_3",
+      "associated_drug_or_biological_ndc_3",
+      "associated_device_or_medical_supply_pdi_3",
+      "covered_or_noncovered_indicator_4",
+      "indicate_drug_or_biological_or_device_or_medical_supply_4",
+      "product_category_or_therapeutic_area_4",
+      "name_of_drug_or_biological_or_device_or_medical_supply_4",
+      "associated_drug_or_biological_ndc_4",
+      "associated_device_or_medical_supply_pdi_4",
+      "covered_or_noncovered_indicator_5",
+      "indicate_drug_or_biological_or_device_or_medical_supply_5",
+      "product_category_or_therapeutic_area_5",
+      "name_of_drug_or_biological_or_device_or_medical_supply_5",
+      "associated_drug_or_biological_ndc_5",
+      "associated_device_or_medical_supply_pdi_5",
+      "total_amount_of_payment_usdollars",
+      "date_of_payment",
+      "form_of_payment_or_transfer_of_value",
+      "expenditure_category1",
+      "expenditure_category2",
+      "expenditure_category3",
+      "expenditure_category4",
+      "expenditure_category5",
+      "expenditure_category6",
+      "preclinical_research_indicator",
+      "delay_in_publication_indicator",
+      "name_of_study",
+      "dispute_status_for_publication",
+      "record_id",
+      "program_year",
+      "payment_publication_date",
+      "clinicaltrials_gov_identifier",
+      "research_information_link",
+      "context_of_research"
+    ]
+  }
+}

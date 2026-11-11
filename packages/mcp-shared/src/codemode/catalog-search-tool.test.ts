@@ -55,6 +55,13 @@ function handlerFor(cat: ApiCatalog = catalog): Handler {
 }
 
 describe("createCatalogSearchTool", () => {
+	it("exposes executable workflows through the registered handler", async () => {
+		const workflow = { title: "Release-pinned workflow", description: "Compare native assemblies", keywords: ["pangenome"], code: 'return await api.get("/gene/1");' };
+		const result = await handlerFor({ ...catalog, workflows: [workflow] })({ query: "pangenome" });
+		expect(result.structuredContent?.data.workflows).toEqual([workflow]);
+		expect(result.structuredContent?.data.results_count).toBe(0);
+		expect(result.content?.[0].text).toContain(workflow.code);
+	});
 	it("names the tool <prefix>_search", () => {
 		expect(createCatalogSearchTool("test", catalog).name).toBe("test_search");
 	});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	createGetSchemaHandler,
 	createQueryDataHandler,
@@ -62,10 +62,21 @@ describe("shouldStage", () => {
 });
 
 describe("generateDataAccessId", () => {
-	it("builds a prefixed, unique-ish id", () => {
+	it("builds a prefixed id with 128 random bits", () => {
 		const id = generateDataAccessId("civic");
-		expect(id).toMatch(/^civic_\d+_[a-z0-9]+$/);
-		expect(generateDataAccessId("civic")).not.toBe("");
+		expect(id).toMatch(/^civic_\d{13}_[0-9a-f]{32}$/);
+	});
+
+	it("takes the random part from the CSPRNG, not from Math.random", () => {
+		// The id is the only credential for a staged dataset, so it must not be predictable.
+		const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+		try {
+			const ids = new Set(Array.from({ length: 200 }, () => generateDataAccessId("civic").split("_")[2]));
+			expect(ids.size).toBe(200);
+			expect(random).not.toHaveBeenCalled();
+		} finally {
+			random.mockRestore();
+		}
 	});
 });
 

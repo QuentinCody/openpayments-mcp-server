@@ -167,3 +167,49 @@ describe("createGraphqlExecuteTool degrades when the API disables introspection"
 		expect(captured.code).toContain("available: false");
 	});
 });
+
+describe("createGraphqlExecuteTool carries the license profile to the adapter", () => {
+	// A reselling caller (the paid orchestrator) sends the profile in params._meta.
+	// The server's GraphqlFetchFn and ApiFetchFn must receive it, so they can
+	// withhold what the upstream terms do not permit commercially.
+	async function callWith(extra: unknown) {
+		const seen: { gql: unknown[]; rest: unknown[] } = { gql: [], rest: [] };
+		const tool = createGraphqlExecuteTool({
+			prefix: "dgidb",
+			gqlFetch: async (_query, _variables, request) => {
+				seen.gql.push(request);
+				return { data: { ok: true } };
+			},
+			restApiFetch: async (request) => {
+				seen.rest.push(request.licenseProfile);
+				return { status: 200, data: {} };
+			},
+			loader: { get: () => ({}) },
+			introspection,
+		});
+		let handler: Handler | undefined;
+		tool.register({
+			tool: (...args: unknown[]) => {
+				if (typeof args[0] === "string" && args[0].endsWith("_execute")) handler = args[3] as Handler;
+			},
+		});
+		await handler?.({ code: "return 1" }, extra);
+		const gqlProxy = captured.fns.__graphql_proxy as (args: unknown) => Promise<unknown>;
+		const apiProxy = captured.fns.__api_proxy as (args: unknown) => Promise<unknown>;
+		await gqlProxy({ query: "{ ok }" });
+		await apiProxy({ method: "GET", path: "/x" });
+		return seen;
+	}
+
+	it("passes licenseProfile 'commercial' to gqlFetch and to the REST adapter", async () => {
+		const seen = await callWith({ _meta: { "dev.quentincody.bio/licenseProfile": "commercial" } });
+		expect(seen.gql).toEqual([{ licenseProfile: "commercial" }]);
+		expect(seen.rest).toEqual(["commercial"]);
+	});
+
+	it("passes nothing without the profile, so the adapter behaves as before", async () => {
+		const seen = await callWith({});
+		expect(seen.gql).toEqual([undefined]);
+		expect(seen.rest).toEqual([undefined]);
+	});
+});

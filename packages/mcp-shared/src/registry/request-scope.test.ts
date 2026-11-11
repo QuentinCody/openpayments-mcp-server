@@ -3,8 +3,10 @@ import {
 	CHAT_SCOPE_META_KEY,
 	childTraceparent,
 	getRequestCorrelation,
+	getRequestLicenseProfile,
 	getRequestScope,
 	getRequestTraceparent,
+	LICENSE_PROFILE_META_KEY,
 	type MaybeExtra,
 	nestedCallMeta,
 	TRACEPARENT_META_KEY,
@@ -246,5 +248,39 @@ describe("request trace correlation", () => {
 		expect(meta[TRACEPARENT_META_KEY]).toMatch(
 			/^00-0123456789abcdef0123456789abcdef-[0-9a-f]{16}-01$/,
 		);
+	});
+});
+
+describe("license profile of a request", () => {
+	// A reselling caller (the paid orchestrator) sends this key. A server then
+	// withholds the content that its upstream terms do not permit commercially.
+
+	it("is read from the spec location first, then from the v1 location", () => {
+		expect(getRequestLicenseProfile({ mcpReq: { _meta: { [LICENSE_PROFILE_META_KEY]: "commercial" } } })).toBe("commercial");
+		expect(getRequestLicenseProfile({ _meta: { [LICENSE_PROFILE_META_KEY]: "commercial" } })).toBe("commercial");
+	});
+
+	it("has an effect only for the exact value 'commercial'", () => {
+		for (const value of ["Commercial", "COMMERCIAL", "academic", "", true, 1, null, { profile: "commercial" }]) {
+			expect(getRequestLicenseProfile({ _meta: { [LICENSE_PROFILE_META_KEY]: value } } as MaybeExtra)).toBeUndefined();
+		}
+		expect(getRequestLicenseProfile(undefined)).toBeUndefined();
+		expect(getRequestLicenseProfile({})).toBeUndefined();
+	});
+
+	it("is part of the request correlation, alone or with the chat scope", () => {
+		expect(getRequestCorrelation({ _meta: { [LICENSE_PROFILE_META_KEY]: "commercial" } })).toEqual({
+			chatId: undefined,
+			traceparent: undefined,
+			licenseProfile: "commercial",
+		});
+		const both = getRequestCorrelation({ _meta: { [CHAT_SCOPE_META_KEY]: "chat-7", [LICENSE_PROFILE_META_KEY]: "commercial" } });
+		expect(both).toMatchObject({ chatId: "chat-7", licenseProfile: "commercial" });
+		expect(getRequestCorrelation({ _meta: { [CHAT_SCOPE_META_KEY]: "chat-7" } })).not.toHaveProperty("licenseProfile");
+	});
+
+	it("is copied to a nested call, so a server that calls another server keeps the restriction", () => {
+		expect(nestedCallMeta({ licenseProfile: "commercial" })).toEqual({ [LICENSE_PROFILE_META_KEY]: "commercial" });
+		expect(nestedCallMeta({ chatId: "chat-7" })).not.toHaveProperty(LICENSE_PROFILE_META_KEY);
 	});
 });

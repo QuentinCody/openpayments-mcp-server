@@ -28,12 +28,34 @@ describe("isSingleRecordResponse (T10.1)", () => {
 			false,
 		);
 		expect(isSingleRecordResponse({ hits: [{ a: 1 }, { a: 2 }] })).toBe(false);
+		expect(isSingleRecordResponse({ publicHubs: [{ hubUrl: "https://example.org/a/hub.txt" }, { hubUrl: "https://example.org/b/hub.txt" }] })).toBe(false);
 	});
 
 	it("treats a GraphQL one-level-nested collection as multi-row", () => {
 		expect(
 			isSingleRecordResponse({ genes: { nodes: [{ a: 1 }, { a: 2 }] } }),
 		).toBe(false);
+	});
+
+	it("recognizes file manifests at the root and inside a snapshot", () => {
+		const files = [{id: "tree-id", directory: true}, {id: "MD5E-s1--key.nii.gz", annexed: true}];
+		for (const value of [{files}, {snapshot: {id: "ds000224:1.0.1", files}}]) {
+			expect(isSingleRecordResponse(value)).toBe(false);
+			expect(effectiveStagingThreshold(value, 30 * 1024)).toBe(30 * 1024);
+		}
+	});
+
+	it("uses UCSC's returned-item count for track-named arrays and chromosome maps", () => {
+		// UCSC /getData/track: the container name is the selected track, not 'data'.
+		for (const rows of [[{ chrom: "chr1" }, { chrom: "chr1" }], { chr1: [{ chrom: "chr1" }, { chrom: "chr1" }] }]) {
+			const response = { genome: "hg38", hprc2v21Sv: rows, itemsReturned: 2, maxItemsLimit: true };
+			expect(isSingleRecordResponse(response)).toBe(false);
+			expect(effectiveStagingThreshold(response, undefined)).toBe(30 * 1024);
+		}
+	});
+
+	it.each([0, 1, -1, 2.5, "2", null, Number.POSITIVE_INFINITY, Number.NaN])("does not infer multiple rows from an invalid or single itemsReturned value: %s", itemsReturned => {
+		expect(isSingleRecordResponse({ itemsReturned })).toBe(true);
 	});
 
 	it("treats a top-level array of >1 as multi-row, and a 0/1-element list as single", () => {

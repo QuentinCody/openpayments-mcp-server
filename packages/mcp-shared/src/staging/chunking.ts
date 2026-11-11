@@ -76,8 +76,14 @@ export class ChunkingEngine {
 
 	private splitIntoChunks(content: string): string[] {
 		const chunks: string[] = [];
-		for (let i = 0; i < content.length; i += this.CHUNK_SIZE) {
-			chunks.push(content.slice(i, i + this.CHUNK_SIZE));
+		for (let start = 0; start < content.length;) {
+			let end = Math.min(start + this.CHUNK_SIZE, content.length);
+			const last = content.charCodeAt(end - 1);
+			const next = content.charCodeAt(end);
+			// SQLite encodes each string separately: a split surrogate becomes U+FFFD.
+			if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+			chunks.push(content.slice(start, end));
+			start = end;
 		}
 		return chunks;
 	}

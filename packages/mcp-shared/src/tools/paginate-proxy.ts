@@ -9,18 +9,19 @@
  */
 
 import { z } from "zod";
-import type { ApiFetchFn } from "../codemode/catalog";
+import { adapterFailureMessage, type ApiFetchFn } from "../codemode/catalog";
 import {
 	type PageFetcher,
 	type PaginateOptions,
 	paginateAll,
 } from "../codemode/paginate";
-import type { ToolEntry } from "../registry/types";
+import type { ToolContext, ToolEntry } from "../registry/types";
 import { shouldStage, stageToDoAndRespond } from "../staging/utils";
 import {
 	buildStageOptions,
 	interpolatePath,
 	isRecord,
+	licenseProfileField,
 	validatePath,
 } from "./api-proxy";
 
@@ -35,6 +36,24 @@ export interface PaginateProxyToolOptions {
 	stagingThreshold?: number;
 	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, staging routes there (ADR-006 Phase 0). */
 	workspaceNamespace?: unknown;
+}
+
+/** Fetch one page of `path` (GET) with the caller's license profile. */
+function pageFetcher(apiFetch: ApiFetchFn, path: string, ctx: ToolContext): PageFetcher {
+	return async (params) => {
+		const result = await apiFetch({
+			method: "GET",
+			path,
+			params: Object.keys(params).length > 0 ? params : undefined,
+			...licenseProfileField(ctx),
+		});
+		// A refusal for license reasons is a failed call with its reason. Returned
+		// as page data it would read as "zero records", which is a false negative.
+		if (result.status === 451) {
+			throw Object.assign(new Error(adapterFailureMessage(result.status, result.data)), { status: 451, data: result.data });
+		}
+		return result.data;
+	};
 }
 
 /** Create the hidden __paginate_proxy tool entry. */
@@ -70,16 +89,7 @@ export function createPaginateProxyTool(
 				validatePath(rawPath);
 				// Path params are fixed across pages; interpolate once, paginate the rest.
 				const { path, queryParams } = interpolatePath(rawPath, rawParams);
-				const fetchPage: PageFetcher = async (params) => {
-					const result = await apiFetch({
-						method: "GET",
-						path,
-						params: Object.keys(params).length > 0 ? params : undefined,
-					});
-					return result.data;
-				};
-
-				const pag = await paginateAll(fetchPage, queryParams, opts);
+				const pag = await paginateAll(pageFetcher(apiFetch, path, ctx), queryParams, opts);
 				const itemsBytes = JSON.stringify(pag.items).length;
 
 				if (

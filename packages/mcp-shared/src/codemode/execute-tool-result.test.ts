@@ -20,6 +20,15 @@ describe("REST execute result handling", () => {
 		});
 	});
 
+	it.each([100, 0, undefined, -1, 1.5])("separates staged source record counts from storage rows (%s)", async count => {
+		const response = await handleRestExecutorResult({ result: {
+			__staged: true, data_access_id: "staged_profiles", total_rows: 101,
+			returned_record_count: count, _staging: { payload_hash: `sha256:${"a".repeat(64)}` },
+		} }, context);
+		const sc = response.structuredContent as { _meta: { citation: { record_count?: number } } };
+		expect(sc._meta.citation.record_count).toBe(count === 100 || count === 0 ? count : undefined);
+	});
+
 	it("binds an auto-staged response to its preserved full payload", async () => {
 		const digest = "b".repeat(64);
 		const response = await handleRestExecutorResult(
@@ -176,6 +185,34 @@ describe("negative-result classification for envelope payloads", () => {
 		expect(c.negative_result).toBeUndefined();
 	});
 
+	it.each([
+		{ count: 2981, next: "page=2", results: [{ id: 1 }, { id: 2 }] },
+		{ requested_release: "2022", complete: false, response: { count: 2981, results: [{ id: 1 }, { id: 2 }] } },
+		{ hits: { total: { value: 2981, relation: "gte" }, hits: [{ id: 1 }, { id: 2 }] } },
+		{ data: { response: { total: 2981, results: [{ id: 1 }, { id: 2 }] } } },
+	])("cites returned page rows instead of the upstream matching total: %j", async result => {
+		const response = await handleRestExecutorResult({ result }, context);
+		expect(response.structuredContent).toMatchObject({
+			data: result,
+			_meta: { citation: { record_count: 2 } },
+		});
+	});
+
+	it.each([
+		{ total: 2981 },
+		{ response: { results: [1] }, data: { results: [2] } },
+		{ response: { response: { response: { results: [1] } } } },
+		{ response: null },
+		{ response: "not a collection" },
+	])("leaves totals-only, ambiguous or unsupported wrappers uncounted: %j", async result => {
+		expect((await cite(result)).record_count).toBeUndefined();
+	});
+
+	it("keeps a fetched empty page distinct from a nonzero upstream total", async () => {
+		const c = await cite({ count: 2981, results: [], complete: false });
+		expect(c).toMatchObject({ record_count: 0, negative_result: true, verification: "unverified-empty" });
+	});
+
 	it("leaves an ambiguous multi-array envelope unclassified", async () => {
 		// Two candidate arrays: guessing which holds the records could mislabel a
 		// populated result as empty, so the count stays unknown on purpose.
@@ -188,5 +225,19 @@ describe("negative-result classification for envelope payloads", () => {
 		const c = await cite([]);
 		expect(c.record_count).toBe(0);
 		expect(c.negative_result).toBe(true);
+	});
+
+	it("does not mistake an RNAcentral QC diagnostic array for an empty record set", async () => {
+		const c = await cite({ id: "URS000075BC33_9606", has_issue: false, tcode: false, stopfree: false, messages: [] });
+		expect(c.record_count).toBeUndefined();
+		expect(c.negative_result).toBeUndefined();
+	});
+
+	it("does not infer record counts from arbitrary properties or populated diagnostics", async () => {
+		for (const result of [{ warnings: ["upstream warning"] }, { synonyms: [] }, { children: [] }]) {
+			const c = await cite(result);
+			expect(c.record_count).toBeUndefined();
+			expect(c.negative_result).toBeUndefined();
+		}
 	});
 });

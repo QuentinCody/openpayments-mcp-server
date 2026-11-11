@@ -1,5 +1,5 @@
 /**
- * OpenPayments API adapter — wraps openpaymentsFetch into the ApiFetchFn
+ * OpenPayments API adapter — provides bounded public reads through the ApiFetchFn
  * interface for use by the Code Mode __api_proxy tool.
  */
 
@@ -8,7 +8,9 @@ import {
     EmptyDatasetError,
     guardEmptyResult,
 } from "@bio-mcp/shared/codemode/empty-result-guard";
-import { openpaymentsFetch } from "./http";
+
+import { paymentRoute } from "./payment-page";
+import { fail, releaseRead } from "./release-http";
 
 /** Parse one DKAN response into `{ status, data }` (throws on !ok). */
 async function fetchParsed(
@@ -16,34 +18,9 @@ async function fetchParsed(
     params?: Record<string, unknown>,
     opts?: { timeout?: number; retries?: number },
 ): Promise<{ status: number; data: unknown }> {
-    const response = await openpaymentsFetch(path, params, opts);
-
-    if (!response.ok) {
-        let errorBody: string;
-        try {
-            errorBody = await response.text();
-        } catch {
-            errorBody = response.statusText;
-        }
-        const error = new Error(
-            `HTTP ${response.status}: ${errorBody.slice(0, 200)}`,
-        ) as Error & {
-            status: number;
-            data: unknown;
-        };
-        error.status = response.status;
-        error.data = errorBody;
-        throw error;
-    }
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("json")) {
-        const text = await response.text();
-        return { status: response.status, data: text };
-    }
-
-    const data = await response.json();
-    return { status: response.status, data };
+    const { status, data } = await releaseRead(path, params ?? {}, Date.now() + (opts?.timeout ?? 45000),
+        path === "/metastore/schemas/dataset/items" ? 16 * 1024 * 1024 : undefined);
+    return { status, data };
 }
 
 /** A filtered DKAN datastore query — the only shape whose empty we verify. */
@@ -95,11 +72,13 @@ async function verifyEmpty(
 }
 
 /**
- * Create an ApiFetchFn that routes through openpaymentsFetch.
+ * Create an ApiFetchFn for bounded native and metadata-guarded reads.
  * No auth needed — OpenPayments DKAN API is public.
  */
 export function createOpenPaymentsApiFetch(): ApiFetchFn {
     return async (request) => {
+        if (request.method !== "GET" || request.body !== undefined) fail("Open Payments routes require bodyless GET requests", 405);
+        if (request.path.startsWith("/datasets/")) return { status: 200, data: await paymentRoute(request.path, request.params ?? {}) };
         const result = await fetchParsed(request.path, request.params);
 
         // Guard against silent transient empties on FILTERED datastore queries —

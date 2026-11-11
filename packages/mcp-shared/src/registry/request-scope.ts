@@ -77,6 +77,26 @@ export interface MaybeExtra {
 export interface RequestCorrelation {
 	chatId?: string;
 	traceparent?: string;
+	/** See `LicenseProfile` in ./types. */
+	licenseProfile?: "commercial";
+}
+
+/**
+ * `params._meta` key by which a reselling caller (the paid orchestrator) asks a
+ * server to withhold content that its upstream terms do not permit for
+ * commercial use. Only the exact value "commercial" has an effect. The key can
+ * only make a response more restricted, so a client gains nothing by sending it.
+ */
+export const LICENSE_PROFILE_META_KEY = "dev.quentincody.bio/licenseProfile";
+
+/** The license profile of one request, or undefined for the normal behavior. */
+export function getRequestLicenseProfile(
+	source: MaybeExtra | undefined,
+): "commercial" | undefined {
+	const value =
+		source?.mcpReq?._meta?.[LICENSE_PROFILE_META_KEY] ??
+		source?._meta?.[LICENSE_PROFILE_META_KEY];
+	return value === "commercial" ? "commercial" : undefined;
 }
 
 function headerValue(
@@ -140,7 +160,9 @@ export function getRequestCorrelation(
 ): RequestCorrelation | undefined {
 	const chatId = getRequestScope(source);
 	const traceparent = getRequestTraceparent(source);
-	return chatId || traceparent ? { chatId, traceparent } : undefined;
+	const licenseProfile = getRequestLicenseProfile(source);
+	if (!chatId && !traceparent && !licenseProfile) return undefined;
+	return { chatId, traceparent, ...(licenseProfile ? { licenseProfile } : {}) };
 }
 
 /** Build fresh per-call metadata for one nested tools/call request. */
@@ -152,6 +174,7 @@ export function nestedCallMeta(
 	if (correlation.chatId) meta[CHAT_SCOPE_META_KEY] = correlation.chatId;
 	const traceparent = childTraceparent(correlation.traceparent);
 	if (traceparent) meta[TRACEPARENT_META_KEY] = traceparent;
+	if (correlation.licenseProfile) meta[LICENSE_PROFILE_META_KEY] = correlation.licenseProfile;
 	return Object.keys(meta).length > 0 ? meta : undefined;
 }
 

@@ -109,6 +109,15 @@ describe("SchemaValidator", () => {
 	});
 
 	describe("no false positives", () => {
+		it("accepts implicit table aliases while still checking qualified column typos", () => {
+			expect(validator.validate("SELECT v.gene, s.title FROM variants v JOIN studies s ON s.id=v.id").valid).toBe(true);
+			expect(validator.validate('SELECT v.gene FROM "variants" v').valid).toBe(true);
+			expect(validator.validate("SELECT v.gen FROM variants v").diagnostics).toEqual([
+				expect.objectContaining({kind: "unknown_column", message: "unknown column 'gen'"}),
+			]);
+			expect(validator.validate("SELECT gene FROM variants WHERE gen='x'").valid).toBe(false);
+		});
+
 		it("does not flag aliases", () => {
 			const result = validator.validate(
 				"SELECT COUNT(*) as total FROM variants",

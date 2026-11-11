@@ -16,51 +16,17 @@
  * or use api.query()/db.queryStaged() to query the data in-band with SQL.
  */
 
+import { STAGED_PAYLOAD_GUARD_SOURCE } from "./staged-payload-guard";
+
 /**
  * Returns the JS source string to inject into V8 isolates.
  * Relies on `codemode` proxy being available (from evaluator prefix).
  */
 export function buildApiProxySource(): string {
-	return `
+	return STAGED_PAYLOAD_GUARD_SOURCE + `
 // --- API proxy helpers (injected) ---
 // __stagedResults is declared in the evaluate() scope (module prefix) so it's
 // accessible both inside this IIFE and in the module suffix return statement.
-
-/** Wrap a staged response — THROW on payload access; a warning is not enough. */
-function __wrapStaged(raw) {
-  __stagedResults.push(raw);
-  var msg = raw.message || "Response was auto-staged.";
-  var hint = " THIS IS NOT AN EMPTY RESULT: the upstream returned data and it is in SQLite." +
-    " Query it in-band with api.query('" + raw.data_access_id + "', 'SELECT * FROM <table> LIMIT 10')," +
-    " or return this object and use the query_data tool with data_access_id='" + raw.data_access_id + "'," +
-    " or re-request with a smaller page/limit param so the response never stages.";
-  // These keys previously omitted "result"/"resultList" and merely console.warn'd,
-  // returning undefined — so the idiomatic \`r.resultList?.result ?? []\` collapsed
-  // to [] and the caller reported "no results" for a query whose upstream returned
-  // plenty. Observed live 2026-07-15 against Europe PMC (58 hits read as 0) and
-  // reproduced against deployed entrez 2026-07-16. A console.warn lands in isolate
-  // logs the model never reads; only a throw is load-bearing.
-  var TRAP_KEYS = ["results", "result", "resultList", "data", "entries", "items", "records", "rows", "hits", "nodes", "edges", "response", "collection", "content", "docs", "_embedded", "studies"];
-  // T6.3 — a staged result is an object, NOT an array. Calling an array method
-  // on it (e.g. openalexPapers.slice(...)) threw a cryptic "slice is not a
-  // function". Return a thrower that explains the staged-data shape instead.
-  var ARRAY_METHODS = ["slice","map","filter","forEach","reduce","reduceRight","find","findIndex","some","every","flatMap","flat","sort","reverse","concat","join","indexOf","lastIndexOf","includes","at","pop","push","shift","unshift","splice","fill","keys","values","entries"];
-  return new Proxy(raw, {
-    get: function(target, prop) {
-      if (typeof prop === "string" && !(prop in target)) {
-        if (TRAP_KEYS.indexOf(prop) !== -1) {
-          throw new Error("This response was AUTO-STAGED (" + (raw.total_rows != null ? raw.total_rows + " rows" : "large payload") + ") — '" + prop + "' does not exist on the staging envelope. Reading it yields undefined, which silently reads as 'no results'." + hint + " Envelope keys: __staged, data_access_id, total_rows, columns, schema, tables_created, message.");
-        }
-        if (ARRAY_METHODS.indexOf(prop) !== -1) {
-          return function() {
-            throw new Error("This is a STAGED result OBJECT, not an array — '." + prop + "()' is not available. The rows live in SQLite, not on this object." + hint);
-          };
-        }
-      }
-      return target[prop];
-    }
-  });
-}
 
 /**
  * Stage arbitrary data into SQLite. Returns staging metadata with data_access_id.

@@ -12,6 +12,16 @@
  * closure if it doesn't redeclare it) instead of colliding with it. The user's
  * `return` propagates out through the awaited IIFE, so the result is unchanged.
  */
-export function wrapInUserScope(userCode: string): string {
-	return `return await (async () => {\n${userCode}\n})();`;
+export function wrapInUserScope(userCode: string, preserveApiErrors = false): string {
+	const scoped = `return await (async () => {\n${userCode}\n})();`;
+	if (!preserveApiErrors) return scoped;
+	// Capture only API errors carrying evidence. Ordinary program errors must
+	// still reach the executor's failure/staged-recovery path.
+	return `try { ${scoped} }
+catch (error) {
+  if (error && typeof error.status === "number" && error.data !== undefined) {
+    return { __api_error: true, status: error.status, message: error.message, data: error.data };
+  }
+  throw error;
+}`;
 }

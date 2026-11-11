@@ -10,6 +10,8 @@
  *   - `useConsolidatedEngine()` — opt-in to the new StagingEngine
  */
 
+import { withPhysicalTables } from "./physical-schema";
+import { inspectStagedTables } from "./schema-inspection";
 import { DurableObject } from "cloudflare:workers";
 import { SchemaValidator } from "@bio-mcp/syntaqlite-worker";
 import { VirtualFS } from "../filesystem/virtual-fs";
@@ -24,18 +26,17 @@ import {
 	type SqlQueryBody,
 } from "./query-endpoint";
 import { mergeSchemaHints } from "./schema-hints";
+import { materializationWarnings, prepareMaterialization } from "./materialization-result";
 import {
 	computeColumnProfiles,
 	detectArrays,
 	type InferredSchema,
 	type InferredTable,
-	inferSchema,
 	materializeSchema,
 	type SchemaHints,
 	type TableProfile,
 } from "./schema-inference";
 import {
-	buildColumnDescriptor,
 	buildColumnMeta,
 	buildProfileByTable,
 	buildRelationshipJoins,
@@ -111,37 +112,6 @@ export class RestStagingDO extends DurableObject {
 		return this.ctx.storage.sql;
 	}
 
-	/**
-	 * Add tables that physically exist in this DO but are absent from the
-	 * inferred schema, so the SQL guard cannot reject a table we ourselves
-	 * created and advertised.
-	 *
-	 * The lossless fallback tables (`payloads`, `content_chunks`,
-	 * `chunk_metadata`) are named in every staging envelope's `tables_created`,
-	 * but only inference-derived tables were ever allowlisted — so the documented
-	 * recovery path ("query `payloads` with the data_access_id") failed with
-	 * "unknown table 'payloads'". Columns are left empty: this restores table
-	 * reachability without asserting a column shape we have not inferred.
-	 */
-	private withPhysicalTables(schema: InferredSchema): InferredSchema {
-		const known = new Set(schema.tables.map((t) => t.name));
-		const extra: InferredTable[] = [];
-		try {
-			const rows = this.sql
-				.exec(
-					"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-				)
-				.toArray() as Array<{ name?: unknown }>;
-			for (const r of rows) {
-				const name = typeof r.name === "string" ? r.name : undefined;
-				if (!name || known.has(name)) continue;
-				extra.push({ name, columns: [], indexes: [] });
-			}
-		} catch {
-			return schema; // sqlite_master unreadable → leave the schema untouched
-		}
-		return extra.length ? { tables: [...schema.tables, ...extra] } : schema;
-	}
 
 	/**
 	 * Lazily create a SchemaValidator using the stored inferred schema.
@@ -158,7 +128,7 @@ export class RestStagingDO extends DurableObject {
 			if (!row?.schema_json) return null;
 			const schema = JSON.parse(row.schema_json) as InferredSchema;
 			this.schemaValidator = new SchemaValidator(
-				this.withPhysicalTables(schema),
+				withPhysicalTables(schema, this.sql),
 			);
 			return this.schemaValidator;
 		} catch {
@@ -261,6 +231,9 @@ export class RestStagingDO extends DurableObject {
 		return undefined;
 	}
 
+	/** Select a provider's tabular envelope without changing preserved source evidence. */
+	protected getTabularData(data: unknown): unknown { return data; }
+
 	/**
 	 * Override in subclass to return a DomainConfig for Tier 2 normalization.
 	 * When this returns non-undefined and useConsolidatedEngine() returns true,
@@ -269,6 +242,9 @@ export class RestStagingDO extends DurableObject {
 	protected getDomainConfig(): DomainConfig | undefined {
 		return undefined;
 	}
+
+	/** Opt-in atomic replacement for server-owned derived tables; default staging appends. */
+	protected replaceMaterializedTables(_data: unknown): boolean { return false; }
 
 	/**
 	 * Override in subclass to provide request metadata for config cascade.
@@ -518,29 +494,21 @@ export class RestStagingDO extends DurableObject {
 		// Legacy Tier 1 pipeline — merge server-side hints with client-provided hints
 		const serverHints = this.getSchemaHints(data);
 		const hints = mergeSchemaHints(serverHints, clientHints);
-		const arrays = detectArrays(data);
+		const arrays = detectArrays(this.getTabularData(data));
+		const replace = this.replaceMaterializedTables(data);
 
-		if (arrays.length > 0 && arrays.some((a) => a.rows.length > 0)) {
+		if (arrays.length > 0 && (replace || arrays.some((a) => a.rows.length > 0))) {
 			try {
-				const schema = inferSchema(arrays, hints);
+				const { schema, rowsMap } = prepareMaterialization(arrays, hints, replace);
 				// Persist inferred schema for enriched handleSchema() output
-				this.persistInferredSchema(schema);
-				const rowsMap = new Map<string, unknown[]>();
-				for (const arr of arrays) {
-					const tableName =
-						hints?.tableName ??
-						arr.key.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
-					const actualName =
-						schema.tables.length === 1
-							? schema.tables[0].name
-							: (schema.tables.find((t) => t.name === tableName)?.name ??
-								tableName);
-					rowsMap.set(actualName, arr.rows);
-				}
-
-				const result = this.ctx.storage.transactionSync(() =>
-					materializeSchema(schema, rowsMap, this.sql),
-				);
+				if (!replace) this.persistInferredSchema(schema);
+				const result = this.ctx.storage.transactionSync(() => {
+					if (replace) for (const table of schema.tables) this.sql.exec(`DROP TABLE IF EXISTS "${table.name.replace(/"/g, '""')}"`);
+					const saved = materializeSchema(schema, rowsMap, this.sql);
+					if (replace && saved.failedRows) throw new Error("Derived-table replacement rejected incomplete materialization");
+					if (replace) this.persistInferredSchema(schema);
+					return saved;
+				});
 
 				// Track row counts in provenance
 				this.updateProvenanceRowCounts(
@@ -552,25 +520,7 @@ export class RestStagingDO extends DurableObject {
 				// Compute and persist column profiles (runs SQL against populated tables)
 				this.persistColumnProfiles(schema);
 				const relationships = this.extractRelationships(schema);
-				// Build staging warnings if data was lost
-				const stagingWarnings: Record<string, unknown> = {};
-				if (result.failedRows > 0) {
-					stagingWarnings.rows_skipped = result.failedRows;
-					stagingWarnings.sample_errors = result.warnings.map((w) => ({
-						row: w.rowIndex,
-						table: w.table,
-						error: w.error,
-					}));
-				}
-				const lossPercent =
-					result.inputRows > 0
-						? (result.failedRows / result.inputRows) * 100
-						: 0;
-				if (lossPercent > 5) {
-					stagingWarnings.data_loss_warning =
-						`${result.failedRows} of ${result.inputRows} rows (${lossPercent.toFixed(1)}%) failed to stage. ` +
-						`This exceeds the 5% threshold. Review sample_errors for details.`;
-				}
+				const stagingWarnings = materializationWarnings(result);
 
 				return this.jsonResponse({
 					success: true,
@@ -585,6 +535,7 @@ export class RestStagingDO extends DurableObject {
 						: {}),
 				});
 			} catch (matErr) {
+				if (replace) throw matErr;
 				console.warn("T5.3 staging fallback: materialization failed", matErr);
 			}
 		}
@@ -714,22 +665,6 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	private async handleSchema(): Promise<Response> {
-		const tables: Record<
-			string,
-			{
-				row_count: number;
-				columns: Array<{
-					name: string;
-					type: string;
-					not_null: boolean;
-					primary_key: boolean;
-					json_shape?: string;
-					searchable_array?: boolean;
-				}>;
-			}
-		> = {};
-		let totalRows = 0;
-
 		// Load persisted inferred schema for enrichment
 		let inferredSchema: InferredSchema | undefined;
 		try {
@@ -778,30 +713,7 @@ export class RestStagingDO extends DurableObject {
 		// Build profile lookup: tableName → { colName → ColumnProfile }
 		const profileByTable = buildProfileByTable(columnProfiles);
 
-		const tableResults = this.sql
-			.exec(
-				`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_staging_%' AND name NOT IN ('_inferred_schema', '_column_profiles')`,
-			)
-			.toArray();
-
-		for (const table of tableResults) {
-			const tableName = table.name as string;
-			const columnResults = this.sql
-				.exec(`PRAGMA table_info(${tableName})`)
-				.toArray();
-			const countResult = this.sql
-				.exec(`SELECT COUNT(*) as count FROM "${tableName}"`)
-				.one();
-			const rowCount = Number((countResult as { count: number })?.count || 0);
-			totalRows += rowCount;
-
-			tables[tableName] = {
-				row_count: rowCount,
-				columns: columnResults.map((col: Record<string, unknown>) =>
-					buildColumnDescriptor(col, tableName, columnMeta, profileByTable),
-				),
-			};
-		}
+		const {tables, totalRows} = inspectStagedTables(this.sql, columnMeta, profileByTable);
 
 		// Extract relationships from inferred schema and attach sample JOIN SQL
 		const relationships: TableRelationship[] = inferredSchema

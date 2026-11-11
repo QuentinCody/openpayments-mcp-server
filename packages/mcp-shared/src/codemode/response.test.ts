@@ -10,6 +10,18 @@ import {
 } from "./response";
 
 describe("createCodeModeResponse", () => {
+	it("exposes the canonical staging carrier required by the fleet contract", () => {
+		const meta = { staged: true, data_access_id: "snapshot_1", tables_created: ["rows"], total_rows: 500, payload_hash: "sha256:example" };
+		const result = createCodeModeResponse({ __staged: true }, { meta });
+		expect(result.structuredContent?._staging).toMatchObject({ data_access_id: "snapshot_1", tables_created: ["rows"], total_rows: 500, payload_hash: "sha256:example" });
+		expect(result.structuredContent?._meta).toEqual(meta);
+		expect(result.content.length).toBeGreaterThan(0);
+	});
+
+	it("preserves row_count staging and does not classify inline pointers as staged", () => {
+		expect(createCodeModeResponse({}, { meta: { staged: true, row_count: 0 } }).structuredContent?._staging).toMatchObject({ total_rows: 0 });
+		expect(createCodeModeResponse([], { meta: { data_access_id: "follow_up" } }).structuredContent?._staging).toBeUndefined();
+	});
 	it("returns content + structuredContent with data", () => {
 		const result = createCodeModeResponse({ gene: "BRAF" });
 		expect(result.content[0].type).toBe("text");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ApiFetchFn } from "../codemode/catalog";
+import { type ApiFetchFn, commercialUseRefusal } from "../codemode/catalog";
 import type { ToolContext } from "../registry/types";
 import { createPaginateProxyTool } from "./paginate-proxy";
 
@@ -158,6 +158,32 @@ describe("createPaginateProxyTool", () => {
 		>;
 		expect(res.__api_error).toBe(true);
 		expect(res.status).toBe(503);
+	});
+
+	it("passes the commercial profile to every page and reports a 451 refusal with its reason", async () => {
+		const calls: FetchRequest[] = [];
+		const apiFetch: ApiFetchFn = async (request) => {
+			calls.push(request);
+			return commercialUseRefusal("PMC full text", "see the PMC license terms");
+		};
+		const tool = createPaginateProxyTool({ apiFetch });
+		const res = (await tool.handler(
+			{ path: "/search" },
+			{ sql: () => [], requestContext: { licenseProfile: "commercial" } },
+		)) as Record<string, unknown>;
+		expect(calls[0].licenseProfile).toBe("commercial");
+		// A refusal is a failed call, never "zero records".
+		expect(res).toMatchObject({ __api_error: true, status: 451 });
+		expect(String(res.message)).toBe(
+			"NOT_LICENSED_FOR_COMMERCIAL_USE: PMC full text is not available in a commercial product: see the PMC license terms",
+		);
+		expect(res).not.toHaveProperty("items");
+	});
+
+	it("sends no license profile when the caller has none", async () => {
+		const { apiFetch, calls } = mockApiFetch(1);
+		await createPaginateProxyTool({ apiFetch }).handler({ path: "/search" }, ctx);
+		expect(calls[0]).not.toHaveProperty("licenseProfile");
 	});
 
 	it("rejects dangerous traversal paths", async () => {

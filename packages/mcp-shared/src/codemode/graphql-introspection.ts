@@ -10,13 +10,25 @@
 // Types
 // ---------------------------------------------------------------------------
 
+import type { Completeness } from "../completeness";
+
 /** Function signature for executing a GraphQL query against a server. */
 export type GraphqlFetchFn = (
 	query: string,
 	variables?: Record<string, unknown>,
+	/**
+	 * `licenseProfile: "commercial"` when the caller resells the result (the
+	 * paid orchestrator sets it). The adapter then withholds or refuses what its
+	 * upstream terms do not permit commercially, for example with an `errors`
+	 * entry whose message starts with `NOT_LICENSED_FOR_COMMERCIAL_USE`.
+	 * Undefined: the normal behavior. Same contract as `ApiFetchFn`.
+	 */
+	request?: { licenseProfile?: "commercial" },
 ) => Promise<{
 	data?: Record<string, unknown>;
 	errors?: Array<{ message: string; [key: string]: unknown }>;
+	/** Adapter-verified coverage, separate from the native GraphQL data. */
+	completeness?: Completeness;
 }>;
 
 export interface TrimmedArg {

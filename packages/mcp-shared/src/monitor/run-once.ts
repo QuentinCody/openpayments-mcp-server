@@ -9,6 +9,7 @@
 
 import {
 	cleanResult,
+	resolvePath,
 	extractRowSets,
 	type RowSet,
 	snapshotHash,
@@ -55,8 +56,15 @@ export interface RunOnceResult {
 /** Run one monitor tick against the live source and diff it against the prior snapshot. */
 export async function runOnce(args: RunOnceInput): Promise<RunOnceResult> {
 	const query = args.source.buildQuery(args.input);
-	const raw = await args.run(query);
+	const response = await args.run(query);
+	const raw = args.source.prepareResult ? await args.source.prepareResult(response, args.run) : response;
 	const cleaned = cleanResult(raw, args.source.profile);
+	for (const table of args.source.profile.tables) {
+		const rows = resolvePath(cleaned, table.path);
+		if (!Array.isArray(rows) || rows.some(row => row === null || typeof row !== "object" || Array.isArray(row))) {
+			throw new Error(`monitor: missing or invalid table ${table.table}; refusing to diff an incomplete or staged response`);
+		}
+	}
 	const rowSets = extractRowSets(raw, args.source.profile);
 	const contentHash = await snapshotHash(rowSets, args.source.profile);
 	const unchanged =

@@ -8,9 +8,9 @@
  */
 
 import { z } from "zod";
-import type { ApiCatalog, ApiFetchFn } from "../codemode/catalog";
-import type { ResolvedSpec } from "../codemode/openapi-resolver";
-import { inferUpstreamTotal } from "../completeness";
+import { adapterFailureMessage, type ApiFetchFn } from "../codemode/catalog";
+import type { ApiProxyToolOptions } from "./api-proxy-options";
+export type { ApiProxyToolOptions } from "./api-proxy-options";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import type { SchemaHints } from "../staging/schema-inference";
 import { effectiveStagingThreshold } from "../staging/single-record";
@@ -32,7 +32,7 @@ import {
 	jsonByteSize,
 	TRANSPORT_LIMIT,
 } from "./passthrough-limits";
-import { buildStagedEnvelope, extractStagedColumns } from "./staging-envelope";
+import { buildStagedEnvelope, extractStagedColumns, resolveUpstreamTotal } from "./staging-envelope";
 
 // `extractStagedColumns` is re-exported so the long-standing
 // `import { extractStagedColumns } from "./api-proxy"` sites (and its colocated
@@ -53,8 +53,13 @@ export function validatePath(path: string): void {
 	if (!path.startsWith("/")) {
 		throw new Error(`Path must start with /: ${path}`);
 	}
+	// A URL parser reads `%2e` as a dot and `\` as a slash. So `/.%2e/`, `/%2e./`
+	// and `\..\` are traversal too: `new URL("/.%2e/.%2e/other", base)` leaves the
+	// API root and reaches another service on the same host, with this server's
+	// credentials. Check the path as written and as the parser reads it.
+	const asParsed = path.replace(/%2e/gi, ".").replace(/%5c/gi, "\\").replace(/\\/g, "/");
 	for (const pattern of DANGEROUS_PATTERNS) {
-		if (pattern.test(path)) {
+		if (pattern.test(path) || pattern.test(asParsed)) {
 			throw new Error(`Dangerous path pattern detected: ${path}`);
 		}
 	}
@@ -157,20 +162,84 @@ async function preserveApiErrorData(
 	return boundedErrorData(data);
 }
 
-export interface ApiProxyToolOptions {
-	apiFetch: ApiFetchFn;
-	/** Optional legacy catalog metadata for drift hints */
-	catalog?: ApiCatalog;
-	/** Optional resolved OpenAPI metadata for drift hints */
-	openApiSpec?: ResolvedSpec;
-	/** DO namespace for auto-staging large responses */
-	doNamespace?: unknown;
-	/** Prefix for data access IDs (e.g., "gtex") */
-	stagingPrefix?: string;
-	/** Byte threshold for auto-staging (default 30KB, via DEFAULT_STAGING_THRESHOLD) */
-	stagingThreshold?: number;
-	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, auto-staging routes there (ADR-006 Phase 0). */
-	workspaceNamespace?: unknown;
+/**
+ * The `licenseProfile` field of an ApiFetchFn request, from the tool context. It lets the
+ * adapter withhold content that a reselling caller may not receive (see catalog.ts).
+ */
+export function licenseProfileField(ctx: ToolContext | undefined): { licenseProfile?: "commercial" } {
+	const licenseProfile = ctx?.requestContext?.licenseProfile;
+	return licenseProfile ? { licenseProfile } : {};
+}
+
+/** The local 404 for a path that no known endpoint matches (pre-flight drift check). */
+function unknownEndpointError(
+	method: string,
+	path: string,
+	preflight: NonNullable<ReturnType<typeof preflightUnknownEndpoint>>,
+): Record<string, unknown> {
+	return {
+		__api_error: true,
+		status: 404,
+		code: "UNKNOWN_ENDPOINT",
+		attempted: `${method} ${path}`,
+		message: preflight.message,
+		...(preflight.suggestions?.[0] ? { closest_match: preflight.suggestions[0] } : {}),
+		drift_hint: preflight,
+		preflight: true,
+	};
+}
+
+/** The 413 for an unstaged inline body above the transport limit (it would be dropped). */
+function tooLargeError(responseBytes: number): Record<string, unknown> {
+	return {
+		__api_error: true,
+		incomplete: true,
+		status: 413,
+		code: "RESPONSE_TOO_LARGE",
+		message: `Response too large (${responseBytes} bytes); staging is required. Narrow the query (fewer fields/rows) or use a paged endpoint.`,
+	};
+}
+
+/**
+ * The error object of a failed upstream call (a throw, or a resolved non-2xx).
+ * `incomplete` marks the evidence of this call as partial (429/timeout/5xx/…), so a
+ * partial answer is not read as whole. A large error body is staged, not dropped.
+ */
+async function apiFailure(
+	status: number,
+	message: string,
+	data: unknown,
+	driftHint: unknown,
+	options: ApiProxyToolOptions,
+	ctx: ToolContext,
+): Promise<Record<string, unknown>> {
+	const errorData = await preserveApiErrorData(data, { ...options, ctx });
+	return { __api_error: true, incomplete: true, status, message, data: errorData, ...(driftHint ? { drift_hint: driftHint } : {}) };
+}
+
+/**
+ * Stage a large upstream result and return the staged envelope. `upstreamTotal`
+ * powers the under-count completeness check; the envelope also carries staged
+ * columns (T3.3) and the silent over-match warning (T1.3), built in buildStagedEnvelope.
+ */
+async function stageResult(
+	result: Awaited<ReturnType<ApiFetchFn>>,
+	responseBytes: number,
+	target: { doNamespace: unknown; stagingPrefix: string; workspaceNamespace?: unknown },
+	ctx: ToolContext,
+): Promise<unknown> {
+	const upstreamTotal = resolveUpstreamTotal(result.data, result.upstreamTotal);
+	const staged = await stageToDoAndRespond(
+		result.data,
+		target.doNamespace as Parameters<typeof stageToDoAndRespond>[1],
+		target.stagingPrefix,
+		undefined,
+		undefined,
+		target.stagingPrefix,
+		ctx?.sessionId,
+		buildStageOptions(ctx, target.workspaceNamespace, target.stagingPrefix, upstreamTotal),
+	);
+	return buildStagedEnvelope({ staged, responseBytes, originalData: result.data, completeness: result.completeness });
 }
 
 /**
@@ -184,6 +253,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 		doNamespace,
 		stagingPrefix,
 		stagingThreshold,
+		maxInlineBytes,
 		workspaceNamespace,
 	} = options;
 	const knownEndpoints = buildKnownEndpointIndex(catalog, openApiSpec);
@@ -221,106 +291,54 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 				// same first segment exists), fail LOCALLY with the structured drift
 				// hint and ZERO upstream round-trip. Servers with no catalog/spec, real
 				// endpoint paths, and wholly-novel paths fall through untouched.
-				const preflight = preflightUnknownEndpoint(
-					method,
-					path,
-					knownEndpoints,
-				);
-				if (preflight) {
-					return {
-						__api_error: true,
-						status: 404,
-						code: "UNKNOWN_ENDPOINT",
-						attempted: `${method} ${path}`,
-						message: preflight.message,
-						...(preflight.suggestions?.[0]
-							? { closest_match: preflight.suggestions[0] }
-							: {}),
-						drift_hint: preflight,
-						preflight: true,
-					};
-				}
+				const preflight = preflightUnknownEndpoint(method, path, knownEndpoints);
+				if (preflight) return unknownEndpointError(method, path, preflight);
 
 				const result = await apiFetch({
 					method,
 					path,
 					params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
 					body,
+					...licenseProfileField(ctx),
 				});
 
 				// A resolved non-2xx is a FAILURE (the catch only fires on THROW) — an
 				// adapter that RETURNS {status:502,data} else surfaces it as data with a
 				// citation, the systemic clingen-class silent failure (doc 09/11).
 				if (typeof result.status === "number" && result.status >= 400) {
-					const dh = buildDriftHint(method, path, result.status, knownEndpoints);
-					const errorData = await preserveApiErrorData(result.data, {
-						doNamespace,
-						stagingPrefix,
-						stagingThreshold,
-						workspaceNamespace,
-						ctx,
-					});
-					return { __api_error: true, incomplete: true, status: result.status, message: `Upstream returned HTTP ${result.status}`, data: errorData, ...(dh ? { drift_hint: dh } : {}) };
+					const driftHint = buildDriftHint(method, path, result.status, knownEndpoints);
+					const message = adapterFailureMessage(result.status, result.data);
+					return await apiFailure(result.status, message, result.data, driftHint, options, ctx);
 				}
 
 				// T10.1 — a SINGLE record gets a raised staging threshold so it stays
 				// inline. undefined data (a 204 no-content) sizes to 0, not a throw (#7).
-				const responseBytes = result.data === undefined ? 0 : JSON.stringify(result.data).length;
+				const responseBytes = result.data === undefined ? 0 : jsonByteSize(result.data);
 				if (
 					doNamespace &&
 					stagingPrefix &&
 					shouldStage(
 						responseBytes,
-						effectiveStagingThreshold(result.data, stagingThreshold),
+						Math.min(effectiveStagingThreshold(result.data, stagingThreshold), maxInlineBytes ?? Infinity),
 					)
 				) {
-					// upstreamTotal powers the under-count completeness check; the
-					// envelope also carries staged columns (T3.3) and the silent
-					// over-match warning (T1.3), both built in buildStagedEnvelope.
-					const upstreamTotal = inferUpstreamTotal(result.data);
-					const staged = await stageToDoAndRespond(
-						result.data,
-						doNamespace as Parameters<typeof stageToDoAndRespond>[1],
-						stagingPrefix,
-						undefined,
-						undefined,
-						stagingPrefix,
-						ctx?.sessionId,
-						buildStageOptions(
-							ctx,
-							workspaceNamespace,
-							stagingPrefix,
-							upstreamTotal,
-						),
-					);
-					return buildStagedEnvelope({
-						staged,
-						responseBytes,
-						originalData: result.data,
-					});
+					return await stageResult(result, responseBytes, { doNamespace, stagingPrefix, workspaceNamespace }, ctx);
 				}
 				// #3 — an UNSTAGED inline body over the transport limit is silently dropped; fail loud.
-				if (responseBytes > TRANSPORT_LIMIT) {
-					return { __api_error: true, incomplete: true, status: 413, code: "RESPONSE_TOO_LARGE", message: `Response too large (${responseBytes} > ${TRANSPORT_LIMIT}); narrow the query (fewer fields/rows) or use a paged endpoint.` };
+				if (responseBytes > Math.min(TRANSPORT_LIMIT, maxInlineBytes ?? Infinity)) {
+					return tooLargeError(responseBytes);
 				}
 
 				// A 200 is not proof the filter was applied — see detectUndeclaredParams.
 				const undeclared = detectUndeclaredParams(method, interpolatedPath, rawParams, knownEndpoints);
-				if (undeclared && result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
-					return { ...(result.data as Record<string, unknown>), __unfiltered_warning: undeclared };
-				}
-				return result.data;
+				return undeclared && isRecord(result.data)
+					? { ...result.data, __unfiltered_warning: undeclared }
+					: result.data;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				const status = (err as { status?: number }).status || 500;
 				const driftHint = buildDriftHint(method, interpolatedPath, status, knownEndpoints);
-				// incomplete: a failed fetch (429/timeout/5xx/…) means the evidence for
-				// this call is INCOMPLETE — flag it so a partial answer is not read as whole.
-				const errorData = await preserveApiErrorData(
-					(err as { data?: unknown }).data,
-					{ doNamespace, stagingPrefix, stagingThreshold, workspaceNamespace, ctx },
-				);
-				return { __api_error: true, incomplete: true, status, message, data: errorData, ...(driftHint ? { drift_hint: driftHint } : {}) };
+				return apiFailure(status, message, (err as { data?: unknown }).data, driftHint, options, ctx);
 			}
 		},
 	};

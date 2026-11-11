@@ -88,11 +88,17 @@ export function shouldStage(
 	return responseBytes > (threshold ?? DEFAULT_STAGING_THRESHOLD);
 }
 
-/** Generate a unique data access ID. */
+/**
+ * Generate a data access ID: `<prefix>_<unix ms>_<32 hex characters>`.
+ *
+ * The id is the only credential for a staged dataset: a caller that knows it
+ * can read the dataset. So the random part is 128 bits from the CSPRNG, not
+ * `Math.random()`, whose output a caller can predict.
+ */
 export function generateDataAccessId(prefix: string): string {
-	const ts = Date.now();
-	const rand = Math.random().toString(36).substring(2, 15);
-	return `${prefix}_${ts}_${rand}`;
+	let rand = "";
+	for (const byte of crypto.getRandomValues(new Uint8Array(16))) rand += byte.toString(16).padStart(2, "0");
+	return `${prefix}_${Date.now()}_${rand}`;
 }
 
 interface DurableObjectStub {

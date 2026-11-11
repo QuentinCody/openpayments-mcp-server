@@ -18,6 +18,9 @@ const source: SourceModule = {
 };
 
 describe("runOnce", () => {
+	it.each([{}, { rows: { __staged: true } }, { rows: [null] }])("rejects incomplete data instead of reporting deletions: %j", async (data) => {
+		await expect(runOnce({ source, input: {}, run: async () => data, priorRowSets: extractRowSets({ rows: [{ k: "a" }] }, source.profile), priorContentHash: "previous" })).rejects.toThrow("refusing to diff");
+	});
 	it("produces a content hash and a baseline (empty) diff on first run", async () => {
 		const r = await runOnce({
 			source,

@@ -70,6 +70,13 @@ describe("parseToolResult", () => {
 });
 
 describe("callTool", () => {
+	it.each([401, 403, 500])("classifies HTTP %i without retaining the response body", async (status) => {
+		const service = { fetch: async () => new Response("private auth details", { status }) };
+		await expect(callTool(service, "t", {}, 1)).rejects.toMatchObject({ kind: status === 500 ? "transport_failure" : "credential_failure", boundary: "mcp_transport", status });
+	});
+	it("rejects explicit structured authentication errors even without isError", () => {
+		expect(() => parseToolResult({ result: { structuredContent: { success: false, error: { code: "AUTH_REQUIRED" } } } })).toThrow("authentication/authorization failure");
+	});
 	it("sends a modern request over the service binding", async () => {
 		const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
 		const service = {

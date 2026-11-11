@@ -85,6 +85,13 @@ export function createCodeModeResponse<T>(
 		success: true,
 		data,
 		...(meta && Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+		...(meta?.staged === true ? { _staging: {
+			data_access_id: meta.data_access_id,
+			tables_created: meta.tables_created,
+			total_rows: meta.total_rows ?? meta.row_count,
+			payload_hash: meta.payload_hash,
+			completeness: meta.completeness,
+		} } : {}),
 	};
 
 	let text: string;

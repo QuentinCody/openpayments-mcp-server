@@ -79,6 +79,10 @@
     "./coding/*": {
       "types": "./dist/coding/*.d.ts",
       "default": "./dist/coding/*.js"
+    },
+    "./fulltext/*": {
+      "types": "./dist/fulltext/*.d.ts",
+      "default": "./dist/fulltext/*.js"
     }
   },
   "scripts": {

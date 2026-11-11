@@ -104,6 +104,8 @@ export interface SourceModule {
 	profile: MonitorProfile;
 	/** Build the re-runnable {server, tool, params} from user input (e.g. an NDA number). */
 	buildQuery(input: Record<string, unknown>): SavedQuery;
+	/** Validate and shape a native tool result into profile tables before diffing. */
+	prepareResult?(result: unknown, run?: (query: SavedQuery) => Promise<unknown>): unknown | Promise<unknown>;
 	/** Classify + label one change. Falls back to {@link defaultMateriality} when omitted. */
 	classify?(change: RowChange): { materiality: Materiality; label: string };
 }

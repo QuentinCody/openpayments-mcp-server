@@ -13,6 +13,12 @@
 /** MCP Streamable HTTP drops a structuredContent payload above this many bytes. */
 export const TRANSPORT_LIMIT = 100_000;
 
+/** Fleet-wide point at which complete results move out of the inline channel. */
+export const STAGING_THRESHOLD_BYTES = 30 * 1024;
+
+/** Console diagnostics are useful, but must never dominate a result envelope. */
+export const CODE_MODE_LOG_LIMIT_BYTES = 8 * 1024;
+
 /**
  * UTF-8 byte length of a string WITHOUT allocating (Workers have no `Buffer`,
  * and `TextEncoder().encode(s).length` allocates the whole byte array just to
@@ -42,6 +48,25 @@ export function utf8Len(s: string): number {
 		}
 	}
 	return bytes;
+}
+
+/**
+ * Return the longest prefix whose UTF-8 encoding fits in `maxBytes`.
+ * Iterating code points keeps surrogate pairs intact, so an emoji is either
+ * included whole or omitted whole.
+ */
+export function truncateUtf8(s: string, maxBytes: number): string {
+	if (maxBytes <= 0) return "";
+	if (utf8Len(s) <= maxBytes) return s;
+	let bytes = 0;
+	let prefix = "";
+	for (const char of s) {
+		const charBytes = utf8Len(char);
+		if (bytes + charBytes > maxBytes) break;
+		prefix += char;
+		bytes += charBytes;
+	}
+	return prefix;
 }
 
 /**

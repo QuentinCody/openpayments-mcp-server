@@ -43,6 +43,7 @@ function slimStaged(obj: Record<string, unknown>): {
 	tablesCreated: unknown;
 	totalRows: unknown;
 	payloadHash: unknown;
+	completeness: unknown;
 } {
 	const { schema: _s, _staging: _st, ...slim } = obj;
 	return {
@@ -51,6 +52,7 @@ function slimStaged(obj: Record<string, unknown>): {
 		tablesCreated: obj.tables_created,
 		totalRows: obj.total_rows,
 		payloadHash: stagedPayloadHash(_st),
+		completeness: _st !== null && typeof _st === "object" && !Array.isArray(_st) ? Reflect.get(_st, "completeness") : undefined,
 	};
 }
 
@@ -61,7 +63,7 @@ async function recoverStaged(
 	prov: CitationCtx | undefined,
 	retrievedAt: string,
 ) {
-	const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } =
+	const { slim, dataAccessId, tablesCreated, totalRows, payloadHash, completeness } =
 		slimStaged(staged);
 	const logOutput = result.logs?.length ? result.logs.join("\n") : undefined;
 	const cite = await buildCodeModeCitationMeta(
@@ -79,6 +81,7 @@ async function recoverStaged(
 			tables_created: tablesCreated,
 			total_rows: totalRows,
 			...(payloadHash ? { payload_hash: payloadHash } : {}),
+			...(completeness ? { completeness } : {}),
 			...cite,
 			...(logOutput ? { console_output: logOutput } : {}),
 			executed_at: retrievedAt,
@@ -128,7 +131,7 @@ async function successResult(
 	const stagingMeta: Record<string, unknown> = {};
 
 	if (isStaged) {
-		const { slim, dataAccessId, tablesCreated, totalRows, payloadHash } = slimStaged(
+		const { slim, dataAccessId, tablesCreated, totalRows, payloadHash, completeness } = slimStaged(
 			raw as Record<string, unknown>,
 		);
 		stagingMeta.staged = true;
@@ -136,6 +139,7 @@ async function successResult(
 		stagingMeta.tables_created = tablesCreated;
 		stagingMeta.total_rows = totalRows;
 		stagingMeta.payload_hash = payloadHash;
+		if (completeness) stagingMeta.completeness = completeness;
 		responseData = slim;
 	}
 

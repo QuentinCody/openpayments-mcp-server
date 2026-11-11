@@ -3,6 +3,12 @@ import type { RowChange } from "../types";
 import { fdaOrangeBook } from "./fda-orange-book";
 
 describe("fdaOrangeBook.buildQuery", () => {
+	it("rejects a staged or missing source result while accepting real empty arrays", async () => {
+		const code = String(fdaOrangeBook.buildQuery({ nda: "123" }).params.code);
+		const execute = new Function("api", `return (async () => {${code}})()`);
+		await expect(execute({ get: async () => ({ __staged: true }) })).rejects.toThrow("Incomplete or staged");
+		await expect(execute({ get: async () => ({ results: [] }) })).resolves.toMatchObject({ exclusivity: [], patents: [] });
+	});
 	it("targets orange_book_execute with exact-match code for the NDA", () => {
 		const q = fdaOrangeBook.buildQuery({ nda: "202155" });
 		expect(q.server).toBe("fda-orange-book");

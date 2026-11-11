@@ -351,7 +351,6 @@ export function validateGraphqlQuery(
 	const errors: GqlValidationError[] = [];
 	const MAX_ERRORS = 6;
 
-	// interlinked: defer cognitive_complexity -- pre-existing; this turn only changed the fieldList hint. Splitting the GraphQL selection walker is its own change with its own risk, not a drive-by.
 	const walk = (selection: ParsedField[], typeName: string): void => {
 		if (errors.length >= MAX_ERRORS) return;
 		const type = typeIndex.get(typeName);
@@ -363,6 +362,10 @@ export function validateGraphqlQuery(
 
 		for (const sel of selection) {
 			if (errors.length >= MAX_ERRORS) return;
+			// These fields are implicit in GraphQL and absent from ordinary field
+			// introspection. Their own arguments/selection are validated upstream.
+			if (sel.name === "__typename" || typeName === introspection.queryType.name &&
+				(sel.name === "__schema" || sel.name === "__type")) continue;
 			const def = fieldIndex.get(sel.name);
 			if (!def) {
 				errors.push({
@@ -374,30 +377,7 @@ export function validateGraphqlQuery(
 			}
 
 			// Unknown / rejected arguments.
-			if (sel.hasArgs && sel.args.length > 0) {
-				const validArgs = new Set((def.args ?? []).map((a) => a.name));
-				for (const argName of sel.args) {
-					if (!validArgs.has(argName)) {
-						errors.push({
-							type: typeName,
-							field: `${sel.name}.${argName}`,
-							message: `Field "${sel.name}" on "${typeName}" does not accept argument "${argName}". Valid arguments: ${argList(def)}.`,
-						});
-					}
-				}
-			}
-
-			// Missing required arguments.
-			const provided = new Set(sel.args);
-			for (const a of def.args ?? []) {
-				if (isRequiredArg(a) && !provided.has(a.name)) {
-					errors.push({
-						type: typeName,
-						field: `${sel.name}.${a.name}`,
-						message: `Field "${sel.name}" on "${typeName}" requires argument "${a.name}: ${a.type}".`,
-					});
-				}
-			}
+			validateFieldArguments(sel, def, errors, typeName);
 
 			if (sel.selectionSet) walk(sel.selectionSet, namedType(def.type));
 		}
@@ -405,6 +385,33 @@ export function validateGraphqlQuery(
 
 	walk(root, rootTypeName);
 	return { checked: true, errors: errors.slice(0, MAX_ERRORS) };
+}
+
+function validateFieldArguments(sel: ParsedField, def: TrimmedField, errors: GqlValidationError[], typeName: string) {
+  if (sel.hasArgs && sel.args.length > 0) {
+    const validArgs = new Set((def.args ?? []).map((a) => a.name));
+    for (const argName of sel.args) {
+      if (!validArgs.has(argName)) {
+        errors.push({
+          type: typeName,
+          field: `${sel.name}.${argName}`,
+          message: `Field "${sel.name}" on "${typeName}" does not accept argument "${argName}". Valid arguments: ${argList(def)}.`,
+        });
+      }
+    }
+  }
+
+  // Missing required arguments.
+  const provided = new Set(sel.args);
+  for (const a of def.args ?? []) {
+    if (isRequiredArg(a) && !provided.has(a.name)) {
+      errors.push({
+        type: typeName,
+        field: `${sel.name}.${a.name}`,
+        message: `Field "${sel.name}" on "${typeName}" requires argument "${a.name}: ${a.type}".`,
+      });
+    }
+  }
 }
 
 /** One-line human summary of validation errors, for an error envelope message. */

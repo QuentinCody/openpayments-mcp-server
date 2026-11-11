@@ -62,6 +62,23 @@ const introspection: TrimmedIntrospection = {
 };
 
 describe("validateGraphqlQuery", () => {
+	it("allows implicit introspection fields, including aliases and nested typename", () => {
+		const query = '{ model: __schema { queryType { name } } definition: __type(name: "Gene") { fields { name } } genes { nodes { __typename name } } }';
+		expect(validateGraphqlQuery(query, introspection)).toEqual({checked: true, errors: []});
+	});
+	it("still checks ordinary fields alongside introspection", () => {
+		const result = validateGraphqlQuery('{ __schema { queryType { name } } genes { nodes { nonexistent } } }', introspection);
+		expect(result.checked).toBe(true);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0].field).toBe("nonexistent");
+	});
+	it.each(['{ genes { nodes { __schema { queryType { name } } } } }', 'mutation { __schema { queryType { name } } }'])("does not allow query-root introspection on other types: %s", query => {
+		const result = validateGraphqlQuery(query, introspection);
+		expect(result.checked).toBe(true);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0].field).toBe("__schema");
+	});
+
 	it("catches the dgidb error class: rejected args, missing required arg, unknown fields", () => {
 		const q = `{ gene(name:"EGFR"){ interactions(first:500){ totalCount edges{ node{ name } } } } }`;
 		const res = validateGraphqlQuery(q, introspection);

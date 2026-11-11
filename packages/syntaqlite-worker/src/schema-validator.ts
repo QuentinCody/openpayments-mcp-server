@@ -123,12 +123,7 @@ function extractReferencedIdentifiers(sql: string): {
 	]);
 
 	// Collect aliases (identifiers after AS) — these should not be validated
-	const aliases = new Set<string>();
-	const aliasPattern = /\bAS\s+(?:"([^"]+)"|(\w+))/gi;
-	while ((match = aliasPattern.exec(cleaned)) !== null) {
-		const name = match[1] ?? match[2];
-		if (name) aliases.add(name.toLowerCase());
-	}
+	const aliases = collectAliases(cleaned, sqlKeywords);
 
 	// Match table.column or bare column references
 	const colPattern = /(?:(\w+)\.)?(?:"([^"]+)"|(\w+))/g;
@@ -153,6 +148,23 @@ function extractReferencedIdentifiers(sql: string): {
 	}
 
 	return { tableRefs, columnRefs };
+}
+
+function collectAliases(cleaned: string, sqlKeywords: Set<string>): Set<string> {
+	const aliases = new Set<string>();
+	let match: RegExpExecArray | null;
+	const aliasPattern = /\bAS\s+(?:"([^"]+)"|(\w+))/gi;
+	while ((match = aliasPattern.exec(cleaned)) !== null) {
+		const name = match[1] ?? match[2];
+		if (name) aliases.add(name.toLowerCase());
+	}
+	// Table aliases may omit AS. Clause keywords after a table are not aliases.
+	const tableAliasPattern = /\b(?:FROM|JOIN)\s+(?:"[^"]+"|\w+)\s+(?:AS\s+)?(?:"([^"]+)"|(\w+))/gi;
+	while ((match = tableAliasPattern.exec(cleaned)) !== null) {
+		const name = match[1] ?? match[2];
+		if (name && !sqlKeywords.has(name.toLowerCase())) aliases.add(name.toLowerCase());
+	}
+	return aliases;
 }
 
 /**

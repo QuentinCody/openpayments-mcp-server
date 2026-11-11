@@ -10,20 +10,22 @@
  */
 
 import type { ApiCatalog } from "@bio-mcp/shared/codemode/catalog";
+import { releaseEndpoints, releaseWorkflows } from "./releases";
 
 export const openPaymentsCatalog: ApiCatalog = {
     name: "CMS Open Payments (DKAN)",
     baseUrl: "https://openpaymentsdata.cms.gov/api/1",
     version: "1.0",
     auth: "none",
-    endpointCount: 6,
+    endpointCount: 9,
+    workflows: releaseWorkflows,
     notes:
         "## DKAN Query API\n" +
         "This API uses the DKAN open data platform. Each year/type of payment data is a separate dataset.\n" +
         "The primary query endpoint is `/datastore/query/{datasetId}/0` where `{datasetId}` is a UUID.\n\n" +
         "## How to Query Payments\n" +
-        "1. Pick the dataset UUID from the registry below (or use `/search` to discover datasets)\n" +
-        "2. Query via `/datastore/query/{datasetId}/0` with conditions and sorts\n" +
+        "1. Use `/datasets/discover` with program_year and optional payment_type; choose among returned candidates explicitly.\n" +
+        "2. Prefer `/datasets/{dataset_id}/page` to retain metadata and guard the selected year/type and revision. Native `/datastore/query/{datasetId}/0` remains available.\n" +
         "3. Always pass `keys: true` so results are objects (not arrays). Pass `schema: false` to keep responses small.\n\n" +
         "## Filtering Syntax\n" +
         "Pass `conditions` as an array of objects. Each condition has:\n" +
@@ -46,27 +48,11 @@ export const openPaymentsCatalog: ApiCatalog = {
         "## Sorting\n" +
         "Pass `sorts` as an array: `sorts: [{ property: 'total_amount_of_payment_usdollars', order: 'desc' }]`\n" +
         "NOTE: Sorts are lexicographic (string-based), so '999' > '9972' > '100000'. For true numeric sort, use staged SQL with CAST().\n\n" +
-        "## Dataset UUID Registry\n" +
-        "**General Payments** (physician non-research payments):\n" +
-        "- 2024: `e6b17c6a-2534-4207-a4a1-6746a14911ff` (~15.4M records)\n" +
-        "- 2023: `fb3a65aa-c901-4a38-a813-b04b00dfa2a9`\n" +
-        "- 2022: `df01c2f8-dc1f-4e79-96cb-8208beaf143c`\n" +
-        "- 2021: `0380bbeb-aea1-58b6-b708-829f92a48202`\n" +
-        "- 2020: `a08c4b30-5cf3-4948-ad40-36f404619019`\n" +
-        "- 2019: `4e54dd6c-30f8-4f86-86a7-3c109a89528e`\n" +
-        "- 2018: `f003634c-c103-568f-876c-73017fa83be0`\n\n" +
-        "**Research Payments** (clinical research/study payments):\n" +
-        "- 2024: `2f15cb85-8887-4dcc-a318-1f8ec1d815b3` (~757K records)\n" +
-        "- 2023: `ec9521bf-9d97-4603-814c-f4132d34bc4f`\n" +
-        "- 2022: `fdc3c773-018a-412c-8a81-d7b8a13a037b`\n" +
-        "- 2021: `ce1d28dd-0094-5060-a036-580329439600`\n" +
-        "- 2020: `9c248e7e-7c7f-478b-ab84-ce0919d72c1c`\n" +
-        "- 2019: `713a6016-1930-4a0c-b7c2-3e3de4f244c5`\n" +
-        "- 2018: `7b82fb48-2bec-45f0-b40e-aed5f1d1eba0`\n\n" +
-        "**Ownership/Investment Payments**:\n" +
-        "- 2024: `9ac4f7f8-b6e4-4d80-8410-4aba7e71dd02` (~4.6K records)\n" +
-        "- 2022: `37792388-800f-427a-9e02-b11601454eeb`\n" +
-        "- 2019: `0b5c9710-7edb-484e-abc8-39293849ccb2`\n\n" +
+        "## Release and join provenance\n" +
+        "Program year is the reporting period; issued/modified metadata, payment_publication_date and retrieval time are separate. CMS publishes the previous program year by June 30 and refreshes in January. Older years can also be revised.\n" +
+        "Retain dataset UUID, distribution index/reference, metadata hash, program_year, record_id, change_type and dispute_status_for_publication. Metadata stability is not an atomic historical snapshot.\n" +
+        "Join providers with NPI/profile ID and companies with manufacturer/GPO ID, preserving identity source and year. Do not merge by name alone or treat a payment/dispute as evidence of wrongdoing.\n" +
+        "Do not assume archives remain queryable: CMS currently lists 2019–2025 in the search tool and 2013–2018 as archives. Discover the chosen year before using historical IDs.\n\n" +
         "**Covered Recipient Profile Supplement** (all years): `23160558-6742-54ff-8b9f-cac7d514ff4e`\n\n" +
         "## Key Columns — General Payments\n" +
         "- `covered_recipient_npi` — NPI number\n" +
@@ -85,13 +71,14 @@ export const openPaymentsCatalog: ApiCatalog = {
         "- `name_of_drug_or_biological_or_device_or_medical_supply_1` — associated product\n" +
         "- `physician_ownership_indicator` — Yes/No\n" +
         "- `program_year` — 4-digit year\n" +
-        "- `record_id` — unique record identifier\n\n" +
+        "- `record_id` — record identifier; retain year, dataset and revision context\n" +
+        "- `payment_publication_date`, `change_type`, `dispute_status_for_publication` — retain native revision/dispute evidence\n\n" +
         "## Key Columns — Research Payments (additional)\n" +
         "- `name_of_study` — research study name\n" +
         "- `clinicaltrials_gov_identifier` — NCT number link\n" +
         "- `research_information_link` — URL for research details\n" +
         "- `preclinical_research_indicator` — Yes/No\n" +
-        "- Principal investigator fields (PI 1 has named columns; PIs 2-5 are collapsed during staging)\n\n" +
+        "- Principal investigator fields: release-page native envelope preserves all numbered fields; legacy wide-row staging may collapse PI 2-5\n\n" +
         "## Key Columns — Ownership Payments\n" +
         "- `physician_npi`, `physician_first_name`, `physician_last_name`\n" +
         "- `total_amount_invested_usdollars`\n" +
@@ -106,13 +93,14 @@ export const openPaymentsCatalog: ApiCatalog = {
         "Always use `keys: true` so results are objects with named fields.\n" +
         "Use `schema: false` to avoid inflating the response size with column metadata.\n",
     endpoints: [
+        ...releaseEndpoints,
         // === Datastore Query ===
         {
             method: "GET",
             path: "/datastore/query/{datasetId}/0",
             summary:
                 "Query a specific Open Payments dataset. This is the primary endpoint for retrieving payment records. " +
-                "Use the dataset UUID registry (in notes) to find the right datasetId for each payment type and year. " +
+                "Use /datasets/discover to find the datasetId for the reporting year and payment type. " +
                 "Always pass keys=true and schema=false for optimal results.",
             category: "datastore",
             pathParams: [
@@ -121,7 +109,7 @@ export const openPaymentsCatalog: ApiCatalog = {
                     type: "string",
                     required: true,
                     description:
-                        "Dataset UUID — see Dataset UUID Registry in catalog notes for mapping of payment type + year to UUID",
+                        "Dataset UUID — select from /datasets/discover for the requested payment type and reporting year",
                 },
             ],
             queryParams: [
@@ -239,7 +227,7 @@ export const openPaymentsCatalog: ApiCatalog = {
             path: "/metastore/schemas/dataset/items",
             summary:
                 "List all available datasets in the Open Payments catalog. Returns metadata for every dataset " +
-                "including identifiers, titles, descriptions, and download URLs. Response is large (61+ datasets).",
+                "including identifiers, titles, descriptions, and download URLs. Response may require staging.",
             category: "metastore",
         },
 

@@ -5,11 +5,18 @@
  * paths build the same `{__staged, data_access_id, columns, message, …}` envelope.
  */
 
-import { detectOverMatch, type FilterWarning } from "../completeness";
+import { type Completeness, detectOverMatch, type FilterWarning, inferUpstreamTotal, mergeCompleteness } from "../completeness";
+import { countReturnedRecords } from "../record-count";
 import type { StageResult } from "../staging/utils";
 
 /** Max size (bytes) for a single property to be preserved in the staging envelope. */
 const ENVELOPE_SCALAR_LIMIT = 1024;
+
+/** An adapter can distinguish an unknown total from an omitted inference override. */
+export function resolveUpstreamTotal(data: unknown, override: number | null | undefined): number | undefined {
+  if (override === null) return undefined;
+  return override === undefined ? inferUpstreamTotal(data) : override;
+}
 
 /**
  * Copy small scalar properties from the original API response onto the staging
@@ -107,6 +114,8 @@ export interface StagedEnvelopeInput {
 	originalData: unknown;
 	/** Pre-computed over-match warning; defaults to detectOverMatch(originalData). */
 	overMatch?: FilterWarning;
+  /** Adapter-verified coverage; successful storage cannot override a partial page. */
+  completeness?: Completeness;
 }
 
 /**
@@ -183,7 +192,15 @@ export function buildStagedEnvelope(
 	const { staged, responseBytes, originalData } = input;
 	const overMatch = input.overMatch ?? detectOverMatch(originalData);
 	const tableDetail = buildStagedTableSummary(staged);
-	const completeness = staged._staging?.completeness;
+	// UCSC marks capped track/file responses even when it supplies no total.
+	// Successfully storing every returned row must not override that evidence.
+	const capped = originalData && typeof originalData === "object" &&
+		"maxItemsLimit" in originalData && originalData.maxItemsLimit === true;
+	const completeness = mergeCompleteness(
+		input.completeness,
+		capped ? { complete: false, truncation: { reason: "upstream_cap", detail: "Provider reported maxItemsLimit=true.", remedy: "Narrow the query or use provider bulk downloads; stored rows are only the returned subset." } } : undefined,
+		staged._staging?.completeness,
+	);
 	const incompleteNote =
 		completeness && completeness.complete === false
 			? ` INCOMPLETE: ${completeness.truncation?.detail ?? ""} ${completeness.truncation?.remedy ?? ""}`.trimEnd()
@@ -196,7 +213,9 @@ export function buildStagedEnvelope(
 		schema: staged.schema,
 		tables_created: staged.tablesCreated,
 		total_rows: staged.totalRows,
-		_staging: staged._staging,
+		// Storage rows include child/context tables. Only count identifiable source records.
+		returned_record_count: countReturnedRecords(originalData),
+		_staging: capped || input.completeness ? { ...staged._staging, completeness } : staged._staging,
 		...(stagedCols ? { columns: stagedCols } : {}),
 		...(staged.stagingWarnings
 			? { staging_warnings: staged.stagingWarnings }

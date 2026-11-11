@@ -44,8 +44,11 @@ export async function gwasGet<T = unknown>(
 /** Fetch v2 associations filtered by EFO trait or free-text term. */
 export async function gwasAssociations(
 	params: {
+		efoId?: string;
+		/** @deprecated Historical identifier argument; use efoId. */
 		efoTrait?: string;
 		traitName?: string;
+		showChildTraits?: boolean;
 		size?: number;
 		page?: number;
 	},
@@ -55,7 +58,11 @@ export async function gwasAssociations(
 		size: params.size ?? 200,
 		page: params.page ?? 0,
 	};
-	if (params.efoTrait) qp.efoTrait = params.efoTrait;
-	if (params.traitName) qp.traitName = params.traitName;
+	// v2 separates ontology identifiers from labels and uses snake_case on the wire.
+	// Contract: EBISPOT/gwas-mcp src/gwascatalog/mcp/data/rest-api-doc.yaml.
+	const id = params.efoId ?? params.efoTrait;
+	if (id) qp.efo_id = id;
+	else if (params.traitName) qp.efo_trait = params.traitName;
+	if (params.showChildTraits !== undefined) qp.show_child_trait = params.showChildTraits;
 	return gwasGet("/v2/associations", qp, opts);
 }

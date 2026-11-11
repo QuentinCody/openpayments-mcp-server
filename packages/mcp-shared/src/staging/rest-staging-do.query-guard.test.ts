@@ -220,7 +220,7 @@ describe("RestStagingDO allowlists physically-present tables", () => {
 	function makeDoWithSchema(): { instance: RestStagingDO; executed: string[] } {
 		const executed: string[] = [];
 		const schema = JSON.stringify({
-			tables: [{ name: "records", columns: [{ name: "id" }], indexes: [] }],
+			tables: [{ name: "records", columns: [{ name: "CONTRACT_ID" }], indexes: [] }],
 		});
 		const sql: SqlDouble = {
 			exec(query: string) {
@@ -228,7 +228,9 @@ describe("RestStagingDO allowlists physically-present tables", () => {
 				const rows = /_inferred_schema/.test(query)
 					? [{ schema_json: schema }]
 					: /sqlite_master/.test(query)
-						? [{ name: "records" }, { name: "payloads" }]
+						? [{ name: "records" }, { name: "payloads" }, { name: "content_chunks" }]
+                        : /PRAGMA table_info/.test(query)
+                            ? ["id", "root_json", "content_id", "chunk_index", "chunk_data"].map(name => ({ name, type: "TEXT" }))
 						: /COUNT\(\*\)/.test(query)
 							? [{ c: 1 }]
 							: [{ root_json: "{}" }];
@@ -267,6 +269,14 @@ describe("RestStagingDO allowlists physically-present tables", () => {
 		expect(body.error ?? "").not.toMatch(/unknown table/i);
 		expect(res.status).not.toBe(400);
 	});
+
+    it("allows chunk predicates while retaining unknown-column validation", async () => {
+        const { instance } = makeDoWithSchema();
+        const response = await instance.fetch(post("/query", { sql: "SELECT chunk_data FROM content_chunks WHERE content_id = 'chunk_fixture' AND chunk_index = 0 LIMIT 1" }));
+        expect(response.status).toBe(200);
+        const invalid = await instance.fetch(post("/query", { sql: "SELECT chunk_data FROM content_chunks WHERE chunk_indx = 0 LIMIT 1" }));
+        expect(invalid.status).toBe(400);
+    });
 
 	it("still rejects a table that exists nowhere", async () => {
 		const { instance } = makeDoWithSchema();

@@ -17,7 +17,7 @@
 
 import { z } from "zod";
 import type { SourceDescriptor } from "../provenance/provenance";
-import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
+import { getRequestLicenseProfile, getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext } from "../registry/types";
 import {
 	createApiProxyTool,
@@ -173,6 +173,7 @@ interface ExecutionContext {
 	buildExecutorFns: (
 		sessionId: string | undefined,
 		workspace?: string,
+		licenseProfile?: "commercial",
 	) => ExecutorFns;
 	cache: {
 		introspection: TrimmedIntrospection | undefined;
@@ -247,6 +248,7 @@ async function executeCode(
 	code: string,
 	sessionId: string | undefined,
 	workspace?: string,
+	licenseProfile?: "commercial",
 ) {
 	await ensureIntrospection(ctx);
 
@@ -264,7 +266,7 @@ async function executeCode(
 	});
 	const result = await executor.execute(
 		wrappedCode,
-		ctx.buildExecutorFns(sessionId, workspace),
+		ctx.buildExecutorFns(sessionId, workspace, licenseProfile),
 	);
 	return await handleExecutorResult(result, {
 		source: ctx.options.source,
@@ -285,7 +287,7 @@ function createExecutorFnsBuilder(
 	fsDoNamespace: unknown,
 	workspaceNamespace?: unknown,
 	apiProxyTool?: ReturnType<typeof createApiProxyTool>,
-): (sessionId: string | undefined, workspace?: string) => ExecutorFns {
+): (sessionId: string | undefined, workspace?: string, licenseProfile?: "commercial") => ExecutorFns {
 	const queryProxyTool = doNamespace
 		? createQueryProxyTool({ doNamespace, workspaceNamespace })
 		: undefined;
@@ -304,8 +306,14 @@ function createExecutorFnsBuilder(
 			})
 		: {};
 
-	return (sessionId: string | undefined, workspace?: string) => {
-		const ctx: ToolContext = { sql: () => [], sessionId, workspace };
+	return (sessionId: string | undefined, workspace?: string, licenseProfile?: "commercial") => {
+		const ctx: ToolContext = {
+			sql: () => [],
+			sessionId,
+			workspace,
+			// Reaches the server's GraphqlFetchFn and ApiFetchFn through the proxies.
+			...(licenseProfile ? { requestContext: { licenseProfile } } : {}),
+		};
 		return {
 			__graphql_proxy: async (args: unknown) =>
 				graphqlProxyTool.handler(toInput(args), ctx),
@@ -451,8 +459,8 @@ export function createGraphqlExecuteTool(
 				this.description,
 				this.schema,
 				async (input: { code: string; workspace?: string }, extra: unknown) => {
-					const code = input.code?.trim();
-					if (!code) {
+					const code = input.code;
+					if (typeof code !== "string" || !code.trim()) {
 						return createCodeModeError(
 							ErrorCodes.INVALID_ARGUMENTS,
 							"code is required",
@@ -460,7 +468,8 @@ export function createGraphqlExecuteTool(
 					}
 					try {
 						const scope = getRequestScope(extra as MaybeExtra | undefined);
-						return await executeCode(ctx, code, scope, input.workspace);
+						const licenseProfile = getRequestLicenseProfile(extra as MaybeExtra | undefined);
+						return await executeCode(ctx, code, scope, input.workspace, licenseProfile);
 					} catch (err) {
 						const message = err instanceof Error ? err.message : String(err);
 						return createCodeModeError(

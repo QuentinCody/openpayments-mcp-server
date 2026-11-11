@@ -11,9 +11,17 @@ export type SqlTaggedTemplate = <
 ) => T[];
 
 /** Per-call correlation context propagated through nested orchestrator calls. */
+/**
+ * A caller that resells results sets this profile. A server then withholds
+ * the content that its upstream terms do not permit for commercial use.
+ * No profile means the normal, non-commercial behavior.
+ */
+export type LicenseProfile = "commercial";
+
 export interface ToolRequestContext {
 	chatId?: string;
 	traceparent?: string;
+	licenseProfile?: LicenseProfile;
 }
 
 /**

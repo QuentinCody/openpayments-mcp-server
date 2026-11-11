@@ -327,6 +327,16 @@ describe("createGraphqlProxyTool — workspace-aware staging (ADR-006 Phase 0)",
 });
 
 describe("createGraphqlProxyTool", () => {
+	it("preserves adapter coverage through staging without adding it to native data", async () => {
+		const data = {rows: Array.from({length: 500}, (_, id) => ({id, value: "x".repeat(100)}))};
+		const completeness = {complete: false, returned: 500, truncation: {reason: "page_limit" as const}};
+		const fetch: GraphqlFetchFn = async () => ({data, completeness});
+		const inline = await makeTool(fetch).handler({query: "{ rows { id value } }"}, stubCtx);
+		expect(inline).toEqual(data);
+		const staged = await makeTool(fetch, {doNamespace: makeDoNamespace()}).handler({query: "{ rows { id value } }"}, stubCtx);
+		expect(staged).toMatchObject({__staged: true, _staging: {completeness}});
+	});
+
 	it("creates a hidden tool named __graphql_proxy", () => {
 		const tool = makeTool(async () => ({ data: {} }));
 		expect(tool.name).toBe("__graphql_proxy");

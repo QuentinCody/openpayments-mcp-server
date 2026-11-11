@@ -1,3 +1,4 @@
+import { openpayResponse } from "../lib/tool-result";
 /**
  * OpenPayments Code Mode — registers search + execute tools for full API access.
  *
@@ -21,13 +22,21 @@ interface CodeModeEnv {
  */
 export function registerCodeMode(server: McpServer, env: CodeModeEnv): void {
     const apiFetch = createOpenPaymentsApiFetch();
+    const registrar = { tool: (...args: unknown[]) => {
+        // SAFETY: shared factories supply SDK arguments; only the alias name changes.
+        const register = server.tool.bind(server) as (...values: unknown[]) => void;
+        const [name, ...rest] = args;
+        const handler = rest.pop() as (input: unknown, extra: unknown) => ReturnType<typeof openpayResponse>;
+        const respond = (input: unknown, extra: unknown) => openpayResponse(() => handler(input, extra), env, String(name), extra, input);
+        register(name, ...rest, respond); register(`mcp_${String(name)}`, ...rest, respond);
+    } };
 
     // Register the search tool (in-process, no isolate)
     const searchTool = createSearchTool({
         prefix: "openpay",
         catalog: openPaymentsCatalog,
     });
-    searchTool.register(server as unknown as { tool: (...args: unknown[]) => void });
+    searchTool.register(registrar);
 
     // Register the execute tool (V8 isolate via DynamicWorkerExecutor)
     const executeTool = createExecuteTool({
@@ -36,8 +45,12 @@ export function registerCodeMode(server: McpServer, env: CodeModeEnv): void {
         source: { id: "openpay", name: "CMS Open Payments", url: "https://openpaymentsdata.cms.gov", license: "U.S. Public Domain" },
         catalog: openPaymentsCatalog,
         apiFetch,
+        preserveApiErrors: true,
+        maxInlineBytes: 30 * 1024,
+        stagingThreshold: 30 * 1024,
+        timeout: 60_000,
         doNamespace: env.OPENPAYMENTS_DATA_DO,
         loader: env.CODE_MODE_LOADER,
     });
-    executeTool.register(server as unknown as { tool: (...args: unknown[]) => void });
+    executeTool.register(registrar);
 }

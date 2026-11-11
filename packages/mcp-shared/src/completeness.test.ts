@@ -49,6 +49,9 @@ describe("asCount", () => {
 });
 
 describe("inferUpstreamTotal", () => {
+	it("recognizes Grist's native capitalized string total without counting its page as complete", () => {
+		expect(inferUpstreamTotal({ HitCount: "613", Request: { Page: "1" }, RecordList: { Record: [] } })).toBe(613);
+	});
 	it("returns undefined for non-objects and arrays", () => {
 		expect(inferUpstreamTotal(null)).toBeUndefined();
 		expect(inferUpstreamTotal("x")).toBeUndefined();

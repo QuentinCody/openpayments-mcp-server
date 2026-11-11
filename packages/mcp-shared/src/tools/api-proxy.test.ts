@@ -90,6 +90,32 @@ describe("path helpers", () => {
 		expect(() => validatePath("/../etc")).toThrow(/Dangerous/);
 	});
 
+	it("validatePath rejects traversal that is written with encoded dots or backslashes", () => {
+		// `new URL("/.%2e/.%2e/other/service", "https://host/api/v1/")` is
+		// https://host/other/service: the request leaves the API root.
+		const base = "https://host.example/api/v1";
+		expect(new URL(`${base}/.%2e/.%2e/other/service`).pathname).toBe("/other/service");
+		for (const path of [
+			"/.%2e/.%2e/other/service",
+			"/%2e./other",
+			"/%2E%2e/other",
+			"/.%2E/other",
+			"/a/%2e%2e",
+			"/a/.%2e",
+			"/a\\..\\other",
+			"/a%5c..%5cother",
+			"/a%5C%2e%2e%5Cother",
+		]) {
+			expect(() => validatePath(path), path).toThrow(/Dangerous/);
+		}
+	});
+
+	it("validatePath accepts ordinary paths with dots and encoded characters", () => {
+		for (const path of ["/files/study.v1.2.json", "/v1.2/genes", "/lookup/%2efoo", "/entry/P04637.fasta", "/a/b%20c", "/search?q=1.5..2.5", "/x/a%5Cb"]) {
+			expect(() => validatePath(path), path).not.toThrow();
+		}
+	});
+
 	it("interpolatePath fills path params and keeps the rest as query", () => {
 		const { path, queryParams } = interpolatePath("/gene/{id}", {
 			id: "BRCA1",
@@ -163,6 +189,30 @@ describe("buildStageOptions (ADR-006 Phase 0)", () => {
 });
 
 describe("createApiProxyTool", () => {
+  it.each([null, undefined, 200, 0])("honors the adapter's total-count evidence (%s) without changing native count", async upstreamTotal => {
+    const {ns} = makeServerDo();
+    const data = largePayload();
+    const proxy = createApiProxyTool({apiFetch: async () => ({status:200,data,upstreamTotal,
+      completeness:{complete:false,returned:500,truncation:{reason:"unknown",detail:"Observed page only"}},
+    }),doNamespace:ns,stagingPrefix:"rhea",maxInlineBytes:30720});
+    const result = await proxy.handler({method:"GET",path:"/rhea"},baseCtx);
+    expect(result).toMatchObject({__staged:true,count:500,_staging:{completeness:{complete:false}}});
+    if (upstreamTotal === null) expect(result).not.toHaveProperty("_staging.completeness.total_available");
+    else expect(result).toHaveProperty("_staging.completeness.total_available",upstreamTotal ?? 500);
+    expect(data.count).toBe(500);
+  });
+
+  it("retains adapter-verified partial coverage after successful staging without changing native payloads", async () => {
+    const {ns} = makeServerDo();
+    const data = {results: [{id: 1, description: "x".repeat(40000)}]};
+    const tool = createApiProxyTool({apiFetch: async () => ({status: 200, data,
+      completeness: {complete: false, returned: 1, truncation: {reason: "page_limit", detail: "Next page exists"}},
+    }), doNamespace: ns, stagingPrefix: "funding", maxInlineBytes: 30720});
+    const result = await tool.handler({method: "GET", path: "/awards"}, baseCtx);
+    expect(result).toMatchObject({__staged: true, _staging: {completeness: {complete: false, returned: 1, truncation: {reason: "page_limit"}}}});
+    expect(data).not.toHaveProperty("completeness");
+  });
+
 	const apiFetch: ApiFetchFn = async () => ({
 		status: 200,
 		data: largePayload(),

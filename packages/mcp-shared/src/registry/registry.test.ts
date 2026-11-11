@@ -45,6 +45,26 @@ describe("ToolRegistry.add / lookup", () => {
 });
 
 describe("ToolRegistry.registerAll", () => {
+	it.each(["x".repeat(20_000), "🧬".repeat(8_000)])("refuses oversized complete envelopes when staging is not configured", async (blob) => {
+		const reg = new ToolRegistry(CTX);
+		reg.add(entry({ name: "large", handler: async () => ({ blob }) }));
+		const { server, registered } = makeServer();
+		reg.registerAll(server);
+		const result = await registered[0].handler({}) as { isError?: boolean; structuredContent: unknown };
+		expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThan(30 * 1024);
+		expect(result.isError).toBe(true);
+	});
+
+	it("bounds oversized thrown errors on the complete MCP envelope", async () => {
+		const reg = new ToolRegistry(CTX);
+		reg.add(entry({ name: "large_error", handler: async () => { throw new Error("🧬".repeat(40_000)); } }));
+		const { server, registered } = makeServer();
+		reg.registerAll(server);
+		const result = await registered[0].handler({}) as { isError?: boolean };
+		expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThan(30 * 1024);
+		expect(result.isError).toBe(true);
+	});
+
 	it("dual-registers non-hidden tools with both response fields", async () => {
 		const reg = new ToolRegistry(CTX);
 		reg.add(entry({ name: "visible", handler: async () => ({ n: 5 }) }));
@@ -140,30 +160,31 @@ describe("ToolRegistry.registerAll", () => {
 		});
 	});
 
-	it("stores an oversized result losslessly and returns a hash-addressed reference", async () => {
-		const calls: Array<{ sql: string; params: unknown[] }> = [];
-		const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-			calls.push({ sql: strings.join("?"), params: values });
-			return [];
-		}) as ToolContext["sql"];
-		const reg = new ToolRegistry({ sql });
-		reg.add(
-			entry({
-				name: "large",
-				handler: async () => ({ blob: "x".repeat(120_000) }),
-			}),
-		);
+	it.each([false, true])("passes the complete success/error envelope to the configured finalizer (failure %s)", async (failure) => {
+		const blob = "🧬\\\"".repeat(40_000);
+		const compact = { content: [{ type: "text" as const, text: "staged" }], structuredContent: { success: !failure, _staging: { staged: true } }, ...(failure ? { isError: true } : {}) };
+		const finalize = vi.fn(async () => compact);
+		const reg = new ToolRegistry(CTX, finalize);
+		reg.add(entry({ name: "large", handler: async () => { if (failure) throw new Error(blob); return { blob }; } }));
 		const { server, registered } = makeServer();
 		reg.registerAll(server);
-		const result = (await registered[0].handler({})) as {
-			structuredContent: { data: Record<string, unknown> };
-		};
-		expect(result.structuredContent.data.lossless).toBe(true);
-		expect(result.structuredContent.data.payload_hash).toMatch(/^sha256:/);
-		expect(result.structuredContent.data.complete).toBe(true);
-		expect(
-			calls.some((call) => call.sql.includes("__lossless_tool_result_chunks")),
-		).toBe(true);
+		const extra = { _meta: { "dev.quentincody.bio/chatId": "chat-a" } };
+		expect(await registered[0].handler({ q: "x" }, extra)).toEqual(compact);
+		expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ structuredContent: failure
+			? { success: false, error: { code: "TOOL_EXECUTION_ERROR", message: blob } }
+			: { success: true, data: { blob } } }), "large", { q: "x" }, extra);
+	});
+
+	it("fails explicitly if a finalizer throws or still returns an oversized envelope", async () => {
+		for (const finalize of [async () => { throw new Error("storage unavailable"); }, async () => ({ content: [{ type: "text" as const, text: "x".repeat(40_000) }], structuredContent: { success: true } })]) {
+			const reg = new ToolRegistry(CTX, finalize);
+			reg.add(entry({ name: "large" }));
+			const { server, registered } = makeServer();
+			reg.registerAll(server);
+			const result = await registered[0].handler({}) as { isError?: boolean };
+			expect(result.isError).toBe(true);
+			expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThan(30 * 1024);
+		}
 	});
 });
 

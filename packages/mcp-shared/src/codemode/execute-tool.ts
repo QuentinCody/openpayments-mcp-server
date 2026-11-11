@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 import type { SourceDescriptor } from "../provenance/provenance";
-import { getRequestScope, type MaybeExtra } from "../registry/request-scope";
+import { getRequestLicenseProfile, getRequestScope, type MaybeExtra } from "../registry/request-scope";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import {
 	type ApiProxyToolOptions,
@@ -74,6 +74,10 @@ export interface ExecuteToolOptions {
 	loader: unknown;
 	/** Byte threshold for auto-staging (default 30KB, via DEFAULT_STAGING_THRESHOLD) */
 	stagingThreshold?: number;
+	/** Hard inline byte ceiling for api.get/post, overriding the single-record heuristic. */
+	maxInlineBytes?: number;
+	/** Preserve uncaught API status/data inside the isolate; keeps original caller code for citations. */
+	preserveApiErrors?: boolean;
 	/** Execution timeout in ms (default 30000) */
 	timeout?: number;
 	/** Optional JavaScript source injected into the isolate before user code.
@@ -101,6 +105,7 @@ function wrapUserCode(
 	userCode: string,
 	preamble?: string,
 	includeFsProxy?: boolean,
+	preserveApiErrors?: boolean,
 ): string {
 	const apiProxy = buildApiProxySource();
 	const fsProxy = includeFsProxy ? buildFsProxySource() : "";
@@ -111,7 +116,7 @@ ${apiProxy}
 ${fsProxy}
 ${preamble ? `\n// --- Preamble (domain helpers) ---\n${preamble}\n// --- End preamble ---\n` : ""}
 // --- User code (nested scope so a user const api/schema shadows, not collides — T4.2) ---
-${wrapInUserScope(userCode)}
+${wrapInUserScope(userCode, preserveApiErrors)}
 // --- End user code ---
 }`;
 }
@@ -122,6 +127,40 @@ export interface ExecuteToolResult {
 	description: string;
 	schema: { code: z.ZodString; workspace: z.ZodOptional<z.ZodString> };
 	register: (server: { tool: (...args: unknown[]) => void }) => void;
+}
+
+const HTTP_METHODS = new Set(["get", "post", "put", "delete", "patch", "options", "head", "trace"]);
+
+/** Count the operations (path + HTTP method pairs) in an OpenAPI spec. */
+function countOperations(spec: ResolvedSpec): number {
+	return Object.values(spec.paths).reduce((count, pathItem) => {
+		if (!pathItem || typeof pathItem !== "object") return count;
+		return count + Object.keys(pathItem).filter((method) => HTTP_METHODS.has(method)).length;
+	}, 0);
+}
+
+/** Coerce executor args to the Record<string, unknown> that handlers expect. */
+function toInput(args: unknown): Record<string, unknown> {
+	if (args !== null && typeof args === "object" && !Array.isArray(args)) {
+		return { ...(args as Record<string, unknown>) };
+	}
+	return {};
+}
+
+/**
+ * The per-request ToolContext of one `_execute` call. The session id from the MCP
+ * `extra` lets auto-staging register datasets with the session-scoped __registry__
+ * DO; `workspace` routes auto-staging into the shared WorkspaceDO (ADR-006 Phase 0);
+ * the license profile reaches the server's ApiFetchFn through the proxies (catalog.ts).
+ */
+function requestToolContext(extra: unknown, workspace?: string): ToolContext {
+	const licenseProfile = getRequestLicenseProfile(extra as MaybeExtra | undefined);
+	return {
+		sql: () => [],
+		sessionId: getRequestScope(extra as MaybeExtra | undefined),
+		workspace,
+		...(licenseProfile ? { requestContext: { licenseProfile } } : {}),
+	};
 }
 
 /**
@@ -164,24 +203,7 @@ export function createExecuteTool(
 	const toolName = `${prefix}_execute`;
 	const apiName = catalog?.name || openApiSpec?.info.title || prefix;
 	const totalOperations = openApiSpec
-		? Object.values(openApiSpec.paths).reduce((count, pathItem) => {
-				if (!pathItem || typeof pathItem !== "object") return count;
-				return (
-					count +
-					Object.keys(pathItem).filter((method) =>
-						[
-							"get",
-							"post",
-							"put",
-							"delete",
-							"patch",
-							"options",
-							"head",
-							"trace",
-						].includes(method),
-					).length
-				);
-			}, 0)
+		? countOperations(openApiSpec)
 		: (catalog?.endpointCount ?? 0);
 	const searchSource = openApiSpec
 		? buildOpenApiSearchSource(JSON.stringify(openApiSpec))
@@ -212,6 +234,7 @@ export function createExecuteTool(
 		doNamespace,
 		stagingPrefix: prefix,
 		stagingThreshold,
+		maxInlineBytes: options.maxInlineBytes,
 		workspaceNamespace,
 	};
 	const apiProxyTool = createApiProxyTool(apiProxyToolOpts);
@@ -239,18 +262,6 @@ export function createExecuteTool(
 			})
 		: undefined;
 
-	/** Coerce executor args to the Record<string, unknown> that handlers expect. */
-	function toInput(args: unknown): Record<string, unknown> {
-		if (args !== null && typeof args === "object" && !Array.isArray(args)) {
-			const result: Record<string, unknown> = {};
-			for (const [k, v] of Object.entries(args)) {
-				result[k] = v;
-			}
-			return result;
-		}
-		return {};
-	}
-
 	// Filesystem proxy handlers (only when fsDoNamespace is provided) — built once.
 	const fsHandlers: ExecutorFns = fsDoNamespace
 		? createFsProxyHandlers({
@@ -260,18 +271,8 @@ export function createExecuteTool(
 			})
 		: {};
 
-	/**
-	 * Build the function map for the executor with a per-request ToolContext.
-	 * sessionId flows in from the MCP `extra` argument so auto-staging can
-	 * register datasets with the session-scoped __registry__ DO. `workspace`
-	 * flows in from the `_execute` `workspace` arg so auto-staging can route into
-	 * the shared WorkspaceDO (ADR-006 Phase 0) instead of the per-server DO.
-	 */
-	function buildExecutorFns(
-		sessionId: string | undefined,
-		workspace?: string,
-	): ExecutorFns {
-		const ctx: ToolContext = { sql: () => [], sessionId, workspace };
+	/** Build the function map for the executor with a per-request ToolContext (see requestToolContext). */
+	function buildExecutorFns(ctx: ToolContext): ExecutorFns {
 		return {
 			__api_proxy: async (args: unknown) =>
 				apiProxyTool.handler(toInput(args), ctx),
@@ -379,8 +380,8 @@ export function createExecuteTool(
 				description,
 				schema,
 				async (input: { code: string; workspace?: string }, extra: unknown) => {
-					const code = input.code?.trim();
-					if (!code) {
+					const code = input.code;
+					if (typeof code !== "string" || !code.trim()) {
 						return createCodeModeError(
 							ErrorCodes.INVALID_ARGUMENTS,
 							"code is required",
@@ -393,10 +394,10 @@ export function createExecuteTool(
 							code,
 							preamble,
 							!!fsDoNamespace,
+							options.preserveApiErrors,
 						);
 
-						const scope = getRequestScope(extra as MaybeExtra | undefined);
-						const executorFns = buildExecutorFns(scope, input.workspace);
+						const executorFns = buildExecutorFns(requestToolContext(extra, input.workspace));
 						const executor = new DynamicWorkerExecutor({ loader, timeout });
 						const result = await executor.execute(wrappedCode, executorFns);
 

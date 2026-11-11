@@ -11,7 +11,8 @@
  *
  * Detection is deliberately CONSERVATIVE: a response is treated as multi-row only
  * when a recognized collection key holds an array of >1 element (or the payload
- * itself is such an array). A single entity with large NESTED object-arrays
+ * itself is such an array), or a provider reports multiple itemsReturned.
+ * A single entity with large NESTED object-arrays
  * (UniProt `features`/`dbReferences`) is still a single record. Non-standard list
  * shapes fall back to the base threshold (no regression, just no improvement).
  */
@@ -29,6 +30,8 @@ const COLLECTION_KEYS = [
 	"nodes",
 	"edges",
 	"studies", // CT.gov /studies payload is { totalCount, studies:[...] } (#5)
+	"publicHubs", // UCSC /list/publicHubs has no itemsReturned count.
+	"files", // OpenNeuro snapshot.files and native file manifests are collections.
 ];
 
 /** Below this (and under the ~100KB transport limit), a single record stays inline. */
@@ -36,6 +39,9 @@ const SINGLE_RECORD_STAGE_THRESHOLD = 90 * 1024;
 const DEFAULT_STAGING_THRESHOLD = 30 * 1024;
 
 function hasMultiRowCollection(obj: Record<string, unknown>): boolean {
+	// UCSC uses arbitrary track names for row containers (and chromosome maps
+	// when querying a whole track). Its explicit row count is collection evidence.
+	if (typeof obj.itemsReturned === "number" && Number.isSafeInteger(obj.itemsReturned) && obj.itemsReturned > 1) return true;
 	for (const key of COLLECTION_KEYS) {
 		const v = obj[key];
 		if (Array.isArray(v) && v.length > 1) return true;

@@ -6,6 +6,7 @@
 // so it can be unit-tested without the `cloudflare:workers` import (same pattern
 // as ./schema-hints).
 import type { InferredSchema, TableProfile } from "./schema-inference";
+import { quoteIdent } from "./sql-emit";
 import type { TableRelationship } from "./staging-metadata";
 import type {
 	ColumnValueDictionary,
@@ -119,7 +120,7 @@ export function buildRelationshipJoins(
 		// (#6 — was conditionally `id` vs `_rowid`, silently diverging per dataset.)
 		return {
 			...rel,
-			join_sql: `SELECT p.*, c.* FROM "${rel.parent_table}" p JOIN "${rel.child_table}" c ON c.parent_id = p._rowid`,
+			join_sql: `SELECT p.*, c.* FROM ${quoteIdent(rel.parent_table)} p JOIN ${quoteIdent(rel.child_table)} c ON c.parent_id = p._rowid`,
 		};
 	});
 }

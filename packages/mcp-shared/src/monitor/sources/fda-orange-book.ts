@@ -15,8 +15,9 @@ function buildCode(nda: string): string {
 	const APPL = JSON.stringify(nda);
 	return [
 		`const APPL = ${APPL};`,
-		"const exAll = (await api.get('/exclusivity', { Appl_No: APPL })).results || [];",
-		"const ptAll = (await api.get('/patents', { Appl_No: APPL })).results || [];",
+		"const exAll = (await api.get('/exclusivity', { Appl_No: APPL })).results;",
+		"const ptAll = (await api.get('/patents', { Appl_No: APPL })).results;",
+		"if (!Array.isArray(exAll) || !Array.isArray(ptAll)) throw new Error('Incomplete or staged Orange Book response');",
 		"const exclusivity = exAll.filter((r) => r.Appl_No === APPL);",
 		"const patents = ptAll.filter((r) => r.Appl_No === APPL);",
 		"return { nda: APPL, exclusivity, patents };",

@@ -8,6 +8,15 @@ import {
 	StagedPayloadAccessError,
 } from "./staging-envelope";
 
+it("counts source records before staging and never substitutes child or context rows", () => {
+	const staged = { dataAccessId: "profiles", schema: {}, tablesCreated: ["profiles", "response_context"], totalRows: 101,
+		_staging: {} } as StageResult;
+	const result = buildStagedEnvelope({ staged, responseBytes: 40000, originalData: { count: 240, results: Array.from({ length: 100 }, (_, id) => ({ id })) } });
+	expect(result.returned_record_count).toBe(100); expect(result.total_rows).toBe(101);
+	const ambiguous = buildStagedEnvelope({ staged, responseBytes: 40000, originalData: { model: {}, motifs: [], returned_record_count: 99 } });
+	expect(ambiguous.returned_record_count).toBeUndefined();
+});
+
 describe("preserveEnvelopeScalars", () => {
 	it("copies small scalar siblings but never clobbers existing envelope fields", () => {
 		const staging: Record<string, unknown> = { total_rows: 5 };
@@ -80,6 +89,22 @@ describe("buildStagedEnvelope", () => {
 		totalRows: 3,
 		_staging: { table_row_counts: { studies: 3 } },
 	} as unknown as StageResult;
+
+	it("does not certify a provider-capped UCSC result as complete after successful storage", () => {
+		const input = { ...staged, _staging: { ...staged._staging, completeness: { complete: true, returned: 3 } } };
+		const env = buildStagedEnvelope({ staged: input, responseBytes: 40_000,
+			originalData: { genome: "hg38", itemsReturned: 3, maxItemsLimit: true } });
+		expect(env).toMatchObject({ maxItemsLimit: true, _staging: { completeness: { complete: false, returned: 3, truncation: { reason: "upstream_cap" } } } });
+		expect(String(env.message)).toContain("INCOMPLETE");
+		expect(input._staging.completeness.complete).toBe(true);
+	});
+
+  it("cannot override lost materialized rows with adapter coverage marked complete", () => {
+    const input = {...staged, _staging: {...staged._staging, completeness: {complete: false,
+      returned: 2, truncation: {reason: "insertion_failure" as const, detail: "One row was lost"}}}};
+    const env = buildStagedEnvelope({staged: input, responseBytes: 40000, originalData: {}, completeness: {complete: true}});
+    expect(env).toMatchObject({_staging: {completeness: {complete: false, returned: 2, truncation: {reason: "insertion_failure"}}}});
+  });
 
 	it("builds the standard envelope with columns + preserved scalars", () => {
 		const env = buildStagedEnvelope({

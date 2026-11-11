@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { ChunkingEngine, type SqlExec } from "./chunking";
 
 // Stateful SQL fake: records content_chunks inserts, replays them on the
@@ -109,6 +110,30 @@ describe("smartJsonStringify / smartJsonParse", () => {
 });
 
 describe("storeChunkedContent / retrieveChunkedContent", () => {
+	it.each([16382, 16383, 16384])("preserves supplementary Unicode at SQLite chunk boundaries after %s code units", async prefix => {
+		const database = new DatabaseSync(":memory:");
+		const sql: SqlExec = { exec(query, ...bindings) {
+			const statement = database.prepare(query);
+			const rows = query.trimStart().startsWith("SELECT") ? statement.all(...bindings) : (statement.run(...bindings), []);
+			return { toArray: () => rows };
+		} };
+		try {
+			const content = "a".repeat(prefix) + "🧬α".repeat(20000);
+			const e = engine();
+			const meta = await e.storeChunkedContent(content, "text", sql);
+			const recovered = await e.retrieveChunkedContent(meta.contentId, sql);
+			// Compare content without dumping the large fixture on failure.
+			expect(recovered === content).toBe(true);
+			expect(meta.originalSize).toBe(content.length);
+			const parts = sql.exec("SELECT chunk_data, chunk_size FROM content_chunks ORDER BY chunk_index").toArray();
+			expect(parts).toHaveLength(meta.totalChunks);
+			for (const part of parts) {
+				expect(String(part.chunk_data).length).toBe(part.chunk_size);
+				expect(String(part.chunk_data).length).toBeLessThanOrEqual(16 * 1024);
+			}
+		} finally { database.close(); }
+	});
+
 	it("stores metadata + ordered chunks and reassembles them", async () => {
 		const { sql } = makeSql();
 		const e = engine();

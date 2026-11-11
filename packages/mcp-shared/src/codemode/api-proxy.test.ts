@@ -38,8 +38,8 @@ describe("buildApiProxySource", () => {
 		const factory = new Function("__stagedResults", "console", "codemode", `${source}\nreturn __wrapStaged;`);
 		const wrapStaged = factory([], { warn: () => {} }, {}) as (raw: unknown) => Record<string, unknown>;
 		const staged = wrapStaged({ __staged: true, data_access_id: "uniprot_1", message: "auto-staged" });
-		expect(() => (staged as { slice: (n: number) => unknown }).slice(0)).toThrow(/STAGED result OBJECT/);
-		expect(() => (staged as { map: (f: unknown) => unknown }).map(() => 0)).toThrow(/not an array/);
+		expect(() => (staged as { slice: (n: number) => unknown }).slice(0)).toThrow(/AUTO-STAGED .*\.slice\(\) is not available on the staging envelope/);
+		expect(() => (staged as { map: (f: unknown) => unknown }).map(() => 0)).toThrow(/\.map\(\) is not available on the staging envelope/);
 		expect(staged.data_access_id).toBe("uniprot_1"); // real props still pass through
 	});
 });

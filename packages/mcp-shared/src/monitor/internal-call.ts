@@ -11,6 +11,17 @@
  * execute wraps the payload under `data` with volatile `_meta`).
  */
 
+import { MonitorCallError } from "./status";
+
+function toolFailure(result: NonNullable<McpRpcResponse["result"]>): MonitorCallError {
+  const data = result.structuredContent;
+  const error = data && typeof data === "object" && "error" in data ? data.error : undefined;
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  const credential = ["AUTH_REQUIRED", "AUTHENTICATION_ERROR", "UNAUTHORIZED", "FORBIDDEN"].includes(String(code));
+  return new MonitorCallError(credential ? "credential_failure" : "tool_failure", "mcp_tool", null,
+    credential ? "monitored tool reported an authentication/authorization failure" : `monitored tool returned an error: ${(result.content?.[0]?.text ?? "tool error").slice(0, 1000)}`);
+}
+
 /** Minimal service-binding shape needed by the monitor. */
 export interface McpServiceFetcher {
 	fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -63,11 +74,8 @@ export function parseToolResult(resp: McpRpcResponse | undefined): unknown {
 		throw new Error(`monitor in-fabric call failed: ${resp.error.message}`);
 	const result = resp.result;
 	if (!result) throw new Error("monitor in-fabric call: missing result");
-	if (result.isError) {
-		throw new Error(
-			`monitored tool returned an error: ${result.content?.[0]?.text ?? "tool error"}`,
-		);
-	}
+	const data = result.structuredContent;
+	if (result.isError || (data && typeof data === "object" && "success" in data && data.success === false)) throw toolFailure(result);
 	if (result.structuredContent !== undefined) return result.structuredContent;
 	const text = result.content?.[0]?.text;
 	if (typeof text === "string") {
@@ -91,6 +99,7 @@ export async function callTool(
 ): Promise<unknown> {
 	const response = await service.fetch("https://mcp.internal/mcp", {
 		method: "POST",
+		signal: AbortSignal.timeout(60000),
 		headers: {
 			accept: "application/json, text/event-stream",
 			"content-type": "application/json",
@@ -100,6 +109,10 @@ export async function callTool(
 		},
 		body: JSON.stringify(buildToolCall(tool, params, id)),
 	});
+	if (!response.ok) {
+		void response.body?.cancel().catch(() => {}); /* Best-effort cleanup; never persist an auth response body. */
+		throw new MonitorCallError([401, 403].includes(response.status) ? "credential_failure" : "transport_failure", "mcp_transport", response.status, `monitor transport HTTP ${response.status}`);
+	}
 	const resp = (await response.json()) as McpRpcResponse;
 	return parseToolResult(resp);
 }

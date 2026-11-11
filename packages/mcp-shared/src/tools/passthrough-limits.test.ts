@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
 	boundedErrorData,
+	CODE_MODE_LOG_LIMIT_BYTES,
 	isOversized,
 	jsonByteSize,
+	STAGING_THRESHOLD_BYTES,
 	TRANSPORT_LIMIT,
+	truncateUtf8,
 	utf8Len,
 } from "./passthrough-limits";
 
@@ -33,6 +36,26 @@ describe("utf8Len", () => {
 	});
 });
 
+describe("truncateUtf8", () => {
+	it("keeps emoji and CJK code points whole at byte boundaries", () => {
+		expect(truncateUtf8("A😀中B", 5)).toBe("A😀");
+		expect(truncateUtf8("A😀中B", 8)).toBe("A😀中");
+	});
+
+	it("handles zero budgets and strings already within budget", () => {
+		expect(truncateUtf8("😀", 0)).toBe("");
+		expect(truncateUtf8("中", 3)).toBe("中");
+	});
+});
+
+describe("shared byte limits", () => {
+	it("uses one 30KB staging threshold, 100KB transport cap, and bounded log budget", () => {
+		expect(STAGING_THRESHOLD_BYTES).toBe(30 * 1024);
+		expect(TRANSPORT_LIMIT).toBe(100_000);
+		expect(CODE_MODE_LOG_LIMIT_BYTES).toBeLessThan(STAGING_THRESHOLD_BYTES);
+	});
+});
+
 describe("jsonByteSize", () => {
 	it("returns 0 for undefined (the 204-no-content case, must not throw)", () => {
 		expect(jsonByteSize(undefined)).toBe(0);
@@ -41,6 +64,19 @@ describe("jsonByteSize", () => {
 	it("sizes the JSON of a value, UTF-8 accurate", () => {
 		// JSON.stringify({a:"é"}) === '{"a":"é"}' — 'é' is 2 bytes.
 		expect(jsonByteSize({ a: "é" })).toBe(new TextEncoder().encode('{"a":"é"}').length);
+	});
+
+	it("does not undercount emoji or CJK near fleet thresholds", () => {
+		const emoji = { text: "😀".repeat(8_000) };
+		const cjk = { text: "中".repeat(11_000) };
+		expect(jsonByteSize(emoji)).toBe(
+			new TextEncoder().encode(JSON.stringify(emoji)).length,
+		);
+		expect(jsonByteSize(cjk)).toBe(
+			new TextEncoder().encode(JSON.stringify(cjk)).length,
+		);
+		expect(jsonByteSize(emoji)).toBeGreaterThan(STAGING_THRESHOLD_BYTES);
+		expect(jsonByteSize(cjk)).toBeGreaterThan(STAGING_THRESHOLD_BYTES);
 	});
 
 	it("treats an unserializable value as oversized (fail safe)", () => {

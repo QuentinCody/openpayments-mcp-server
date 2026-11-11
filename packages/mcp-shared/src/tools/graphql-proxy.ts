@@ -20,8 +20,9 @@ import type { ToolContext, ToolEntry } from "../registry/types";
 import { effectiveStagingThreshold } from "../staging/single-record";
 import { shouldStage, stageToDoAndRespond } from "../staging/utils";
 import { buildStageOptions } from "./api-proxy";
-import { isOversized, TRANSPORT_LIMIT } from "./passthrough-limits";
+import { isOversized, jsonByteSize, TRANSPORT_LIMIT } from "./passthrough-limits";
 import { buildStagedEnvelope } from "./staging-envelope";
+import type { Completeness } from "../completeness";
 
 // ---------------------------------------------------------------------------
 // Tool factory
@@ -107,6 +108,7 @@ async function tryAutoStage(
 	responseBytes: number,
 	config: StagingConfig,
 	ctx: ToolContext | undefined,
+	completeness?: Completeness,
 ): Promise<Record<string, unknown> | undefined> {
 	if (
 		!config.doNamespace ||
@@ -132,6 +134,7 @@ async function tryAutoStage(
 		staged,
 		responseBytes,
 		originalData: resultData,
+		completeness,
 	});
 }
 
@@ -174,14 +177,14 @@ async function preserveErrorsOnly(
 ): Promise<Record<string, unknown>> {
 	const messages = errors.map((error) => error.message).join("; ");
 	const output = { __gql_error: true, message: messages, errors };
-	const responseBytes = JSON.stringify(output).length;
+	const responseBytes = jsonByteSize(output);
 	const staged = await tryAutoStage(output, responseBytes, staging, ctx);
 	if (!staged) return oversizedGqlError(output, staged) ?? output;
 	return {
 		__gql_error: true,
 		incomplete: true,
 		code: "ERROR_EVIDENCE_STAGED",
-		message: messages,
+		message: `The complete GraphQL errors are staged at data_access_id=${staged.data_access_id}. Use api.query or the server's query_data tool to retrieve all messages.`,
 		evidence: staged,
 	};
 }
@@ -196,7 +199,9 @@ async function executeAndMaybeStage(
 	staging: StagingConfig,
 	ctx: ToolContext | undefined,
 ): Promise<unknown> {
-	const response = await gqlFetch(query, variables);
+	// Lets the adapter withhold content that a reselling caller may not receive.
+	const licenseProfile = ctx?.requestContext?.licenseProfile;
+	const response = licenseProfile ? await gqlFetch(query, variables, { licenseProfile }) : await gqlFetch(query, variables);
 	// An empty errors[] is NOT an error (#10): only a non-empty array signals one.
 	const errors = Array.isArray(response.errors) ? response.errors : [];
 
@@ -210,8 +215,8 @@ async function executeAndMaybeStage(
 	// so serialization, staging, and deterministic replay keep the same evidence.
 	const resultData = response.data ?? {};
 	const completeOutput = attachGraphqlErrors(resultData, errors);
-	const responseBytes = JSON.stringify(completeOutput).length;
-	const staged = await tryAutoStage(completeOutput, responseBytes, staging, ctx);
+	const responseBytes = jsonByteSize(completeOutput);
+	const staged = await tryAutoStage(completeOutput, responseBytes, staging, ctx, response.completeness);
 	const output = staged ?? completeOutput;
 	const tooBig = oversizedGqlError(output, staged);
 	if (tooBig) return tooBig;

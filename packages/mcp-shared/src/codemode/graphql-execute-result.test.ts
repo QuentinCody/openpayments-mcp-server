@@ -4,6 +4,16 @@ import { handleExecutorResult } from "./graphql-execute-result";
 type Sc = any;
 
 describe("handleExecutorResult", () => {
+	it.each([false, true])("preserves provider page completeness through staged success/recovery (failed=%s)", async failed => {
+		const completeness = {complete: false, total_available: 204, returned: 100};
+		const staged = {__staged: true, data_access_id: "gnomad_page", tables_created: ["constraint_metrics"], total_rows: 100,
+			_staging: {completeness}};
+		const result = await handleExecutorResult(failed ? {error: "later user code failed", __stagedResults: [staged]} : {result: staged});
+		expect(result.structuredContent).toMatchObject({_meta: {completeness}, _staging: {completeness}});
+		if (failed) expect(result.structuredContent).toMatchObject({disposition: "partial", program_error: {code: "PROGRAM_DID_NOT_COMPLETE"}});
+		else expect(result.isError).toBeUndefined();
+	});
+
 	it("wraps a plain success result as a code-mode response", async () => {
 		const r = await handleExecutorResult({ result: { gene: "EGFR" } });
 		expect(r.structuredContent).toMatchObject({

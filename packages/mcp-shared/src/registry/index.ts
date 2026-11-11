@@ -1,4 +1,4 @@
-export { type ToolDefinition, ToolRegistry } from "./registry";
+export { type ToolDefinition, ToolRegistry, type RegistryToolResult, type ToolResponseFinalizer } from "./registry";
 export type {
 	SqlTaggedTemplate,
 	ToolContext,

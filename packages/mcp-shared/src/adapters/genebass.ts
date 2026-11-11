@@ -1,10 +1,10 @@
 /**
  * Genebass REST adapter.
- * Base: https://app.genebass.org/api
+ * Base: https://main.genebass.org/api (provider web client).
  * Gene burden PheWAS by Ensembl gene ID.
  */
 
-const GENEBASS_BASE = "https://app.genebass.org/api";
+const GENEBASS_BASE = "https://main.genebass.org/api";
 
 export interface GenebassFetchOpts {
 	fetchImpl?: typeof fetch;
@@ -23,13 +23,13 @@ export async function genebassGeneBurden(
 		userAgent = "bio-mcp-genebass/1.0",
 		params = {},
 	} = opts;
-	const url = new URL(`${GENEBASS_BASE}/gene_burden_phewas`);
-	url.searchParams.set("gene_id", ensemblGeneId);
-	url.searchParams.set("burden_set", burdenSet);
+	if (!/^ENSG\d+$/.test(ensemblGeneId)) throw new Error("Genebass requires an unversioned Ensembl gene ID");
+	const url = new URL(`${GENEBASS_BASE}/phewas/${ensemblGeneId}`);
 	for (const [k, v] of Object.entries(params)) {
 		if (v == null) continue;
 		url.searchParams.set(k, String(v));
 	}
+	url.searchParams.set("burdenSet", burdenSet);
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	try {
