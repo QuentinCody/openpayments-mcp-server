@@ -1,2 +1,2 @@
 /** Generated during fleet sync. Do not edit in a standalone repository. */
-export const BUILD_GIT_SHA = "1a5b7217c8bdd6971c14cce54c4098407e820597";
+export const BUILD_GIT_SHA = "348c513e501502565a40c38ffd9f118b8578157f";
