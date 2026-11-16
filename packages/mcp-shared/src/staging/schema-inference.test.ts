@@ -100,6 +100,24 @@ describe("inferSchema", () => {
 		expect(table.columns).toEqual([{ name: "keep", type: "INTEGER" }]);
 	});
 
+	it("accepts only the engine's own column types from a hint, so a hint cannot add SQL", () => {
+		// A client sends schema_hints; the type goes into CREATE TABLE without quotes.
+		const [table] = tableOf([{ a: 1, b: "x", c: 2 }], {
+			columnTypes: { a: " real ", b: "TEXT); DROP TABLE payloads; --", c: 7 as never },
+		});
+		expect(table.columns).toEqual([
+			{ name: "a", type: "REAL" },
+			{ name: "b", type: "TEXT" },
+			{ name: "c", type: "INTEGER" },
+		]);
+	});
+
+	it("keeps a BLOB hint, which servers use to store mixed native values unchanged", () => {
+		// medical-coding stages add_dt as "20050101" (text) and 20050101 (number) in one column.
+		const [table] = tableOf([{ add_dt: "20050101" }, { add_dt: 20050101 }], { columnTypes: { add_dt: "blob" } });
+		expect(table.columns).toEqual([{ name: "add_dt", type: "BLOB" }]);
+	});
+
 	it("marks scalar-array columns as pipe-delimited TEXT", () => {
 		const [table] = tableOf([{ tags: ["a", "b"] }, { tags: ["c"] }]);
 		expect(table.columns[0]).toMatchObject({

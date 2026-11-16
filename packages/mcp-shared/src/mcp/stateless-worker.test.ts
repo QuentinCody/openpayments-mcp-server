@@ -214,6 +214,21 @@ describe("MCP 2026-07-28 shared adapter", () => {
 		});
 	});
 
+	it("names the code of an SDK output validation error", () => {
+		// The SDK's own output validator raises this prefix (see toolErrorCode).
+		const message = "Output validation error: Invalid structured content for tool umls_search";
+		const seam = new McpServer({ name: "test", version: "1.0.0" }) as unknown as {
+			createToolError(message: string): { structuredContent?: unknown; isError?: boolean };
+		};
+		const result = seam.createToolError(message);
+
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent).toEqual({
+			success: false,
+			error: { code: "OUTPUT_VALIDATION_ERROR", message },
+		});
+	});
+
 	it("does not clobber a structuredContent the SDK error factory supplied", () => {
 		// Stands in for a future SDK whose own createToolError is already
 		// contract-shaped: the guard must return that result unchanged.
@@ -260,6 +275,111 @@ describe("MCP 2026-07-28 shared adapter", () => {
  * path a real request runs, so a factory that throws is reported as 503 with the
  * real reason.
  */
+describe("caller upstream keys", () => {
+	const KEY = "0123456789abcdef0123456789abcdef0123";
+
+	/** One request through the real handler; the tool answers with the key it saw. */
+	async function keySeenByTool(
+		meta: Record<string, unknown>,
+		register: "tool" | "registerTool",
+	): Promise<string | undefined> {
+		let server: McpServer | undefined;
+		const handler = createMcpHandler(
+			() => {
+				server = new McpServer({ name: "test", version: "1.0.0" });
+				const answer = async () => ({
+					content: [{ type: "text" as const, text: server?.callerUpstreamKey("ncbi") ?? "none" }],
+					structuredContent: { key: server?.callerUpstreamKey("ncbi") ?? null },
+				});
+				if (register === "tool") server.tool("whoami", "Report the key", { q: z.string() }, answer);
+				else server.registerTool("whoami", { description: "Report the key", inputSchema: z.object({ q: z.string() }) }, answer);
+				return server;
+			},
+			{ route: "/mcp", legacy: "stateless" },
+		);
+		const response = await handler(
+			modernRequest(
+				"tools/call",
+				{ name: "whoami", arguments: { q: "x" }, _meta: { ...REQUEST_META, ...meta } },
+				{ "mcp-name": "whoami" },
+			),
+			{},
+			executionContext(),
+		);
+		const body = (await response.json()) as ToolCallBody;
+		const text = body.result?.content?.[0]?.text;
+		return text === "none" ? undefined : text;
+	}
+
+	it("gives a tool registered with tool() the key from params._meta", async () => {
+		expect(await keySeenByTool({ "dev.quentincody.bio/upstreamKeys": { ncbi: KEY } }, "tool")).toBe(KEY);
+	});
+
+	it("gives a tool registered with registerTool() the key from params._meta", async () => {
+		expect(await keySeenByTool({ "dev.quentincody.bio/upstreamKeys": { ncbi: KEY } }, "registerTool")).toBe(KEY);
+	});
+
+	it("gives no key when the call carries none or a malformed one", async () => {
+		expect(await keySeenByTool({}, "tool")).toBeUndefined();
+		expect(await keySeenByTool({ "dev.quentincody.bio/upstreamKeys": { ncbi: "bad key" } }, "registerTool")).toBeUndefined();
+	});
+
+	it("has no key before any tool call", () => {
+		expect(new McpServer({ name: "test", version: "1.0.0" }).callerUpstreamKey("ncbi")).toBeUndefined();
+	});
+});
+
+describe("the shared registration helpers", () => {
+	it("accepts a complete zod object as a tool input schema", () => {
+		const server = new McpServer({ name: "test", version: "1.0.0" });
+		server.tool("obj", "Object schema", z.object({ value: z.string() }) as never, async () => ({ content: [] }));
+		expect(server.toolInputSchemaJson("obj")).toMatchObject({ type: "object", required: ["value"] });
+	});
+
+	it("refuses a tool or a prompt with no handler", () => {
+		const server = new McpServer({ name: "test", version: "1.0.0" });
+		const loose = server as unknown as { tool(...a: unknown[]): unknown; prompt(...a: unknown[]): unknown };
+		expect(() => loose.tool("bad", "No handler")).toThrow("Tool bad is missing a handler");
+		expect(() => loose.prompt("bad", "No handler")).toThrow("Prompt bad is missing a handler");
+	});
+
+	it("registers prompts with and without arguments", () => {
+		const server = new McpServer({ name: "test", version: "1.0.0" });
+		const message = (text: string) => ({ messages: [{ role: "user" as const, content: { type: "text" as const, text } }] });
+		expect(server.prompt("plain", "No arguments", () => message("hi"))).toBeDefined();
+		expect(server.prompt("withArgs", "One argument", { topic: z.string() }, ({ topic }) => message(topic))).toBeDefined();
+	});
+
+	it("fails at construction when the SDK no longer has createToolError", () => {
+		class FutureSdkServer extends McpServer {}
+		Object.defineProperty(FutureSdkServer.prototype, "createToolError", { value: undefined, writable: true, configurable: true });
+		expect(() => new FutureSdkServer({ name: "test", version: "1.0.0" })).toThrow("no longer exposes createToolError");
+	});
+});
+
+describe("StatelessMcpWorker.serve", () => {
+	class Echo extends StatelessMcpWorker<unknown> {
+		server = new McpServer({ name: "echo", version: "1.0.0" });
+		init() {
+			this.server.tool("echo", "Echo a value", { value: z.string() }, async ({ value }) => ({
+				content: [{ type: "text", text: value }],
+				structuredContent: { success: true, data: { value } },
+			}));
+		}
+	}
+
+	it("builds a fresh worker for the request and answers the tool call", async () => {
+		const response = await Echo.serve().fetch(
+			modernRequest("tools/call", { name: "echo", arguments: { value: "hi" } }, { "mcp-name": "echo" }),
+			{},
+			executionContext(),
+		);
+		const body = (await response.json()) as ToolCallBody;
+		expect(body.result?.content?.[0]?.text).toBe("hi");
+		expect(body.result?.isError).not.toBe(true);
+	});
+});
+
 describe("StatelessMcpWorker.readiness", () => {
 	class Ok extends StatelessMcpWorker<unknown> {
 		server = { _registeredTools: { a: {}, mcp_a: {} } } as never;

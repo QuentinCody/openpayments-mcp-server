@@ -12,6 +12,8 @@ import {
 import { createMcpHandler } from "agents/mcp/server";
 import { buildHealthPayload } from "@bio-mcp/provenance-core";
 import { z } from "zod";
+import { getRequestUpstreamKeys, type MaybeExtra } from "../registry/request-scope";
+import type { UpstreamKeys } from "../registry/types";
 
 export { createMcpHandler };
 export type { ServerContext, ToolAnnotations } from "@modelcontextprotocol/server";
@@ -104,6 +106,40 @@ export class McpServer extends SdkMcpServer {
 			},
 		});
 		this.enforceToolErrorContract();
+		this.captureCallerKeys();
+	}
+
+	/** The upstream keys that the caller sent with the current tool call. */
+	private callerKeys: UpstreamKeys | undefined;
+
+	/**
+	 * The caller's own key for an upstream source (for example "ncbi"), sent in
+	 * `params._meta` of the current tool call, or undefined. A server uses it in
+	 * place of its deployment key. It is per call because the fleet builds one
+	 * server for each HTTP request (`StatelessMcpWorker.serve`), and a request
+	 * carries one tool call.
+	 */
+	callerUpstreamKey(source: string): string | undefined {
+		return this.callerKeys?.[source];
+	}
+
+	/** Wrap a tool handler so that each call first records the caller's keys. */
+	private withCallerKeys(handler: unknown): unknown {
+		return (...args: unknown[]) => {
+			this.callerKeys = getRequestUpstreamKeys(args[args.length - 1] as MaybeExtra | undefined);
+			return (handler as (...a: unknown[]) => unknown)(...args);
+		};
+	}
+
+	/**
+	 * Every tool registered through this instance reads the caller's keys. The
+	 * instance method is replaced (not overridden) because the SDK's
+	 * `registerTool` overloads are generic; `tool()` wraps its own handler.
+	 */
+	private captureCallerKeys(): void {
+		const self = this as unknown as { registerTool: (name: string, config: unknown, handler: unknown) => RegisteredTool };
+		self.registerTool = (name, config, handler) =>
+			SdkMcpServer.prototype.registerTool.call(this, name, config as never, this.withCallerKeys(handler) as never) as RegisteredTool;
 	}
 
 	/**
@@ -165,7 +201,7 @@ export class McpServer extends SdkMcpServer {
 			this,
 			name,
 			{ description, inputSchema } as never,
-			handler as never,
+			this.withCallerKeys(handler) as never,
 		) as RegisteredTool;
 	}
 

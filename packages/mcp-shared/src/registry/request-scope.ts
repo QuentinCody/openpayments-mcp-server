@@ -44,6 +44,8 @@
  * Exported as a constant so client-side injectors and server-side readers
  * cannot drift apart on a typo.
  */
+import type { UpstreamKeys } from "./types";
+
 export const CHAT_SCOPE_META_KEY = "dev.quentincody.bio/chatId";
 export const TRACEPARENT_META_KEY = "traceparent";
 const TRACEPARENT_PATTERN = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
@@ -79,6 +81,37 @@ export interface RequestCorrelation {
 	traceparent?: string;
 	/** See `LicenseProfile` in ./types. */
 	licenseProfile?: "commercial";
+	/**
+	 * See `UpstreamKeys` in ./types. Only an explicit context sets it:
+	 * `getRequestCorrelation` never copies a caller's keys to a nested call.
+	 */
+	upstreamKeys?: UpstreamKeys;
+}
+
+/**
+ * `params._meta` key that carries the caller's own upstream API keys, as an
+ * object of source name to key. It is in the request body, not in a header,
+ * because Workers Logs record request headers.
+ */
+export const UPSTREAM_KEYS_META_KEY = "dev.quentincody.bio/upstreamKeys";
+
+const UPSTREAM_SOURCE_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
+const UPSTREAM_KEY_PATTERN = /^[A-Za-z0-9._~-]{8,128}$/;
+const MAX_UPSTREAM_KEYS = 8;
+
+/**
+ * The caller's upstream keys of one request, or undefined. Only well-formed
+ * entries are kept: a source name in lower case and a key of 8 to 128 URL-safe
+ * characters. A key can only replace the server's own key for that source.
+ */
+export function getRequestUpstreamKeys(source: MaybeExtra | undefined): UpstreamKeys | undefined {
+	const value = source?.mcpReq?._meta?.[UPSTREAM_KEYS_META_KEY] ?? source?._meta?.[UPSTREAM_KEYS_META_KEY];
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const keys: Record<string, string> = {};
+	for (const [name, key] of Object.entries(value).slice(0, MAX_UPSTREAM_KEYS)) {
+		if (UPSTREAM_SOURCE_PATTERN.test(name) && typeof key === "string" && UPSTREAM_KEY_PATTERN.test(key)) keys[name] = key;
+	}
+	return Object.keys(keys).length > 0 ? keys : undefined;
 }
 
 /**
@@ -175,6 +208,9 @@ export function nestedCallMeta(
 	const traceparent = childTraceparent(correlation.traceparent);
 	if (traceparent) meta[TRACEPARENT_META_KEY] = traceparent;
 	if (correlation.licenseProfile) meta[LICENSE_PROFILE_META_KEY] = correlation.licenseProfile;
+	if (correlation.upstreamKeys && Object.keys(correlation.upstreamKeys).length > 0) {
+		meta[UPSTREAM_KEYS_META_KEY] = { ...correlation.upstreamKeys };
+	}
 	return Object.keys(meta).length > 0 ? meta : undefined;
 }
 

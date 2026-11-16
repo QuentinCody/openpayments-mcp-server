@@ -306,9 +306,11 @@ function buildJsonShape(values: unknown[]): string | undefined {
 	const keyTypes = new Map<string, Set<string>>();
 	for (const obj of objectValues.slice(0, 10)) {
 		for (const [k, v] of Object.entries(obj)) {
-			if (!keyTypes.has(k)) keyTypes.set(k, new Set());
-			const types = keyTypes.get(k);
-			if (!types) continue;
+			let types = keyTypes.get(k);
+			if (!types) {
+				types = new Set();
+				keyTypes.set(k, types);
+			}
 			if (v === null || v === undefined) types.add("null");
 			else if (Array.isArray(v)) types.add("array");
 			else types.add(typeof v);
@@ -333,6 +335,14 @@ function buildJsonShape(values: unknown[]): string | undefined {
  * @param maxRecursionDepth Max depth for recursive extraction (default DEFAULT_MAX_RECURSION_DEPTH)
  * @returns Array of InferredTable — the child table plus any grandchild tables
  */
+/** The object items of every array in a column's values, in order. */
+function objectItemsOf(values: unknown[]): Record<string, unknown>[] {
+	return values
+		.filter(Array.isArray)
+		.flat()
+		.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item));
+}
+
 function inferChildTableSchema(
 	parentTableName: string,
 	sourceColumn: string,
@@ -342,31 +352,8 @@ function inferChildTableSchema(
 ): InferredTable[] {
 	const childTableName = `${parentTableName}_${sourceColumn}`;
 
-	// Collect all items from all arrays for this column
-	const allItems: Record<string, unknown>[] = [];
-	for (const v of values) {
-		if (!Array.isArray(v)) continue;
-		for (const item of v) {
-			if (item !== null && typeof item === "object" && !Array.isArray(item)) {
-				allItems.push(item as Record<string, unknown>);
-			}
-		}
-	}
-
-	if (allItems.length === 0) {
-		return [
-			{
-				name: childTableName,
-				columns: [{ name: "parent_id", type: "INTEGER" }],
-				indexes: ["parent_id"],
-				childOf: {
-					parentTable: parentTableName,
-					fkColumn: "parent_id",
-					sourceColumn,
-				},
-			},
-		];
-	}
+	// Both callers run this only for an `object_array` column, so there is at least one object item.
+	const allItems = objectItemsOf(values);
 
 	// Flatten child items to depth 1 (no deep nesting in child tables)
 	const sampleItems = allItems.slice(0, MAX_SCAN_ROWS);
@@ -605,7 +592,7 @@ function buildParentColumns(
 		// Skip columns that became child tables
 		if (childSourceColumns.has(colName)) continue;
 
-		const overrideType = hints?.columnTypes?.[colName];
+		const overrideType = hintedColumnType(hints?.columnTypes?.[colName]);
 		let type: InferredColumn["type"];
 		let isPipeDelimited = false;
 		if (overrideType) {
@@ -670,6 +657,21 @@ function capTableColumns(
 		jsonShape: `{${overflowed.slice(0, 5).join(", ")}${overflowed.length > 5 ? `, ... (+${overflowed.length - 5} more)` : ""}}`,
 	});
 	return kept;
+}
+
+// BLOB: SQLite keeps each value with its own type (servers such as medical-coding hint it for mixed columns).
+const HINT_COLUMN_TYPES: ReadonlySet<string> = new Set(["TEXT", "INTEGER", "REAL", "JSON", "BLOB"]);
+
+/**
+ * A column type from a schema hint, when it is one of the types this engine
+ * writes; else undefined, and the type is inferred. A hint can come from a
+ * client (`schema_hints`), and the type goes into `CREATE TABLE` without
+ * quotes, so any other text would be SQL that the client wrote.
+ */
+function hintedColumnType(hint: unknown): InferredColumn["type"] | undefined {
+	if (typeof hint !== "string") return undefined;
+	const type = hint.trim().toUpperCase();
+	return HINT_COLUMN_TYPES.has(type) ? (type as InferredColumn["type"]) : undefined;
 }
 
 function sanitizeTableName(key: string): string {

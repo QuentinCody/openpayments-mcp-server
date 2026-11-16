@@ -18,10 +18,19 @@ export type SqlTaggedTemplate = <
  */
 export type LicenseProfile = "commercial";
 
+/**
+ * API keys that the caller supplies for upstream sources, by source name
+ * (for example `{ ncbi: "..." }`). The paid orchestrator sends a tenant's own
+ * keys only to the servers of that source. A server uses the caller's key in
+ * place of its own deployment key.
+ */
+export type UpstreamKeys = Readonly<Record<string, string>>;
+
 export interface ToolRequestContext {
 	chatId?: string;
 	traceparent?: string;
 	licenseProfile?: LicenseProfile;
+	upstreamKeys?: UpstreamKeys;
 }
 
 /**

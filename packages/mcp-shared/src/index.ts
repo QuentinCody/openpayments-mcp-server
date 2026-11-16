@@ -181,6 +181,8 @@ export {
 	nestedCallMeta,
 	type RequestCorrelation,
 	TRACEPARENT_META_KEY,
+	getRequestUpstreamKeys,
+	UPSTREAM_KEYS_META_KEY,
 	validTraceparent,
 } from "./registry/request-scope";
 export type {
