@@ -14,6 +14,8 @@ import { buildHealthPayload } from "@bio-mcp/provenance-core";
 import { z } from "zod";
 import { getRequestUpstreamKeys, type MaybeExtra } from "../registry/request-scope";
 import type { UpstreamKeys } from "../registry/types";
+import { dispatchStagingRequest, type StagingPartitionOptions } from "./staging-partition";
+export { isPrivateStagingBinding, publicStagingNamespace } from "./staging-partition";
 
 export { createMcpHandler };
 export type { ServerContext, ToolAnnotations } from "@modelcontextprotocol/server";
@@ -234,7 +236,7 @@ export class McpServer extends SdkMcpServer {
 	}
 }
 
-interface LegacyServeOptions {
+interface LegacyServeOptions extends StagingPartitionOptions {
 	/** Ignored after the stateless migration; retained while call sites converge. */
 	binding?: string;
 }
@@ -348,7 +350,7 @@ export abstract class StatelessMcpWorker<Env = unknown> {
 
 	static serve(
 		route = "/mcp",
-		_options: LegacyServeOptions = {},
+		options: LegacyServeOptions = {},
 	): WorkerHandler {
 		const Worker = this as unknown as WorkerConstructor;
 		return {
@@ -357,19 +359,21 @@ export abstract class StatelessMcpWorker<Env = unknown> {
 				env: unknown,
 				executionContext: ExecutionContext,
 			): Promise<Response> {
-				const handler = createMcpHandler(
-					async (requestContext) => {
-						const worker = new Worker(undefined, env);
-						worker.setRequestContext(requestContext, executionContext);
-						await worker.init();
-						return worker.server;
-					},
-					{
-						route,
-						legacy: "stateless",
-					},
-				);
-				return handler(request, env, executionContext);
+				return dispatchStagingRequest(request, env, async (scopedRequest, scopedEnv) => {
+					const handler = createMcpHandler(
+						async (requestContext) => {
+							const worker = new Worker(undefined, scopedEnv);
+							worker.setRequestContext(requestContext, executionContext);
+							await worker.init();
+							return worker.server;
+						},
+						{
+							route,
+							legacy: "stateless",
+						},
+					);
+					return handler(scopedRequest, scopedEnv, executionContext);
+				}, options);
 			},
 		};
 	}
