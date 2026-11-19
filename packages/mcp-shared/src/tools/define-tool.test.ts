@@ -318,6 +318,17 @@ describe("defineTool", () => {
 		expect(sc._meta.citation.result_scope).toBe("structured_content:data");
 	});
 
+	it("retains the citation handle when it is available only in the result data", async () => {
+		const { server, calls } = fakeServer();
+		defineTool(server, {
+			name: "demo_handle", description: "Return the dataset handle", inputSchema: {},
+			source: { id: "demo", name: "Demo Source" },
+			handler: () => toolOk({ data_access_id: "example_dataset" }),
+		});
+		const result = await calls[0].cb({}, {});
+		expect(result.structuredContent).toMatchObject({ _meta: { citation: { data_access_id: "example_dataset" } } });
+	});
+
 	it("fails loudly when staging metadata itself exceeds the transport limit", async () => {
 		const { server, calls } = fakeServer();
 		defineTool(server, {

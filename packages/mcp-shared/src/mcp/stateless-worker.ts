@@ -12,6 +12,7 @@ import {
 import { createMcpHandler } from "agents/mcp/server";
 import { buildHealthPayload } from "@bio-mcp/provenance-core";
 import { z } from "zod";
+import { registerFeedback } from "../tools/feedback";
 import { getRequestUpstreamKeys, type MaybeExtra } from "../registry/request-scope";
 import type { UpstreamKeys } from "../registry/types";
 import { dispatchStagingRequest, type StagingPartitionOptions } from "./staging-partition";
@@ -326,9 +327,10 @@ export abstract class StatelessMcpWorker<Env = unknown> {
 					"server constructed but registered 0 tools — an empty tool list is an outage, not a state",
 				);
 			}
+			registerFeedback(worker.server, env);
 			return Response.json(
 				{
-					...buildHealthPayload(serverName, { tools }),
+					...buildHealthPayload(serverName, { tools: countRegisteredTools(worker.server) }),
 					ready: true,
 					ms: Date.now() - startedAt,
 				},
@@ -365,6 +367,7 @@ export abstract class StatelessMcpWorker<Env = unknown> {
 							const worker = new Worker(undefined, scopedEnv);
 							worker.setRequestContext(requestContext, executionContext);
 							await worker.init();
+							registerFeedback(worker.server, scopedEnv);
 							return worker.server;
 						},
 						{

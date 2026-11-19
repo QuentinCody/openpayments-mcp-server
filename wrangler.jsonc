@@ -1,5 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
+	"services": [{ "binding": "FEEDBACK_INBOX", "service": "mcp-client-bio", "entrypoint": "FeedbackInbox" }],
+	"vars": { "MCP_FEEDBACK_SOURCE": "openpayments" },
 	"name": "openpayments-mcp-server",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",

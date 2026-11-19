@@ -33,7 +33,7 @@
  * importing `{ defineTool }` from `@bio-mcp/shared`.
  */
 
-import type { CallToolResult, ServerContext } from "@modelcontextprotocol/server";
+import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import { MCP_INLINE_LIMIT_BYTES, serializedBytes } from "../agentic/lossless";
 import {
@@ -46,7 +46,6 @@ import type {
 	SuccessResponse,
 } from "../codemode/response";
 import { buildCitation, type SourceDescriptor } from "../provenance/provenance";
-import type { McpServer } from "../mcp/stateless-worker";
 
 /**
  * The sha256 of the COMPLETE staged payload, when staging preserved one.
